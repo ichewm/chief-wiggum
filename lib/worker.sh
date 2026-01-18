@@ -13,9 +13,13 @@ source "$WIGGUM_HOME/lib/ralph-loop.sh"
 source "$WIGGUM_HOME/lib/logger.sh"
 source "$WIGGUM_HOME/lib/file-lock.sh"
 source "$WIGGUM_HOME/lib/calculate-cost.sh"
+source "$WIGGUM_HOME/lib/audit-logger.sh"
 
 main() {
     log "Worker starting: $WORKER_ID for task $TASK_ID"
+
+    # Log worker start to audit log
+    audit_log_worker_start "$TASK_ID" "$WORKER_ID"
 
     setup_worker
 
@@ -110,6 +114,9 @@ detect_workspace_violations() {
 
 cleanup_worker() {
     log "Cleaning up worker $WORKER_ID"
+
+    # Log cleanup start to audit log
+    audit_log_worker_cleanup "$TASK_ID" "$WORKER_ID"
 
     local has_violations=false
     local pr_url="N/A"
@@ -306,6 +313,9 @@ ${metrics_section}
         fi
         log_error "Worker $WORKER_ID failed task $TASK_ID"
     fi
+
+    # Log final worker status to audit log
+    audit_log_worker_complete "$TASK_ID" "$WORKER_ID" "$final_status"
 }
 
 main "$@"
