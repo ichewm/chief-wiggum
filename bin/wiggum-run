@@ -8,6 +8,7 @@ RALPH_DIR="$PROJECT_DIR/.ralph"
 source "$WIGGUM_HOME/lib/task-parser.sh"
 source "$WIGGUM_HOME/lib/logger.sh"
 source "$WIGGUM_HOME/lib/file-lock.sh"
+source "$WIGGUM_HOME/lib/audit-logger.sh"
 
 # Default configuration
 MAX_WORKERS=4
@@ -213,6 +214,11 @@ main() {
             local worker_pid=$!
             active_workers[$worker_pid]="$task_id"
             all_pids+=($worker_pid)
+
+            # Log task assignment to audit log
+            local worker_id="worker-${task_id}-$$"
+            audit_log_task_assigned "$task_id" "$worker_id" "$worker_pid"
+
             log "Spawned worker for $task_id (PID: $worker_pid)"
         done
 
