@@ -157,9 +157,14 @@ cleanup_worker() {
             if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
                 log "Creating branch and PR for $TASK_ID"
 
-                # Create a branch for this task
-                local branch_name="task/$TASK_ID"
-                git checkout -b "$branch_name" 2>&1 | tee -a "$WORKER_DIR/worker.log"
+                # Create a unique branch for this task attempt (include timestamp to avoid conflicts)
+                local timestamp=$(date +%s)
+                local branch_name="task/$TASK_ID-$timestamp"
+
+                if ! git checkout -b "$branch_name" 2>&1 | tee -a "$WORKER_DIR/worker.log"; then
+                    log_error "Failed to create branch $branch_name"
+                    return 1
+                fi
 
                 # Stage all changes
                 git add -A
