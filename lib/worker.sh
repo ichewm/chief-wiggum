@@ -26,12 +26,22 @@ main() {
 
     # Track if shutdown was requested
     local worker_interrupted=false
+    local ralph_loop_pid=""
 
     # Setup signal handlers for graceful shutdown
     handle_worker_shutdown() {
         log "Worker $WORKER_ID received shutdown signal"
         worker_interrupted=true
-        # The signal will propagate to child processes (ralph_loop)
+
+        # Kill ralph_loop if it's running
+        if [ -n "$ralph_loop_pid" ] && kill -0 "$ralph_loop_pid" 2>/dev/null; then
+            log "Terminating ralph_loop (PID: $ralph_loop_pid)"
+            kill -TERM "$ralph_loop_pid" 2>/dev/null || true
+            wait "$ralph_loop_pid" 2>/dev/null || true
+        fi
+
+        # Exit immediately to stop the worker
+        exit 143  # Standard exit code for SIGTERM (128 + 15)
     }
     trap handle_worker_shutdown INT TERM
 
@@ -40,14 +50,18 @@ main() {
 
     setup_worker
 
-    # Start Ralph loop for this worker's task
+    # Start Ralph loop for this worker's task in background to capture PID
     # Params: prd_file, agent_file, workspace, max_iterations, max_turns_per_session
-    if ralph_loop \
+    ralph_loop \
         "$WORKER_DIR/prd.md" \
         "$WIGGUM_HOME/config/worker-agent.md" \
         "$WORKER_DIR/workspace" \
         "$MAX_ITERATIONS" \
-        "$MAX_TURNS_PER_SESSION"; then
+        "$MAX_TURNS_PER_SESSION" &
+    ralph_loop_pid=$!
+
+    # Wait for ralph_loop to complete
+    if wait "$ralph_loop_pid"; then
         if [ "$worker_interrupted" = true ]; then
             log "Worker $WORKER_ID interrupted by signal"
         else

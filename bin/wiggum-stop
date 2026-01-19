@@ -148,7 +148,7 @@ if [ -n "$SPECIFIC_WORKERS" ]; then
     # Convert comma-separated list to array
     IFS=',' read -ra PIDS_TO_STOP <<< "$SPECIFIC_WORKERS"
 
-    stopped_count=0
+    declare -a pids_to_stop=()
     invalid_count=0
     for pid in "${PIDS_TO_STOP[@]}"; do
         # Trim whitespace
@@ -164,7 +164,7 @@ if [ -n "$SPECIFIC_WORKERS" ]; then
         if kill -0 "$pid" 2>/dev/null; then
             echo "Stopping worker ${worker_pids_map[$pid]} (PID $pid)"
             kill -TERM "$pid"
-            ((stopped_count++))
+            pids_to_stop+=("$pid")
         else
             echo "Worker PID $pid already stopped"
         fi
@@ -176,19 +176,114 @@ if [ -n "$SPECIFIC_WORKERS" ]; then
         echo "Use 'wiggum status' to see valid worker PIDs"
     fi
 
-    echo "Stopped $stopped_count workers"
+    # Wait for workers to stop (up to 10 seconds)
+    if [ ${#pids_to_stop[@]} -gt 0 ]; then
+        echo "Waiting for workers to terminate..."
+        local timeout=10
+        local elapsed=0
+        local all_stopped=false
+
+        while [ $elapsed -lt $timeout ]; do
+            all_stopped=true
+            for pid in "${pids_to_stop[@]}"; do
+                if kill -0 "$pid" 2>/dev/null; then
+                    all_stopped=false
+                    break
+                fi
+            done
+
+            if [ "$all_stopped" = true ]; then
+                break
+            fi
+
+            sleep 1
+            ((elapsed++))
+        done
+
+        # Force kill any remaining workers
+        if [ "$all_stopped" = false ]; then
+            echo "Warning: Some workers did not stop gracefully, force killing..."
+            for pid in "${pids_to_stop[@]}"; do
+                if kill -0 "$pid" 2>/dev/null; then
+                    echo "Force killing ${worker_pids_map[$pid]} (PID $pid)"
+                    kill -9 "$pid" 2>/dev/null || true
+                fi
+            done
+            sleep 1
+        fi
+
+        # Count successfully stopped workers
+        stopped_count=0
+        for pid in "${pids_to_stop[@]}"; do
+            if ! kill -0 "$pid" 2>/dev/null; then
+                ((stopped_count++))
+            fi
+        done
+
+        echo "Stopped $stopped_count workers"
+    else
+        echo "No workers were running"
+    fi
 else
     # Stop all workers
     echo "Stopping all workers..."
 
-    stopped_count=0
+    # Send TERM signal to all workers
+    declare -a pids_to_stop=()
     for pid in "${!worker_pids_map[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
             echo "Stopping ${worker_pids_map[$pid]} (PID $pid)"
             kill -TERM "$pid"
-            ((stopped_count++))
+            pids_to_stop+=("$pid")
         fi
     done
 
-    echo "Stopped $stopped_count workers"
+    # Wait for workers to stop (up to 10 seconds)
+    if [ ${#pids_to_stop[@]} -gt 0 ]; then
+        echo "Waiting for workers to terminate..."
+        local timeout=10
+        local elapsed=0
+        local all_stopped=false
+
+        while [ $elapsed -lt $timeout ]; do
+            all_stopped=true
+            for pid in "${pids_to_stop[@]}"; do
+                if kill -0 "$pid" 2>/dev/null; then
+                    all_stopped=false
+                    break
+                fi
+            done
+
+            if [ "$all_stopped" = true ]; then
+                break
+            fi
+
+            sleep 1
+            ((elapsed++))
+        done
+
+        # Force kill any remaining workers
+        if [ "$all_stopped" = false ]; then
+            echo "Warning: Some workers did not stop gracefully, force killing..."
+            for pid in "${pids_to_stop[@]}"; do
+                if kill -0 "$pid" 2>/dev/null; then
+                    echo "Force killing ${worker_pids_map[$pid]} (PID $pid)"
+                    kill -9 "$pid" 2>/dev/null || true
+                fi
+            done
+            sleep 1
+        fi
+
+        # Count successfully stopped workers
+        stopped_count=0
+        for pid in "${pids_to_stop[@]}"; do
+            if ! kill -0 "$pid" 2>/dev/null; then
+                ((stopped_count++))
+            fi
+        done
+
+        echo "Stopped $stopped_count workers"
+    else
+        echo "No workers to stop"
+    fi
 fi
