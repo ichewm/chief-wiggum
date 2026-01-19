@@ -53,14 +53,71 @@ ralph_loop() {
         local session_id=$(uuidgen)
         last_session_id="$session_id"
 
-        local sys_prompt="Your working directory is $workspace. Do NOT directly or indirectly cd into, read, or modify files outside this directory."
-        local user_prompt="Read @$prd_relative, find the next incomplete task (- [ ]), execute it completely within your working directory, then mark it as complete (- [x]) by editing the PRD file. If you are unable to complete the task, mark it as failed (- [*]) by editing the PRD file."
+        local sys_prompt="WORKSPACE BOUNDARY ENFORCEMENT:
+
+Your working directory is: $workspace
+
+CRITICAL SECURITY RULE: You MUST NOT directly or indirectly:
+- cd into, read, or modify files outside this directory
+- Use relative paths that escape this directory (e.g., ../../)
+- Follow symlinks that point outside this directory
+- Execute commands that affect files outside this directory
+
+All file operations must remain within the workspace boundary. Violations will be logged and blocked by system hooks."
+
+        local user_prompt="TASK EXECUTION PROTOCOL:
+
+Your mission: Complete the next incomplete task from the Product Requirements Document (PRD).
+
+STEP-BY-STEP PROCESS:
+
+1. **Read the PRD**: Examine @$prd_relative to understand all tasks and requirements
+
+2. **Identify Next Task**: Find the first incomplete task marked with (- [ ])
+   - Tasks marked (- [x]) are complete - skip them
+   - Tasks marked (- [*]) are failed - skip them
+   - Focus on the first (- [ ]) task only
+
+3. **Understand Requirements**: Before starting, ensure you understand:
+   - What the task is asking for
+   - What files need to be modified or created
+   - What the acceptance criteria are
+   - Any dependencies or constraints
+
+4. **Execute the Task**: Implement the solution completely within your workspace
+   - Write clean, secure, and maintainable code
+   - Follow existing code patterns and conventions
+   - Add appropriate error handling
+   - Include comments where logic is complex
+
+5. **Verify Your Work**: Before marking complete, verify:
+   - The implementation meets all requirements
+   - Code works as expected (test if applicable)
+   - No breaking changes to existing functionality
+
+6. **Update PRD**: Mark the task status in @$prd_relative:
+   - Change (- [ ]) to (- [x]) if successfully completed
+   - Change (- [ ]) to (- [*]) if unable to complete (explain why in PRD)
+
+IMPORTANT NOTES:
+- Work on ONE task at a time - do not skip ahead
+- Be thorough - partial implementations should be marked as (- [*])
+- If you encounter blockers, document them clearly in the PRD
+- All work must stay within the workspace directory"
 
         # Add context from previous iterations if available
         if [ $iteration -gt 0 ] && [ -f "../worker.log" ]; then
             user_prompt="$user_prompt
 
-For context on previous work in this session, read ../worker.log which contains summaries of all previous iterations."
+CONTEXT FROM PREVIOUS ITERATIONS:
+
+This is iteration $iteration of a multi-iteration work session. Previous work has been completed in earlier iterations.
+
+To understand what has already been accomplished and maintain continuity:
+- Read ../worker.log which contains detailed summaries of all previous iterations
+- Review the session summaries to understand completed work, decisions made, and context
+- Use this information to avoid duplicating work and to build upon previous progress
+- Ensure your approach aligns with patterns and decisions from earlier iterations"
         fi
 
         log_debug "Iteration $iteration: Session $session_id (max $max_turns_per_session turns)"
@@ -215,15 +272,113 @@ Please provide your summary based on the conversation so far, following this str
             echo "=== FINAL SUMMARY PHASE ==="
         } >> "../worker.log"
 
-        local summary_prompt="All tasks have been completed successfully. Please provide a short summary and a comprehensive summary of everything you accomplished in this work session for the changelog. Include:
+        local summary_prompt="FINAL COMPREHENSIVE SUMMARY REQUEST:
 
-1. **TL;DR**: A short summary of what you did in this session with concise bullet points
-2. **What was implemented**: Detailed description of changes, new features, or fixes
-3. **Files modified**: List key files that were created or modified
-4. **Technical details**: Important implementation decisions, patterns used, or configurations added
-5. **Testing/Verification**: How you verified the work was correct
+Congratulations! All tasks in this work session have been completed successfully.
 
-Format the response as a detailed markdown summary suitable for a project changelog. Be specific and technical."
+Your task is to create a comprehensive summary of EVERYTHING accomplished across all iterations in this session. This summary will be used in:
+1. The project changelog (for other developers to understand what changed)
+2. Pull request descriptions (for code review)
+3. Documentation of implementation decisions
+
+Before providing your final summary, wrap your analysis in <analysis> tags to organize your thoughts and ensure completeness. In your analysis:
+
+1. Review all completed tasks from the PRD
+2. Examine all iterations and their summaries (if multiple iterations occurred)
+3. Identify all files that were created or modified
+4. Recall all technical decisions and their rationale
+5. Document all testing and verification performed
+6. Note any important patterns, conventions, or architectural choices
+7. Consider what information would be most valuable for:
+   - Future maintainers of this code
+   - Code reviewers evaluating this work
+   - Other developers working on related features
+
+Your summary MUST include these sections in this exact order:
+
+<example>
+<analysis>
+[Your thorough analysis ensuring all work is captured comprehensively]
+</analysis>
+
+<summary>
+
+## TL;DR
+
+[3-5 concise bullet points summarizing the entire session's work - write for busy developers who need the essence quickly]
+
+## What Was Implemented
+
+[Detailed description of all changes, new features, or fixes. Organize by:
+- New features added
+- Existing features modified
+- Bugs fixed
+- Refactoring performed
+Be specific about functionality and behavior changes]
+
+## Files Modified
+
+[Comprehensive list of files, organized by type of change:
+- **Created**: New files added to the codebase
+- **Modified**: Existing files changed
+- **Deleted**: Files removed (if any)
+
+For each file, include:
+- File path
+- Brief description of changes
+- Key functions/sections modified]
+
+## Technical Details
+
+[Important implementation decisions, patterns, and technical choices:
+- Architecture or design patterns used
+- Why specific approaches were chosen over alternatives
+- Configuration changes and their purpose
+- Dependencies added or updated
+- Security considerations addressed
+- Performance optimizations applied
+- Error handling strategies
+- Edge cases handled]
+
+## Testing and Verification
+
+[How the work was verified to be correct:
+- Manual testing performed (specific test cases)
+- Automated tests written or run
+- Integration testing done
+- Edge cases validated
+- Performance benchmarks (if applicable)
+- Security validation (if applicable)]
+
+## Integration Notes
+
+[Important information for integrating this work:
+- Breaking changes (if any)
+- Migration steps required (if any)
+- Configuration changes needed
+- Dependencies to install
+- Compatibility considerations]
+
+## Future Considerations
+
+[Optional: Notes for future work or considerations:
+- Known limitations
+- Potential optimizations
+- Related features that could be added
+- Technical debt incurred (if any)]
+
+</summary>
+</example>
+
+IMPORTANT GUIDELINES:
+- Be specific with file paths, function names, and code patterns
+- Include actual values for configurations, not placeholders
+- Write for technical readers who may not have context
+- Focus on WHAT was done and WHY, not just HOW
+- Use proper markdown formatting for readability
+- Be thorough but concise - every sentence should add value
+
+Please provide your comprehensive summary following this structure."
 
         # Capture full output to final summary log
         local summary_full=$(claude --resume "$last_session_id" --max-turns 3 \
