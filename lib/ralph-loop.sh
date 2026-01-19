@@ -174,7 +174,7 @@ CRITICAL: Do NOT read files in the logs/ directory - they contain full conversat
 
         # Log initial prompt to iteration log as JSON (matching stream-json format)
         {
-            jq -n --arg iteration "$iteration" \
+            jq -c -n --arg iteration "$iteration" \
                   --arg session "$session_id" \
                   --arg sys_prompt "$sys_prompt" \
                   --arg user_prompt "$user_prompt" \
@@ -337,7 +337,7 @@ Please provide your summary based on the conversation so far, following this str
 
         # Log iteration completion to iteration log file as JSON
         {
-            jq -n --arg iteration "$iteration" \
+            jq -c -n --arg iteration "$iteration" \
                   --arg session "$session_id" \
                   --arg exit_code "$exit_code" \
                   --arg summary_exit_code "$summary_exit_code" \
@@ -511,8 +511,8 @@ Please provide your comprehensive summary following this structure."
             echo ""
         } >> "../worker.log"
 
-        # Save to summary.txt (for PR description)
-        echo "$final_summary" > "../summary.txt"
+        # Save to summary.txt (for PR description) - extract content between <summary> tags
+        sed -n '/<summary>/,/<\/summary>/p' "../logs/final-summary.log" | sed '1d;$d' > "../summary.txt"
 
         log "Final summary saved to summary.txt and worker.log"
     fi

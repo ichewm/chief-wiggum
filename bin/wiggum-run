@@ -12,8 +12,8 @@ source "$WIGGUM_HOME/lib/audit-logger.sh"
 
 # Default configuration
 MAX_WORKERS=4
-MAX_ITERATIONS=50       # Max outer loop iterations per worker
-MAX_TURNS=20           # Max turns per Claude session
+MAX_ITERATIONS=20       # Max outer loop iterations per worker
+MAX_TURNS=50           # Max turns per Claude session
 
 show_help() {
     cat << EOF

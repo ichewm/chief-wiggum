@@ -3,107 +3,62 @@
 
 calculate_worker_cost() {
     local log_file="$1"
-
-    if [ ! -f "$log_file" ]; then
-        echo "Error: Log file not found: $log_file" >&2
-        return 1
-    fi
-
-    # Extract all token usage from the log
-    local input_tokens=0
-    local output_tokens=0
-    local cache_creation_tokens=0
-    local cache_read_tokens=0
-
-    # Parse token usage from stream-JSON output
     local log_dir="$(dirname "$log_file")/logs"
 
-    if [ -d "$log_dir" ]; then
-        # New format: Parse from iteration logs
-        while IFS= read -r line; do
-            # Extract input_tokens (excluding cache fields)
-            local it=$(echo "$line" | grep -o '"input_tokens":[0-9]*' | head -1 | cut -d':' -f2)
-            [ -n "$it" ] && input_tokens=$((input_tokens + it))
+    # Sum all result entries from iteration logs using jq
+    local totals
+    totals=$(find "$log_dir" -type f -name "iteration-*.log" -exec grep '"type":"result"' {} \; | \
+        jq -s '{
+            duration_ms: (map(.duration_ms) | add),
+            duration_api_ms: (map(.duration_api_ms) | add),
+            total_cost: (map(.total_cost_usd) | add),
+            num_turns: (map(.num_turns) | add),
+            web_search_requests: (map(.usage.server_tool_use.web_search_requests) | add),
+            input_tokens: (map(.usage.input_tokens) | add),
+            output_tokens: (map(.usage.output_tokens) | add),
+            cache_creation_tokens: (map(.usage.cache_creation_input_tokens) | add),
+            cache_read_tokens: (map(.usage.cache_read_input_tokens) | add),
+            model_usage: (map(.modelUsage | to_entries) | flatten | group_by(.key) | map({
+                key: .[0].key,
+                value: {
+                    inputTokens: (map(.value.inputTokens) | add),
+                    outputTokens: (map(.value.outputTokens) | add),
+                    cacheReadInputTokens: (map(.value.cacheReadInputTokens) | add),
+                    cacheCreationInputTokens: (map(.value.cacheCreationInputTokens) | add),
+                    costUSD: (map(.value.costUSD) | add)
+                }
+            }) | from_entries)
+        }')
 
-            # Extract output_tokens
-            local ot=$(echo "$line" | grep -o '"output_tokens":[0-9]*' | head -1 | cut -d':' -f2)
-            [ -n "$ot" ] && output_tokens=$((output_tokens + ot))
+    local duration_ms=$(echo "$totals" | jq -r '.duration_ms')
+    local duration_api_ms=$(echo "$totals" | jq -r '.duration_api_ms')
+    local total_cost=$(echo "$totals" | jq -r '.total_cost')
+    local num_turns=$(echo "$totals" | jq -r '.num_turns')
+    local web_search_requests=$(echo "$totals" | jq -r '.web_search_requests')
+    local input_tokens=$(echo "$totals" | jq -r '.input_tokens')
+    local output_tokens=$(echo "$totals" | jq -r '.output_tokens')
+    local cache_creation_tokens=$(echo "$totals" | jq -r '.cache_creation_tokens')
+    local cache_read_tokens=$(echo "$totals" | jq -r '.cache_read_tokens')
 
-            # Extract cache_creation_input_tokens
-            local cct=$(echo "$line" | grep -o '"cache_creation_input_tokens":[0-9]*' | head -1 | cut -d':' -f2)
-            [ -n "$cct" ] && cache_creation_tokens=$((cache_creation_tokens + cct))
-
-            # Extract cache_read_input_tokens
-            local crt=$(echo "$line" | grep -o '"cache_read_input_tokens":[0-9]*' | head -1 | cut -d':' -f2)
-            [ -n "$crt" ] && cache_read_tokens=$((cache_read_tokens + crt))
-        done < <(find "$log_dir" -type f \( -name "iteration-*.log" -o -name "*-summary.log" \) -exec grep '"input_tokens"' {} \;)
-    else
-        # Old format: Parse from worker.log (backward compatibility)
-        while IFS= read -r line; do
-            # Extract input_tokens (excluding cache fields)
-            local it=$(echo "$line" | grep -o '"input_tokens":[0-9]*' | head -1 | cut -d':' -f2)
-            [ -n "$it" ] && input_tokens=$((input_tokens + it))
-
-            # Extract output_tokens
-            local ot=$(echo "$line" | grep -o '"output_tokens":[0-9]*' | head -1 | cut -d':' -f2)
-            [ -n "$ot" ] && output_tokens=$((output_tokens + ot))
-
-            # Extract cache_creation_input_tokens
-            local cct=$(echo "$line" | grep -o '"cache_creation_input_tokens":[0-9]*' | head -1 | cut -d':' -f2)
-            [ -n "$cct" ] && cache_creation_tokens=$((cache_creation_tokens + cct))
-
-            # Extract cache_read_input_tokens
-            local crt=$(echo "$line" | grep -o '"cache_read_input_tokens":[0-9]*' | head -1 | cut -d':' -f2)
-            [ -n "$crt" ] && cache_read_tokens=$((cache_read_tokens + crt))
-        done < <(grep '"input_tokens"' "$log_file")
-    fi
-
-    # Calculate time spent from log timestamps
-    local time_spent=0
-
-    # Try to get exact timestamps from log markers
-    local start_ts=$(grep "WORKER_START_TIME=" "$log_file" | head -1 | cut -d'=' -f2)
-    local end_ts=$(grep "WORKER_END_TIME=" "$log_file" | tail -1 | cut -d'=' -f2)
-
-    if [ -n "$start_ts" ] && [ -n "$end_ts" ] && [ "$end_ts" -gt "$start_ts" ]; then
-        time_spent=$((end_ts - start_ts))
-    else
-        # Fallback: use file timestamps
-        local log_start=$(stat -c %Y "$log_file" 2>/dev/null || stat -f %B "$log_file" 2>/dev/null || echo 0)
-        local log_end=$(stat -c %Y "$log_file" 2>/dev/null || stat -f %m "$log_file" 2>/dev/null || echo 0)
-
-        if [ "$log_end" -gt "$log_start" ]; then
-            time_spent=$((log_end - log_start))
-        else
-            # Last resort: estimate from number of iterations
-            local iterations=$(grep -c "=== ITERATION" "$log_file")
-            # Rough estimate: 30 seconds per iteration on average
-            time_spent=$((iterations * 30))
-        fi
-    fi
-
-    # Format time as HH:MM:SS
+    # Format time
+    local time_spent=$((duration_ms / 1000))
     local hours=$((time_spent / 3600))
     local minutes=$(((time_spent % 3600) / 60))
     local seconds=$((time_spent % 60))
     local time_formatted=$(printf "%02d:%02d:%02d" $hours $minutes $seconds)
 
-    # Calculate costs based on Claude Sonnet 4.5 pricing (2026)
-    # Input: $3.00 per million tokens
-    # Output: $15.00 per million tokens
-    # Cache creation: same as input ($3.00 per million)
-    # Cache read: $0.30 per million (0.1x of input)
-
-    local cost_input=$(echo "scale=6; ($input_tokens * 3.00) / 1000000" | bc)
-    local cost_output=$(echo "scale=6; ($output_tokens * 15.00) / 1000000" | bc)
-    local cost_cache_creation=$(echo "scale=6; ($cache_creation_tokens * 3.00) / 1000000" | bc)
-    local cost_cache_read=$(echo "scale=6; ($cache_read_tokens * 0.30) / 1000000" | bc)
-    local total_cost=$(echo "scale=6; $cost_input + $cost_output + $cost_cache_creation + $cost_cache_read" | bc)
+    local api_time_spent=$((duration_api_ms / 1000))
+    local api_hours=$((api_time_spent / 3600))
+    local api_minutes=$(((api_time_spent % 3600) / 60))
+    local api_seconds=$((api_time_spent % 60))
+    local api_time_formatted=$(printf "%02d:%02d:%02d" $api_hours $api_minutes $api_seconds)
 
     # Output results
     echo "=== Worker Time and Cost Report ==="
     echo ""
-    echo "Time Spent: $time_formatted ($time_spent seconds)"
+    echo "Time Spent: $time_formatted (API: $api_time_formatted)"
+    echo "Turns: $num_turns"
+    echo "Web Searches: $web_search_requests"
     echo ""
     echo "Token Usage:"
     echo "  Input tokens: $(printf "%'d" $input_tokens)"
@@ -112,17 +67,15 @@ calculate_worker_cost() {
     echo "  Cache read tokens: $(printf "%'d" $cache_read_tokens)"
     echo "  Total tokens: $(printf "%'d" $((input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens)))"
     echo ""
-    echo "Cost Breakdown (Claude Sonnet 4.5):"
-    echo "  Input tokens: \$$(printf "%.6f" $cost_input)"
-    echo "  Output tokens: \$$(printf "%.6f" $cost_output)"
-    echo "  Cache creation: \$$(printf "%.6f" $cost_cache_creation)"
-    echo "  Cache read: \$$(printf "%.6f" $cost_cache_read)"
-    echo "  Total cost: \$$(printf "%.6f" $total_cost)"
+    echo "Per-Model Usage:"
+    echo "$totals" | jq -r '.model_usage | to_entries[] | "  \(.key):\n    Input: \(.value.inputTokens), Output: \(.value.outputTokens)\n    Cache read: \(.value.cacheReadInputTokens), Cache create: \(.value.cacheCreationInputTokens)\n    Cost: $\(.value.costUSD | . * 100 | round / 100)"'
+    echo ""
+    echo "Total Cost: \$$(printf "%.2f" $total_cost)"
     echo ""
 
     # Export for use in PR summary
     export WORKER_TIME_SPENT="$time_formatted"
-    export WORKER_TOTAL_COST=$(printf "%.6f" $total_cost)
+    export WORKER_TOTAL_COST=$(printf "%.2f" $total_cost)
     export WORKER_INPUT_TOKENS=$input_tokens
     export WORKER_OUTPUT_TOKENS=$output_tokens
     export WORKER_CACHE_CREATION_TOKENS=$cache_creation_tokens

@@ -231,7 +231,7 @@ Completed by Chief Wiggum autonomous worker.
 
 Co-Authored-By: Chief Wiggum Worker <noreply@chief-wiggum.local>"
 
-                git commit -m "$commit_msg" 2>&1 | tee -a "$WORKER_DIR/worker.log"
+                git commit --no-gpg-sign -m "$commit_msg" 2>&1 | tee -a "$WORKER_DIR/worker.log"
 
                 local commit_hash=$(git rev-parse HEAD)
                 log "Created commit: $commit_hash on branch $branch_name"
