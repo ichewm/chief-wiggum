@@ -9,14 +9,38 @@ input=$(cat)
 tool=$(echo "$input" | jq -r '.tool // empty')
 file_path=$(echo "$input" | jq -r '.tool_input.file_path // empty')
 command=$(echo "$input" | jq -r '.tool_input.command // empty')
+# For Glob/Grep tools, extract the 'path' parameter
+search_path=$(echo "$input" | jq -r '.tool_input.path // empty')
 
 # Get workspace directory (passed as env var by worker)
 workspace="$WORKER_WORKSPACE"
+worker_dir="${WORKER_DIR:-}"
+
+# Audit trail logging function
+# Logs all hook decisions (allow/block) to worker's hook-decisions.log
+log_hook_decision() {
+    local decision="$1"  # ALLOW or BLOCK
+    local tool="$2"
+    local path="$3"
+    local reason="${4:-}"
+
+    # Only log if WORKER_DIR is set (we're in a worker context)
+    if [[ -n "$worker_dir" ]]; then
+        local log_file="$worker_dir/hook-decisions.log"
+        local timestamp=$(date -Iseconds)
+        if [[ -n "$reason" ]]; then
+            echo "[$timestamp] $decision | tool=$tool | path=$path | reason=$reason" >> "$log_file"
+        else
+            echo "[$timestamp] $decision | tool=$tool | path=$path" >> "$log_file"
+        fi
+    fi
+}
 
 # Debug logging (if enabled)
 if [[ "${DEBUG_HOOKS:-false}" == "true" ]]; then
     echo "[HOOK DEBUG] Tool: $tool" >&2
     echo "[HOOK DEBUG] File path: $file_path" >&2
+    echo "[HOOK DEBUG] Search path: $search_path" >&2
     echo "[HOOK DEBUG] Workspace: $workspace" >&2
 fi
 
@@ -26,8 +50,8 @@ if [[ -z "$workspace" ]]; then
     exit 0
 fi
 
-# If no file_path and no command, allow (e.g., some tools don't have paths)
-if [[ -z "$file_path" && -z "$command" ]]; then
+# If no file_path, no search_path, and no command, allow (e.g., some tools don't have paths)
+if [[ -z "$file_path" && -z "$search_path" && -z "$command" ]]; then
     exit 0
 fi
 
@@ -123,6 +147,33 @@ if [[ -n "$file_path" ]]; then
         echo "" >&2
         echo "Use relative paths (e.g., ./file.txt or file.txt) instead." >&2
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        log_hook_decision "BLOCK" "$tool" "$file_path" "file path outside workspace"
+        exit 2  # Block with error
+    fi
+fi
+
+# Validate search_path if present (Glob, Grep tools)
+if [[ -n "$search_path" ]]; then
+    workspace_abs=$(realpath "$workspace" 2>/dev/null)
+
+    # Use validation helper function
+    if ! validate_path_within_workspace "$search_path"; then
+        # Get resolved paths for error message
+        abs_path=$(realpath -m "$search_path" 2>/dev/null || echo "$search_path")
+
+        # Path is outside workspace - BLOCK
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        echo "❌ WORKSPACE BOUNDARY VIOLATION BLOCKED" >&2
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        echo "" >&2
+        echo "Tool: $tool" >&2
+        echo "Attempted search path: $abs_path" >&2
+        echo "Workspace boundary: $workspace_abs" >&2
+        echo "" >&2
+        echo "You can only search files within your workspace directory." >&2
+        echo "Use relative paths (e.g., ./src or src) instead." >&2
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        log_hook_decision "BLOCK" "$tool" "$search_path" "search path outside workspace"
         exit 2  # Block with error
     fi
 fi
@@ -130,6 +181,29 @@ fi
 # Validate Bash commands for dangerous path operations
 if [[ "$tool" == "Bash" && -n "$command" ]]; then
     workspace_abs=$(realpath "$workspace" 2>/dev/null)
+
+    # Block ALL git commands - git operations are handled by worker scripts
+    # Workers should not use git directly as it can cause confusion and conflicts
+    if echo "$command" | grep -qE '(^|[;&|])[[:space:]]*(git[[:space:]]|git$)'; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        echo "❌ GIT COMMAND BLOCKED" >&2
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        echo "" >&2
+        echo "Tool: Bash" >&2
+        echo "Command: $command" >&2
+        echo "" >&2
+        echo "Git commands are not allowed in worker sessions." >&2
+        echo "" >&2
+        echo "Reasons:" >&2
+        echo "  - Git commits and PRs are handled automatically by worker scripts" >&2
+        echo "  - Git status in worktrees can be misleading" >&2
+        echo "  - Direct git usage can cause conflicts with the orchestration system" >&2
+        echo "" >&2
+        echo "If you need version control information, check the PRD or task description." >&2
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        log_hook_decision "BLOCK" "$tool" "git" "git commands not allowed in workers"
+        exit 2  # Block
+    fi
 
     # Check for path traversal patterns in commands
     if echo "$command" | grep -qE '\.\./|\.\.[[:space:]]|/\.\.'; then
@@ -175,6 +249,7 @@ if [[ "$tool" == "Bash" && -n "$command" ]]; then
 
                 echo "You must stay within your workspace directory." >&2
                 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+                log_hook_decision "BLOCK" "$tool" "$cd_target" "cd target outside workspace"
                 exit 2  # Block
             fi
         fi
@@ -210,6 +285,7 @@ if [[ "$tool" == "Bash" && -n "$command" ]]; then
                 echo "" >&2
                 echo "Use relative paths or stay within your workspace." >&2
                 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+                log_hook_decision "BLOCK" "$tool" "$abs_cmd_path" "absolute path outside workspace"
                 exit 2  # Block
             fi
         done
@@ -241,12 +317,109 @@ if [[ "$tool" == "Bash" && -n "$command" ]]; then
                     echo "" >&2
                     echo "Use paths relative to workspace without .. traversal." >&2
                     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+                    log_hook_decision "BLOCK" "$tool" "$suspicious_path" "path traversal escape"
                     exit 2  # Block
                 fi
             fi
         done
     fi
+
+    # Check for command substitution that might access paths outside workspace
+    # Patterns: $(command) and `command`
+    if echo "$command" | grep -qE '\$\([^)]+\)|`[^`]+`'; then
+        echo "[SECURITY] Command substitution detected - checking for path escapes" >&2
+
+        # Extract paths from within command substitutions
+        # Look for cat, read, source, or file access patterns inside $() or ``
+        for subst_path in $(echo "$command" | grep -oE '\$\([^)]*\/[^)]+\)|`[^`]*\/[^`]+`' | grep -oE '\/[^[:space:])"`]+' || true); do
+            # Skip safe system paths
+            if [[ "$subst_path" =~ ^/(bin|usr|lib|dev|proc|sys|tmp)/ ]]; then
+                continue
+            fi
+
+            # Check if path is outside workspace
+            if ! validate_path_within_workspace "$subst_path"; then
+                resolved=$(realpath -m "$subst_path" 2>/dev/null || echo "$subst_path")
+
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+                echo "❌ WORKSPACE BOUNDARY VIOLATION BLOCKED" >&2
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+                echo "" >&2
+                echo "Tool: Bash" >&2
+                echo "Command substitution contains path outside workspace: $subst_path" >&2
+                echo "Resolved to: $resolved" >&2
+                echo "Workspace boundary: $workspace_abs" >&2
+                echo "" >&2
+                echo "⚠️  Path access within \$() or backticks detected" >&2
+                echo "" >&2
+                echo "You cannot access files outside your workspace, even within command substitutions." >&2
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+                log_hook_decision "BLOCK" "$tool" "$subst_path" "path in command substitution outside workspace"
+                exit 2  # Block
+            fi
+        done
+    fi
+
+    # Check for process substitution that might access paths outside workspace
+    # Patterns: <(command) and >(command)
+    if echo "$command" | grep -qE '<\([^)]+\)|>\([^)]+\)'; then
+        echo "[SECURITY] Process substitution detected - checking for path escapes" >&2
+
+        # Extract paths from within process substitutions
+        for proc_path in $(echo "$command" | grep -oE '[<>]\([^)]*\/[^)]+\)' | grep -oE '\/[^[:space:])]+' || true); do
+            # Skip safe system paths
+            if [[ "$proc_path" =~ ^/(bin|usr|lib|dev|proc|sys|tmp)/ ]]; then
+                continue
+            fi
+
+            # Check if path is outside workspace
+            if ! validate_path_within_workspace "$proc_path"; then
+                resolved=$(realpath -m "$proc_path" 2>/dev/null || echo "$proc_path")
+
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+                echo "❌ WORKSPACE BOUNDARY VIOLATION BLOCKED" >&2
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+                echo "" >&2
+                echo "Tool: Bash" >&2
+                echo "Process substitution contains path outside workspace: $proc_path" >&2
+                echo "Resolved to: $resolved" >&2
+                echo "Workspace boundary: $workspace_abs" >&2
+                echo "" >&2
+                echo "⚠️  Path access within <() or >() detected" >&2
+                echo "" >&2
+                echo "You cannot access files outside your workspace, even within process substitutions." >&2
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+                log_hook_decision "BLOCK" "$tool" "$proc_path" "path in process substitution outside workspace"
+                exit 2  # Block
+            fi
+        done
+    fi
+
+    # Check for environment variable paths that might escape workspace
+    # Common patterns: $HOME, $PWD/../, ${HOME}, etc.
+    if echo "$command" | grep -qE '\$HOME|\$\{HOME\}|\$PWD|\$\{PWD\}'; then
+        echo "[SECURITY] Environment variable path reference detected" >&2
+
+        # $HOME is almost always outside the workspace, so check for file access patterns with it
+        if echo "$command" | grep -qE '(cat|less|more|head|tail|vim|nano|source|\.) [^|;&]*\$HOME|\$\{HOME\}'; then
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+            echo "❌ WORKSPACE BOUNDARY VIOLATION BLOCKED" >&2
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+            echo "" >&2
+            echo "Tool: Bash" >&2
+            echo "Command accesses files via \$HOME environment variable" >&2
+            echo "Workspace boundary: $workspace_abs" >&2
+            echo "" >&2
+            echo "⚠️  \$HOME typically points outside your workspace" >&2
+            echo "" >&2
+            echo "Use paths relative to your workspace instead of \$HOME." >&2
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+            log_hook_decision "BLOCK" "$tool" "\$HOME" "file access via HOME env var"
+            exit 2  # Block
+        fi
+    fi
 fi
 
 # Allow if all checks pass
+log_hook_decision "ALLOW" "$tool" "${file_path:-${search_path:-$command}}"
 exit 0

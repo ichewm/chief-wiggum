@@ -248,26 +248,17 @@ Co-Authored-By: Chief Wiggum Worker <noreply@chief-wiggum.local>"
                         fi
 
                         # Calculate time and cost metrics
-                        local metrics_section=""
-                        if [ -f "$WORKER_DIR/worker.log" ]; then
-                            # Calculate cost and export metrics to environment
-                            calculate_worker_cost "$WORKER_DIR/worker.log" > "$WORKER_DIR/metrics.txt" 2>&1
+                        calculate_worker_cost "$WORKER_DIR/worker.log" > "$WORKER_DIR/metrics.txt" 2>&1
 
-                            # Build metrics section for PR
-                            if [ -n "$WORKER_TIME_SPENT" ] && [ -n "$WORKER_TOTAL_COST" ]; then
-                                metrics_section="
+                        local metrics_section=""
+                        if [ -f "$WORKER_DIR/metrics.txt" ]; then
+                            metrics_section="
 ## Metrics
 
-**Time Spent:** $WORKER_TIME_SPENT
-**API Cost:** \$$WORKER_TOTAL_COST (Sonnet 4.5)
-
-**Token Usage:**
-- Input: $(printf "%'d" $WORKER_INPUT_TOKENS) tokens
-- Output: $(printf "%'d" $WORKER_OUTPUT_TOKENS) tokens
-- Cache creation: $(printf "%'d" $WORKER_CACHE_CREATION_TOKENS) tokens
-- Cache read: $(printf "%'d" $WORKER_CACHE_READ_TOKENS) tokens
+\`\`\`
+$(tail -n +3 "$WORKER_DIR/metrics.txt")
+\`\`\`
 "
-                            fi
                         fi
 
                         local pr_body="## Summary

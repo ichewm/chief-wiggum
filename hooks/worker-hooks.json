@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matchers": {"tool": "Edit|Write|Bash"},
+        "matchers": {"tool": "Edit|Write|Bash|Read|Glob|Grep"},
         "hooks": [{
           "type": "command",
           "command": "bash ${WIGGUM_HOME}/hooks/callbacks/validate-workspace-path.sh",

@@ -5,6 +5,60 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/task-parser.sh"
 source "$SCRIPT_DIR/logger.sh"
 
+# Global variable for violation monitor PID (needed for cleanup from signal handler)
+VIOLATION_MONITOR_PID=""
+
+# Real-time violation monitor
+# Runs in background, periodically checks for changes in the main project repo
+# that would indicate workspace violations or user edits during worker execution
+start_violation_monitor() {
+    local project_dir="$1"
+    local worker_dir="$2"
+    local monitor_interval="${3:-30}"  # Check every 30 seconds by default
+
+    (
+        while true; do
+            sleep "$monitor_interval"
+
+            # Check git status in project root (excluding .ralph directory)
+            cd "$project_dir" 2>/dev/null || continue
+            local modified=$(git status --porcelain 2>/dev/null | grep -v "^.. .ralph/" | head -5)
+
+            if [[ -n "$modified" ]]; then
+                local timestamp=$(date -Iseconds)
+
+                # Log the real-time detection
+                echo "[$timestamp] REAL-TIME VIOLATION DETECTED" >> "$worker_dir/violation-monitor.log"
+                echo "Modified files in main repo:" >> "$worker_dir/violation-monitor.log"
+                echo "$modified" >> "$worker_dir/violation-monitor.log"
+                echo "---" >> "$worker_dir/violation-monitor.log"
+
+                # Create flag file for worker to check (optional early termination)
+                echo "VIOLATION_DETECTED" > "$worker_dir/violation_flag.txt"
+                echo "$timestamp" >> "$worker_dir/violation_flag.txt"
+                echo "$modified" >> "$worker_dir/violation_flag.txt"
+
+                # Log to stderr so it appears in worker output
+                echo "[VIOLATION MONITOR] Changes detected in main repository!" >&2
+                echo "[VIOLATION MONITOR] This will cause task failure at cleanup." >&2
+                echo "[VIOLATION MONITOR] Files: $(echo "$modified" | head -1)" >&2
+            fi
+        done
+    ) &
+
+    # Return the PID of the background process
+    echo $!
+}
+
+# Stop the violation monitor
+stop_violation_monitor() {
+    local monitor_pid="$1"
+    if [[ -n "$monitor_pid" ]] && kill -0 "$monitor_pid" 2>/dev/null; then
+        kill "$monitor_pid" 2>/dev/null || true
+        wait "$monitor_pid" 2>/dev/null || true
+    fi
+}
+
 # Extract clean text from Claude CLI stream-JSON output
 # Filters out JSON and returns only assistant text responses
 extract_summary_text() {
@@ -30,6 +84,11 @@ ralph_loop() {
     handle_worker_signal() {
         log "Worker received shutdown signal - cleaning up gracefully"
         shutdown_requested=true
+        # Stop the violation monitor if running
+        if [[ -n "$VIOLATION_MONITOR_PID" ]]; then
+            stop_violation_monitor "$VIOLATION_MONITOR_PID"
+            VIOLATION_MONITOR_PID=""
+        fi
     }
     trap handle_worker_signal INT TERM
 
@@ -50,6 +109,17 @@ ralph_loop() {
 
     # Create logs subdirectory for detailed iteration logs
     mkdir -p "../logs"
+
+    # Derive project directory from workspace path
+    # Workspace is: PROJECT_DIR/.ralph/workers/worker-xxx/workspace
+    # So project dir is 4 levels up
+    local project_dir=$(cd "$workspace/../../../.." && pwd)
+    local worker_dir=$(cd "$workspace/.." && pwd)
+
+    # Start real-time violation monitor
+    log "Starting real-time violation monitor (checking every 30s)"
+    VIOLATION_MONITOR_PID=$(start_violation_monitor "$project_dir" "$worker_dir" 30)
+    log_debug "Violation monitor started with PID: $VIOLATION_MONITOR_PID"
 
     # Convert PRD file to relative path from workspace
     local prd_relative="../prd.md"
@@ -374,6 +444,12 @@ Please provide your summary based on the conversation so far, following this str
             echo "Status: Reached max iterations ($max_iterations) without completing all tasks"
         } >> "../worker.log"
 
+        # Stop violation monitor before returning
+        if [[ -n "$VIOLATION_MONITOR_PID" ]]; then
+            stop_violation_monitor "$VIOLATION_MONITOR_PID"
+            VIOLATION_MONITOR_PID=""
+        fi
+
         return 1
     fi
 
@@ -495,25 +571,20 @@ IMPORTANT GUIDELINES:
 Please provide your comprehensive summary following this structure."
 
         # Capture full output to final summary log
-        local summary_full=$(claude --resume "$last_session_id" --max-turns 3 \
-            --dangerously-skip-permissions -p "$summary_prompt" 2>&1 | \
-            tee "../logs/final-summary.log")
+        claude --resume "$last_session_id" --max-turns 3 \
+            --dangerously-skip-permissions -p "$summary_prompt" \
+            > "../logs/final-summary.log" 2>&1
 
-        # Extract clean text from JSON stream
-        local final_summary=$(extract_summary_text "$summary_full")
+        # Save to summary.txt (for PR description) - extract content between <summary> tags                  
+        sed -n '/<summary>/,/<\/summary>/p' "../logs/final-summary.log" | sed '1d;$d' > "../summary.txt" 
 
         # Append clean summary to worker.log
         {
-            echo "--- Final Summary ---"
-            echo "$final_summary"
-            echo "--- End Final Summary ---"
+            echo "--- Final Summary written to summary.txt ---"
             echo ""
         } >> "../worker.log"
 
-        # Save to summary.txt (for PR description) - extract content between <summary> tags
-        sed -n '/<summary>/,/<\/summary>/p' "../logs/final-summary.log" | sed '1d;$d' > "../summary.txt"
-
-        log "Final summary saved to summary.txt and worker.log"
+        log "Final summary saved to summary.txt"
     fi
 
     # Record end time
@@ -529,5 +600,12 @@ Please provide your comprehensive summary following this structure."
     } >> "../worker.log"
 
     log "Worker finished after $iteration iterations (duration: $duration seconds)"
+
+    # Stop violation monitor before returning
+    if [[ -n "$VIOLATION_MONITOR_PID" ]]; then
+        stop_violation_monitor "$VIOLATION_MONITOR_PID"
+        VIOLATION_MONITOR_PID=""
+    fi
+
     return 0
 }
