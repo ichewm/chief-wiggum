@@ -5,6 +5,14 @@ WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
 source "$WIGGUM_HOME/lib/defaults.sh"
 source "$WIGGUM_HOME/lib/worker-lifecycle.sh"
 
+# Check if Python TUI is available
+TUI_VENV="$WIGGUM_HOME/tui/.venv"
+TUI_PYTHON="$TUI_VENV/bin/python"
+
+tui_available() {
+    [ -x "$TUI_PYTHON" ] && "$TUI_PYTHON" -c "import wiggum_tui" 2>/dev/null
+}
+
 show_help() {
     cat << EOF
 wiggum monitor - Monitor active worker logs
@@ -12,7 +20,8 @@ wiggum monitor - Monitor active worker logs
 Usage: wiggum monitor [mode]
 
 Modes:
-  combined            Show all workers in one stream (default)
+  tui                 Interactive TUI dashboard (default if available)
+  combined            Show all workers in one stream
   split               Show each worker separately
   status              Continuous status updates
 
@@ -22,12 +31,15 @@ Options:
 Description:
   Monitor the output and progress of active workers in real-time.
 
+  - tui: htop-like interactive dashboard with kanban, workers, logs, metrics
   - combined: Tails the combined workers.log file
   - split: Refreshes every 2 seconds showing last 10 lines per worker
   - status: Runs 'wiggum status' every 2 seconds via watch
 
 Examples:
-  wiggum monitor           # Show combined output (default)
+  wiggum monitor           # Launch TUI dashboard (default)
+  wiggum monitor tui       # Explicitly launch TUI
+  wiggum monitor combined  # Show combined log stream
   wiggum monitor split     # Show each worker separately
   wiggum monitor status    # Watch status updates
 
@@ -40,34 +52,68 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     exit 0
 fi
 
-# Check for active workers using shared library
-has_active_workers=false
-if [ -d "$RALPH_DIR/workers" ]; then
-    # Use scan_active_workers to check for running workers
-    while read -r pid task_id worker_id; do
-        if [ -n "$pid" ]; then
-            has_active_workers=true
-            break
-        fi
-    done < <(scan_active_workers "$RALPH_DIR")
-fi
-
-if [ "$has_active_workers" = false ]; then
-    echo "No active workers found. Run 'wiggum run' first."
+# Check for .ralph directory
+if [ ! -d "$RALPH_DIR" ]; then
+    echo "No .ralph directory found. Run 'wiggum init' first."
     exit 1
 fi
 
-echo "=== Monitoring Chief Wiggum Workers ==="
-echo "Press Ctrl+C to stop"
-echo
+# For TUI mode, we don't require active workers (can view history)
+# For other modes, check for active workers
+if [[ "${1:-}" != "tui" ]] && ! tui_available; then
+    has_active_workers=false
+    if [ -d "$RALPH_DIR/workers" ]; then
+        # Use scan_active_workers to check for running workers
+        while read -r pid task_id worker_id; do
+            if [ -n "$pid" ]; then
+                has_active_workers=true
+                break
+            fi
+        done < <(scan_active_workers "$RALPH_DIR")
+    fi
 
-case "${1:-combined}" in
+    if [ "$has_active_workers" = false ]; then
+        echo "No active workers found. Run 'wiggum run' first."
+        exit 1
+    fi
+fi
+
+# Determine default mode - use TUI if available, otherwise combined
+default_mode="combined"
+if tui_available; then
+    default_mode="tui"
+fi
+
+mode="${1:-$default_mode}"
+
+case "$mode" in
+    tui)
+        # Launch interactive TUI dashboard
+        if tui_available; then
+            exec "$TUI_PYTHON" -m wiggum_tui
+        else
+            echo "TUI not available. Install with: cd $WIGGUM_HOME/tui && uv sync"
+            echo "Falling back to combined mode..."
+            echo
+            echo "=== Monitoring Chief Wiggum Workers ==="
+            echo "Press Ctrl+C to stop"
+            echo
+            tail -f "$RALPH_DIR/logs/workers.log"
+        fi
+        ;;
+
     combined)
+        echo "=== Monitoring Chief Wiggum Workers ==="
+        echo "Press Ctrl+C to stop"
+        echo
         # Show all worker output combined
         tail -f "$RALPH_DIR/logs/workers.log"
         ;;
 
     split)
+        echo "=== Monitoring Chief Wiggum Workers ==="
+        echo "Press Ctrl+C to stop"
+        echo
         # Show each worker's latest output
         while true; do
             clear
@@ -89,7 +135,7 @@ case "${1:-combined}" in
         ;;
 
     *)
-        echo "Unknown mode: $1"
+        echo "Unknown mode: $mode"
         echo ""
         show_help
         exit 1
