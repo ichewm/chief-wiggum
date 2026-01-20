@@ -12,8 +12,8 @@ Usage: wiggum review [command] [options]
 
 Commands:
   list              List all open worker PRs
-  view [PR#]        View a specific PR with diff
-  merge [PR#]       Merge a specific PR
+  pr [PR#] view     View a specific PR with diff
+  pr [PR#] merge    Merge a specific PR
   merge-all         Merge all worker PRs (with confirmation)
   cleanup           Delete merged branches
   status            Show integration status
@@ -26,9 +26,9 @@ Options:
 
 Examples:
   wiggum review list                    # List all worker PRs
-  wiggum review view 42                 # Review PR #42
-  wiggum review merge 42                # Merge PR #42
-  wiggum review merge 42 --squash       # Squash-merge PR #42
+  wiggum review pr 42 view              # Review PR #42
+  wiggum review pr 42 merge             # Merge PR #42
+  wiggum review pr 42 merge --squash    # Squash-merge PR #42
   wiggum review merge-all               # Merge all worker PRs (with confirmation)
   wiggum review merge-all --auto-merge  # Auto-merge all without asking
   wiggum review cleanup                 # Delete merged branches
@@ -252,11 +252,32 @@ case "$COMMAND" in
     list)
         list_worker_prs
         ;;
-    view)
-        review_pr "${ARGS[0]}"
-        ;;
-    merge)
-        merge_pr "${ARGS[0]}" "$MERGE_METHOD"
+    pr)
+        PR_NUMBER="${ARGS[0]}"
+        PR_ACTION="${ARGS[1]}"
+        if [ -z "$PR_NUMBER" ]; then
+            error "PR number required"
+            echo "Usage: wiggum review pr [PR#] [view|merge]"
+            exit 1
+        fi
+        if [ -z "$PR_ACTION" ]; then
+            error "Action required"
+            echo "Usage: wiggum review pr [PR#] [view|merge]"
+            exit 1
+        fi
+        case "$PR_ACTION" in
+            view)
+                review_pr "$PR_NUMBER"
+                ;;
+            merge)
+                merge_pr "$PR_NUMBER" "$MERGE_METHOD"
+                ;;
+            *)
+                error "Unknown PR action: $PR_ACTION"
+                echo "Usage: wiggum review pr [PR#] [view|merge]"
+                exit 1
+                ;;
+        esac
         ;;
     merge-all)
         merge_all_prs "$AUTO_MERGE" "$MERGE_METHOD"

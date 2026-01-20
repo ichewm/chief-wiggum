@@ -147,10 +147,10 @@ Workers create Pull Requests for completed tasks. Manage them with:
 wiggum review list
 
 # View a specific PR
-wiggum review view 123
+wiggum review pr 123 view
 
 # Merge a specific PR
-wiggum review merge 123
+wiggum review pr 123 merge
 
 # Merge all open worker PRs
 wiggum review merge-all
