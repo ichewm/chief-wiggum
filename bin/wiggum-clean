@@ -240,7 +240,7 @@ for worker in "${workers_array[@]}"; do
 done
 
 if [ ${#running_workers[@]} -gt 0 ]; then
-    echo "ERROR: Cannot clean running workers. Stop them first with 'wiggum worker <id> stop'."
+    echo "ERROR: Cannot clean running workers. Stop them first with 'wiggum stop <id>'."
     echo ""
     echo "Running workers:"
     for worker in "${running_workers[@]}"; do

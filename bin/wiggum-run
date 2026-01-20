@@ -45,7 +45,7 @@ Behavior:
 EOF
 }
 
-# Spawn a worker for a task using wiggum-worker
+# Spawn a worker for a task using wiggum-start
 # Sets: SPAWNED_WORKER_ID, SPAWNED_WORKER_PID (for caller to use)
 spawn_worker() {
     local task_id="$1"
@@ -54,10 +54,10 @@ spawn_worker() {
     export WIGGUM_MAX_ITERATIONS="$MAX_ITERATIONS"
     export WIGGUM_MAX_TURNS="$MAX_TURNS"
 
-    # Use wiggum-worker to start the worker, capturing exit code
+    # Use wiggum-start to start the worker, capturing exit code
     local start_output
     local start_exit_code
-    start_output=$("$WIGGUM_HOME/bin/wiggum-worker" start "$task_id" 2>&1) || start_exit_code=$?
+    start_output=$("$WIGGUM_HOME/bin/wiggum-start" "$task_id" 2>&1) || start_exit_code=$?
     start_exit_code=${start_exit_code:-0}
 
     # Handle specific exit codes
@@ -69,14 +69,14 @@ spawn_worker() {
             log "Cleaning up stale worker directory for $task_id: $(basename "$existing_dir")"
             rm -rf "$existing_dir"
             # Retry spawning
-            start_output=$("$WIGGUM_HOME/bin/wiggum-worker" start "$task_id" 2>&1) || start_exit_code=$?
+            start_output=$("$WIGGUM_HOME/bin/wiggum-start" "$task_id" 2>&1) || start_exit_code=$?
             start_exit_code=${start_exit_code:-0}
         fi
     fi
 
     # Check if spawn succeeded
     if [ "$start_exit_code" -ne 0 ]; then
-        log_error "wiggum-worker start failed (exit $start_exit_code): $start_output"
+        log_error "wiggum start failed (exit $start_exit_code): $start_output"
         return 1
     fi
 
@@ -351,7 +351,7 @@ main() {
                 continue
             fi
 
-            # Spawn worker (wiggum-worker handles backgrounding)
+            # Spawn worker (wiggum-start handles backgrounding)
             if ! spawn_worker "$task_id"; then
                 log_error "Failed to spawn worker for $task_id"
                 update_kanban_status "$RALPH_DIR/kanban.md" "$task_id" "*"

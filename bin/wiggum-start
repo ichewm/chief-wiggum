@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# wiggum start - Manually start a worker for a task
+#
+# Usage:
+#   wiggum start <TASK-ID>    Start a new worker for the specified task
+
+set -euo pipefail
+
+WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
+PROJECT_DIR="$(pwd)"
+RALPH_DIR="$PROJECT_DIR/.ralph"
+
+source "$WIGGUM_HOME/lib/exit-codes.sh"
+source "$WIGGUM_HOME/lib/logger.sh"
+source "$WIGGUM_HOME/lib/task-parser.sh"
+source "$WIGGUM_HOME/lib/audit-logger.sh"
+source "$WIGGUM_HOME/lib/worker-lifecycle.sh"
+
+# Default configuration (can be overridden by env vars)
+MAX_ITERATIONS="${WIGGUM_MAX_ITERATIONS:-20}"
+MAX_TURNS="${WIGGUM_MAX_TURNS:-50}"
+
+show_help() {
+    cat << EOF
+wiggum start - Manually start a worker for a task
+
+Usage:
+  wiggum start <TASK-ID>    Start a new worker for the specified task
+
+Options:
+  -h, --help    Show this help message
+
+Examples:
+  wiggum start TASK-030     # Start worker for TASK-030
+  wiggum start FEAT-001     # Start worker for FEAT-001
+
+Notes:
+  - The task must exist in .ralph/kanban.md
+  - Use 'wiggum run' for automated orchestration of multiple tasks
+  - Use 'wiggum resume <id>' to resume a stopped worker
+
+EOF
+}
+
+# Start a new worker for a task
+do_start() {
+    local task_id="$1"
+
+    if [ -z "$task_id" ]; then
+        echo "Error: Task ID required"
+        echo "Usage: wiggum start <TASK-ID>"
+        exit $EXIT_WORKER_MISSING_TASK_ID
+    fi
+
+    # Validate task ID format (allow flexible format like TASK-XXX, FEAT-XXX, etc.)
+    if ! [[ "$task_id" =~ ^[A-Za-z]+-[0-9]+$ ]]; then
+        echo "Error: Invalid task ID format: $task_id"
+        echo "Expected format: PREFIX-NUMBER (e.g., TASK-030, FEAT-001)"
+        exit $EXIT_WORKER_INVALID_TASK_FORMAT
+    fi
+
+    # Check .ralph directory exists
+    if [ ! -d "$RALPH_DIR" ]; then
+        echo "Error: No .ralph directory found. Run 'wiggum init' first."
+        exit $EXIT_WORKER_NO_RALPH_DIR
+    fi
+
+    # Check if task exists in kanban
+    if [ ! -f "$RALPH_DIR/kanban.md" ]; then
+        echo "Error: No kanban.md found at $RALPH_DIR/kanban.md"
+        exit $EXIT_WORKER_NO_KANBAN
+    fi
+
+    if ! grep -q "\\*\\*\\[$task_id\\]\\*\\*" "$RALPH_DIR/kanban.md" 2>/dev/null; then
+        echo "Error: Task $task_id not found in kanban.md"
+        exit $EXIT_WORKER_TASK_NOT_FOUND
+    fi
+
+    # Check if a worker already exists for this task (using shared library)
+    local existing
+    existing=$(find_any_worker_by_task_id "$RALPH_DIR" "$task_id")
+    if [ -n "$existing" ]; then
+        echo "Warning: Worker already exists for $task_id: $(basename "$existing")"
+        echo "Use 'wiggum resume $task_id' to resume it, or 'wiggum clean $task_id' first."
+        exit $EXIT_WORKER_ALREADY_EXISTS
+    fi
+
+    # Create worker directory with unique timestamp
+    local timestamp=$(date +%s)
+    local worker_id="worker-${task_id}-${timestamp}"
+    local worker_dir="$RALPH_DIR/workers/$worker_id"
+
+    mkdir -p "$worker_dir"
+    mkdir -p "$RALPH_DIR/logs"
+
+    # Extract task from kanban and create worker PRD
+    extract_task "$task_id" "$RALPH_DIR/kanban.md" > "$worker_dir/prd.md"
+
+    echo "Starting worker $worker_id for task $task_id"
+
+    # Launch worker in background
+    # Worker writes its own PID to worker.pid - orchestrator can poll for it
+    export WORKER_ID="$worker_id"
+    export TASK_ID="$task_id"
+    export WIGGUM_HOME
+    export WIGGUM_MAX_ITERATIONS="$MAX_ITERATIONS"
+    export WIGGUM_MAX_TURNS="$MAX_TURNS"
+
+    bash "$WIGGUM_HOME/lib/worker.sh" "$worker_dir" "$PROJECT_DIR" \
+        >> "$RALPH_DIR/logs/workers.log" 2>&1 &
+
+    # Wait briefly for worker.pid to be created
+    local wait_count=0
+    while [ ! -f "$worker_dir/worker.pid" ] && [ $wait_count -lt 10 ]; do
+        sleep 0.1
+        ((wait_count++))
+    done
+
+    if [ -f "$worker_dir/worker.pid" ]; then
+        local worker_pid=$(cat "$worker_dir/worker.pid")
+        echo "Worker running (PID: $worker_pid)"
+    else
+        echo "Worker started (PID file pending)"
+    fi
+    echo "Use 'wiggum monitor' to follow progress"
+}
+
+# Main
+main() {
+    # Handle help
+    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        show_help
+        exit $EXIT_OK
+    fi
+
+    # Require task ID
+    if [ $# -eq 0 ]; then
+        echo "Error: Task ID required"
+        echo "Usage: wiggum start <TASK-ID>"
+        exit $EXIT_USAGE
+    fi
+
+    do_start "$1"
+}
+
+main "$@"

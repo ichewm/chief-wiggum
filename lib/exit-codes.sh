@@ -6,7 +6,7 @@
 #   1       - Generic/unspecified error
 #   2       - Usage/argument error
 #   3-5     - Init errors (wiggum-init)
-#   10-19   - Worker start errors (wiggum-worker start)
+#   10-19   - Worker start errors (wiggum start)
 #   20-29   - Run/orchestration errors (wiggum-run)
 #   30-39   - Validation errors (wiggum-validate)
 #   40-49   - Review errors (wiggum-review)

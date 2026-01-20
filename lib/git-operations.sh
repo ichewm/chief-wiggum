@@ -2,7 +2,7 @@
 # git-operations.sh - Git commit and PR creation for workers
 #
 # Provides functions for creating commits and pull requests from worker workspaces.
-# Used by both lib/worker.sh and bin/wiggum-worker for consistent git operations.
+# Used by lib/worker.sh and bin/wiggum-resume for consistent git operations.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/logger.sh"

@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# wiggum kill - Force kill workers (SIGKILL)
+#
+# Usage:
+#   wiggum kill                 Force kill all workers
+#   wiggum kill <id>            Force kill specific worker by ID/pattern
+
+set -euo pipefail
+
+WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
+PROJECT_DIR="$(pwd)"
+RALPH_DIR="$PROJECT_DIR/.ralph"
+
+source "$WIGGUM_HOME/lib/exit-codes.sh"
+source "$WIGGUM_HOME/lib/defaults.sh"
+source "$WIGGUM_HOME/lib/worker-lifecycle.sh"
+
+show_help() {
+    cat << EOF
+wiggum kill - Force kill workers (SIGKILL)
+
+Usage:
+  wiggum kill                 Force kill all workers
+  wiggum kill <id>            Force kill specific worker by ID/pattern
+
+Worker ID Resolution:
+  Worker IDs can be partial as long as they match exactly one worker:
+  - 1891712              (timestamp)
+  - K-030                (partial task ID)
+  - TASK-030             (task ID)
+  - worker-TASK-030-1891712  (full ID)
+
+Options:
+  -h, --help    Show this help message
+
+Examples:
+  wiggum kill                 # Force kill all workers
+  wiggum kill TASK-030        # Force kill worker for TASK-030
+  wiggum kill 1891712         # Force kill worker by timestamp
+
+Note:
+  This sends SIGKILL (signal 9) which cannot be caught or ignored.
+  Use 'wiggum stop' for graceful termination when possible.
+
+EOF
+}
+
+# Force kill a single worker by directory
+kill_single_worker() {
+    local worker_dir="$1"
+    local worker_id
+    worker_id=$(basename "$worker_dir")
+
+    local pid
+    pid=$(get_worker_pid "$worker_dir") || return 1
+
+    echo "Force killing worker $worker_id (PID: $pid)..."
+    kill -9 "$pid" 2>/dev/null || true
+
+    sleep 1
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "Error: Failed to kill worker $worker_id"
+        return 1
+    else
+        echo "Worker $worker_id killed"
+        rm -f "$worker_dir/worker.pid"
+    fi
+}
+
+# Force kill all workers
+kill_all_workers() {
+    # Check for active workers by scanning worker directories
+    if [ ! -d "$RALPH_DIR/workers" ]; then
+        echo "No wiggum workers found"
+        exit $EXIT_OK
+    fi
+
+    # Collect active workers using shared library
+    declare -A worker_pids_map  # pid -> worker_id
+    while read -r pid task_id worker_id; do
+        [ -n "$pid" ] || continue
+        worker_pids_map[$pid]="$worker_id"
+    done < <(scan_active_workers "$RALPH_DIR")
+
+    # Check if any workers are running
+    if [ ${#worker_pids_map[@]} -eq 0 ]; then
+        echo "No wiggum workers running"
+        exit $EXIT_OK
+    fi
+
+    echo "Force killing all workers..."
+
+    local killed_count=0
+    for pid in "${!worker_pids_map[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Killing ${worker_pids_map[$pid]} (PID $pid)"
+            kill -9 "$pid" 2>/dev/null || true
+            ((killed_count++))
+        fi
+    done
+
+    sleep 1
+
+    # Verify and clean up PID files
+    for pid in "${!worker_pids_map[@]}"; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            # Find and clean up PID file
+            local worker_id="${worker_pids_map[$pid]}"
+            local worker_dir="$RALPH_DIR/workers/$worker_id"
+            if [ -f "$worker_dir/worker.pid" ]; then
+                rm -f "$worker_dir/worker.pid"
+            fi
+        fi
+    done
+
+    echo "Killed $killed_count workers"
+}
+
+# Main
+main() {
+    # Handle help
+    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        show_help
+        exit $EXIT_OK
+    fi
+
+    # No arguments = kill all workers
+    if [ $# -eq 0 ]; then
+        kill_all_workers
+        exit $EXIT_OK
+    fi
+
+    local target="$1"
+    shift
+
+    # Treat as worker ID pattern
+    local worker_dir
+    worker_dir=$(resolve_worker_id "$RALPH_DIR" "$target") || exit $EXIT_ERROR
+
+    kill_single_worker "$worker_dir"
+}
+
+main "$@"

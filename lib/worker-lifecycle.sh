@@ -2,7 +2,7 @@
 # worker-lifecycle.sh - Worker discovery and PID management
 #
 # Provides functions for finding workers, validating PIDs, and managing
-# worker lifecycle. Used by wiggum-run and wiggum-worker.
+# worker lifecycle. Used by wiggum-run, wiggum-start, wiggum-stop, etc.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/logger.sh"
