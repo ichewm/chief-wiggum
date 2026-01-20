@@ -2,6 +2,7 @@
 # Clean up Chief Wiggum worktrees and worker directories
 
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
+source "$WIGGUM_HOME/lib/exit-codes.sh"
 source "$WIGGUM_HOME/lib/defaults.sh"
 source "$WIGGUM_HOME/lib/worker-lifecycle.sh"
 
@@ -181,20 +182,20 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             show_help
-            exit 0
+            exit $EXIT_OK
             ;;
         -*)
             echo "Unknown option: $1"
             echo ""
             show_help
-            exit 1
+            exit $EXIT_USAGE
             ;;
         *)
             if [ -z "$TARGET" ]; then
                 TARGET="$1"
             else
                 echo "Unexpected argument: $1"
-                exit 1
+                exit $EXIT_USAGE
             fi
             shift
             ;;
@@ -206,25 +207,25 @@ if [ -z "$TARGET" ]; then
     echo "No target specified. Use 'wiggum clean <pattern>' or 'wiggum clean all'."
     echo ""
     show_help
-    exit 0
+    exit $EXIT_OK
 fi
 
 # Check .ralph directory exists
 if [ ! -d "$RALPH_DIR" ]; then
     echo "ERROR: .ralph/ directory not found"
-    exit 1
+    exit $EXIT_CLEAN_NO_RALPH_DIR
 fi
 
 # Determine workers to clean
 if [ "$TARGET" = "all" ]; then
     workers_to_clean=$(find_all_workers)
 else
-    workers_to_clean=$(resolve_patterns "$TARGET") || exit 1
+    workers_to_clean=$(resolve_patterns "$TARGET") || exit $EXIT_CLEAN_PATTERN_NOT_FOUND
 fi
 
 if [ -z "$workers_to_clean" ]; then
     echo "No workers to clean."
-    exit 0
+    exit $EXIT_OK
 fi
 
 # Convert to array
@@ -245,7 +246,7 @@ if [ ${#running_workers[@]} -gt 0 ]; then
     for worker in "${running_workers[@]}"; do
         echo "  $worker"
     done
-    exit 1
+    exit $EXIT_CLEAN_WORKERS_RUNNING
 fi
 
 # Show what will be cleaned and ask for confirmation
@@ -257,7 +258,7 @@ echo ""
 
 if ! confirm "Proceed with cleanup?"; then
     echo "Aborted."
-    exit 0
+    exit $EXIT_OK
 fi
 
 # Do the cleanup

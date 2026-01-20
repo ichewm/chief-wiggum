@@ -2,6 +2,7 @@
 # Chief Wiggum - Kanban validation command
 
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
+source "$WIGGUM_HOME/lib/exit-codes.sh"
 source "$WIGGUM_HOME/lib/defaults.sh"
 source "$WIGGUM_HOME/lib/logger.sh"
 
@@ -35,9 +36,10 @@ Examples:
   wiggum validate --quiet                  # Only show errors
 
 Exit codes:
-  0 - Kanban file is valid
-  1 - Validation errors found
-  2 - File not found or other error
+  0  - Kanban file is valid
+  2  - Usage/argument error
+  30 - File not found
+  31 - Validation errors found
 
 EOF
 }
@@ -54,7 +56,7 @@ validate_kanban() {
 
     if [ ! -f "$kanban_file" ]; then
         echo "Error: Kanban file not found: $kanban_file" >&2
-        return 2
+        return $EXIT_VALIDATE_FILE_NOT_FOUND
     fi
 
     local line_num=0
@@ -275,7 +277,7 @@ main() {
             -f|--file)
                 if [[ -z "$2" ]] || [[ "$2" =~ ^- ]]; then
                     echo "Error: --file requires a path argument"
-                    exit 2
+                    exit $EXIT_USAGE
                 fi
                 kanban_file="$2"
                 shift 2
@@ -286,19 +288,19 @@ main() {
                 ;;
             -h|--help)
                 show_help
-                exit 0
+                exit $EXIT_OK
                 ;;
             -*)
                 echo "Unknown option: $1"
                 echo ""
                 show_help
-                exit 2
+                exit $EXIT_USAGE
                 ;;
             *)
                 echo "Unknown argument: $1"
                 echo ""
                 show_help
-                exit 2
+                exit $EXIT_USAGE
                 ;;
         esac
     done
@@ -307,8 +309,8 @@ main() {
     validate_kanban "$kanban_file"
     local validate_result=$?
 
-    if [ $validate_result -eq 2 ]; then
-        exit 2
+    if [ $validate_result -eq $EXIT_VALIDATE_FILE_NOT_FOUND ]; then
+        exit $EXIT_VALIDATE_FILE_NOT_FOUND
     fi
 
     # Report results
@@ -318,12 +320,12 @@ main() {
         for error in "${VALIDATION_ERRORS[@]}"; do
             echo "  ERROR: $error"
         done
-        exit 1
+        exit $EXIT_VALIDATE_ERRORS_FOUND
     else
         if [ "$quiet" = false ]; then
             echo "Validation passed: $kanban_file is valid"
         fi
-        exit 0
+        exit $EXIT_OK
     fi
 }
 

@@ -14,6 +14,7 @@ PROJECT_DIR="$(pwd)"
 RALPH_DIR="$PROJECT_DIR/.ralph"
 
 # Source shared libraries
+source "$WIGGUM_HOME/lib/exit-codes.sh"
 source "$WIGGUM_HOME/lib/logger.sh"
 source "$WIGGUM_HOME/lib/task-parser.sh"
 source "$WIGGUM_HOME/lib/audit-logger.sh"
@@ -355,31 +356,31 @@ cmd_start() {
     if [ -z "$task_id" ]; then
         echo "Error: Task ID required"
         echo "Usage: wiggum worker start <TASK-ID>"
-        exit 1
+        exit $EXIT_WORKER_MISSING_TASK_ID
     fi
 
     # Validate task ID format (allow flexible format like TASK-XXX, FEAT-XXX, etc.)
     if ! [[ "$task_id" =~ ^[A-Za-z]+-[0-9]+$ ]]; then
         echo "Error: Invalid task ID format: $task_id"
         echo "Expected format: PREFIX-NUMBER (e.g., TASK-030, FEAT-001)"
-        exit 1
+        exit $EXIT_WORKER_INVALID_TASK_FORMAT
     fi
 
     # Check .ralph directory exists
     if [ ! -d "$RALPH_DIR" ]; then
         echo "Error: No .ralph directory found. Run 'wiggum init' first."
-        exit 1
+        exit $EXIT_WORKER_NO_RALPH_DIR
     fi
 
     # Check if task exists in kanban
     if [ ! -f "$RALPH_DIR/kanban.md" ]; then
         echo "Error: No kanban.md found at $RALPH_DIR/kanban.md"
-        exit 1
+        exit $EXIT_WORKER_NO_KANBAN
     fi
 
     if ! grep -q "\\*\\*\\[$task_id\\]\\*\\*" "$RALPH_DIR/kanban.md" 2>/dev/null; then
         echo "Error: Task $task_id not found in kanban.md"
-        exit 1
+        exit $EXIT_WORKER_TASK_NOT_FOUND
     fi
 
     # Check if a worker already exists for this task (using shared library)
@@ -388,7 +389,7 @@ cmd_start() {
     if [ -n "$existing" ]; then
         echo "Warning: Worker already exists for $task_id: $(basename "$existing")"
         echo "Use 'wiggum worker $task_id resume' to resume it, or clean it up first."
-        exit 1
+        exit $EXIT_WORKER_ALREADY_EXISTS
     fi
 
     # Create worker directory with unique timestamp

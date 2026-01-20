@@ -2,6 +2,7 @@
 # Review and manage worker PRs using gh CLI
 
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
+source "$WIGGUM_HOME/lib/exit-codes.sh"
 source "$WIGGUM_HOME/lib/defaults.sh"
 source "$WIGGUM_HOME/lib/pr-comments.sh"
 source "$WIGGUM_HOME/lib/agent-registry.sh"
@@ -65,13 +66,13 @@ error() {
 # Check if gh CLI is installed
 if ! command -v gh &> /dev/null; then
     error "gh CLI is not installed. Install it from: https://cli.github.com/"
-    exit 1
+    exit $EXIT_ERROR
 fi
 
 # Check if we're in a git repository
 if ! git rev-parse --git-dir > /dev/null 2>&1; then
     error "Not in a git repository"
-    exit 1
+    exit $EXIT_REVIEW_NO_RALPH_DIR
 fi
 
 list_worker_prs() {
@@ -309,7 +310,7 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         -h|--help)
             show_help
-            exit 0
+            exit $EXIT_OK
             ;;
         --auto-merge)
             AUTO_MERGE=true
@@ -341,12 +342,12 @@ case "$COMMAND" in
         if [ -z "$PR_NUMBER" ]; then
             error "PR number required"
             echo "Usage: wiggum review pr [PR#] [view|merge]"
-            exit 1
+            exit $EXIT_USAGE
         fi
         if [ -z "$PR_ACTION" ]; then
             error "Action required"
             echo "Usage: wiggum review pr [PR#] [view|merge]"
-            exit 1
+            exit $EXIT_USAGE
         fi
         case "$PR_ACTION" in
             view)
@@ -358,7 +359,7 @@ case "$COMMAND" in
             *)
                 error "Unknown PR action: $PR_ACTION"
                 echo "Usage: wiggum review pr [PR#] [view|merge]"
-                exit 1
+                exit $EXIT_USAGE
                 ;;
         esac
         ;;
@@ -369,7 +370,7 @@ case "$COMMAND" in
         if [ -z "$TASK_PATTERNS" ]; then
             error "Task pattern(s) required"
             echo "Usage: wiggum review task <patterns> [sync|fix]"
-            exit 1
+            exit $EXIT_USAGE
         fi
 
         case "${TASK_ACTION:-sync}" in
@@ -382,7 +383,7 @@ case "$COMMAND" in
             *)
                 error "Unknown task action: $TASK_ACTION"
                 echo "Valid actions: sync, fix"
-                exit 1
+                exit $EXIT_USAGE
                 ;;
         esac
         ;;
@@ -402,6 +403,6 @@ case "$COMMAND" in
         error "Unknown command: $COMMAND"
         echo ""
         show_help
-        exit 1
+        exit $EXIT_USAGE
         ;;
 esac

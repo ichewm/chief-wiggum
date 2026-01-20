@@ -2,6 +2,7 @@
 # Monitor active Chief Wiggum workers
 
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
+source "$WIGGUM_HOME/lib/exit-codes.sh"
 source "$WIGGUM_HOME/lib/defaults.sh"
 source "$WIGGUM_HOME/lib/worker-lifecycle.sh"
 
@@ -49,13 +50,13 @@ EOF
 # Parse options
 if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     show_help
-    exit 0
+    exit $EXIT_OK
 fi
 
 # Check for .ralph directory
 if [ ! -d "$RALPH_DIR" ]; then
     echo "No .ralph directory found. Run 'wiggum init' first."
-    exit 1
+    exit $EXIT_ERROR
 fi
 
 # For TUI mode, we don't require active workers (can view history)
@@ -74,7 +75,7 @@ if [[ "${1:-}" != "tui" ]] && ! tui_available; then
 
     if [ "$has_active_workers" = false ]; then
         echo "No active workers found. Run 'wiggum run' first."
-        exit 1
+        exit $EXIT_REVIEW_NO_WORKERS
     fi
 fi
 
@@ -138,6 +139,6 @@ case "$mode" in
         echo "Unknown mode: $mode"
         echo ""
         show_help
-        exit 1
+        exit $EXIT_USAGE
         ;;
 esac

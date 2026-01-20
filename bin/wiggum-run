@@ -6,6 +6,7 @@ PROJECT_DIR="$(pwd)"
 RALPH_DIR="$PROJECT_DIR/.ralph"
 
 # Source shared libraries
+source "$WIGGUM_HOME/lib/exit-codes.sh"
 source "$WIGGUM_HOME/lib/task-parser.sh"
 source "$WIGGUM_HOME/lib/logger.sh"
 source "$WIGGUM_HOME/lib/file-lock.sh"
@@ -53,8 +54,31 @@ spawn_worker() {
     export WIGGUM_MAX_ITERATIONS="$MAX_ITERATIONS"
     export WIGGUM_MAX_TURNS="$MAX_TURNS"
 
-    # Use wiggum-worker to start the worker
-    "$WIGGUM_HOME/bin/wiggum-worker" start "$task_id" > /dev/null 2>&1
+    # Use wiggum-worker to start the worker, capturing exit code
+    local start_output
+    local start_exit_code
+    start_output=$("$WIGGUM_HOME/bin/wiggum-worker" start "$task_id" 2>&1) || start_exit_code=$?
+    start_exit_code=${start_exit_code:-0}
+
+    # Handle specific exit codes
+    if [ "$start_exit_code" -eq "$EXIT_WORKER_ALREADY_EXISTS" ]; then
+        # Worker directory exists from previous run - clean it up and retry
+        local existing_dir
+        existing_dir=$(find_any_worker_by_task_id "$RALPH_DIR" "$task_id")
+        if [ -n "$existing_dir" ]; then
+            log "Cleaning up stale worker directory for $task_id: $(basename "$existing_dir")"
+            rm -rf "$existing_dir"
+            # Retry spawning
+            start_output=$("$WIGGUM_HOME/bin/wiggum-worker" start "$task_id" 2>&1) || start_exit_code=$?
+            start_exit_code=${start_exit_code:-0}
+        fi
+    fi
+
+    # Check if spawn succeeded
+    if [ "$start_exit_code" -ne 0 ]; then
+        log_error "wiggum-worker start failed (exit $start_exit_code): $start_output"
+        return 1
+    fi
 
     # Find the worker directory that was just created (using shared library)
     local worker_dir
@@ -83,7 +107,7 @@ main() {
             --max-workers)
                 if [[ -z "$2" ]] || [[ "$2" =~ ^- ]]; then
                     echo "Error: --max-workers requires a number argument"
-                    exit 1
+                    exit $EXIT_USAGE
                 fi
                 MAX_WORKERS="$2"
                 shift 2
@@ -91,7 +115,7 @@ main() {
             --max-iters)
                 if [[ -z "$2" ]] || [[ "$2" =~ ^- ]]; then
                     echo "Error: --max-iters requires a number argument"
-                    exit 1
+                    exit $EXIT_USAGE
                 fi
                 MAX_ITERATIONS="$2"
                 shift 2
@@ -99,26 +123,26 @@ main() {
             --max-turns)
                 if [[ -z "$2" ]] || [[ "$2" =~ ^- ]]; then
                     echo "Error: --max-turns requires a number argument"
-                    exit 1
+                    exit $EXIT_USAGE
                 fi
                 MAX_TURNS="$2"
                 shift 2
                 ;;
             -h|--help)
                 show_help
-                exit 0
+                exit $EXIT_OK
                 ;;
             -*)
                 echo "Unknown option: $1"
                 echo ""
                 show_help
-                exit 1
+                exit $EXIT_USAGE
                 ;;
             *)
                 echo "Unknown argument: $1"
                 echo ""
                 show_help
-                exit 1
+                exit $EXIT_USAGE
                 ;;
         esac
     done
@@ -126,7 +150,7 @@ main() {
     # Initialize project if needed
     if [ ! -d "$RALPH_DIR" ]; then
         log_error ".ralph/ directory not found. Run 'wiggum init' first."
-        exit 1
+        exit $EXIT_RUN_NO_RALPH_DIR
     fi
 
     # Ensure only one orchestrator runs at a time
@@ -145,7 +169,7 @@ main() {
                     echo ""
                     echo "Only one orchestrator can run at a time to prevent conflicts."
                     echo "If you're sure no orchestrator is running, remove: $orchestrator_lock"
-                    exit 1
+                    exit $EXIT_RUN_ORCHESTRATOR_RUNNING
                 else
                     # PID exists but it's not wiggum-run (PID reused)
                     log "Cleaning stale orchestrator lock (PID reused)"
@@ -187,20 +211,20 @@ main() {
         log "Active workers will continue running to completion"
         log "Use 'wiggum status' to monitor worker progress"
         cleanup_orchestrator
-        exit 130  # Standard exit code for SIGINT
+        exit $EXIT_SIGINT
     }
     trap handle_shutdown_signal INT TERM
 
     if [ ! -f "$RALPH_DIR/kanban.md" ]; then
         log_error ".ralph/kanban.md not found. Create a kanban file first."
-        exit 1
+        exit $EXIT_RUN_NO_KANBAN
     fi
 
     # Validate kanban format before running
     log "Validating kanban.md format..."
     if ! "$WIGGUM_HOME/bin/wiggum-validate" --quiet; then
         log_error "Kanban validation failed. Run 'wiggum validate' to see details."
-        exit 1
+        exit $EXIT_RUN_VALIDATION_FAILED
     fi
     log "Kanban validation passed"
 
@@ -210,7 +234,7 @@ main() {
         echo ""
         echo "Uncommitted changes detected:"
         git status --short
-        exit 1
+        exit $EXIT_RUN_GIT_DIRTY
     fi
 
     # Pre-flight checks: Ensure SSH and GPG keys are cached
@@ -233,7 +257,7 @@ main() {
                 log_error "SSH test failed. Please ensure your SSH keys are set up and the agent is running."
                 echo ""
                 echo "Try running: ssh -T git@$git_host"
-                exit 1
+                exit $EXIT_RUN_SSH_FAILED
             fi
             echo "  ✓ SSH connection successful"
         fi
@@ -248,7 +272,7 @@ main() {
         echo ""
         echo "Try running: echo 'test' | gpg --clearsign"
         echo "You may need to unlock your GPG key or configure git signing."
-        exit 1
+        exit $EXIT_RUN_GPG_FAILED
     fi
 
     echo ""

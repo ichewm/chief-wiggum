@@ -2,6 +2,7 @@
 # Initialize .ralph/ directory in a project
 
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
+source "$WIGGUM_HOME/lib/exit-codes.sh"
 source "$WIGGUM_HOME/lib/defaults.sh"
 
 show_help() {
@@ -34,13 +35,13 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)
             show_help
-            exit 0
+            exit $EXIT_OK
             ;;
         *)
             echo "Unknown option: $1"
             echo ""
             show_help
-            exit 1
+            exit $EXIT_USAGE
             ;;
     esac
 done
@@ -51,7 +52,7 @@ echo "Initializing Chief Wiggum in $PROJECT_DIR"
 if [ ! -d ".git" ]; then
     echo "WARNING: Not a git repository. Chief Wiggum requires git for worker isolation."
     echo "Run 'git init' first."
-    exit 1
+    exit $EXIT_INIT_NOT_GIT_REPO
 fi
 
 # Create .ralph/ structure

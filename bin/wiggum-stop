@@ -2,6 +2,7 @@
 # Stop all workers
 
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
+source "$WIGGUM_HOME/lib/exit-codes.sh"
 source "$WIGGUM_HOME/lib/defaults.sh"
 source "$WIGGUM_HOME/lib/worker-lifecycle.sh"
 
@@ -106,7 +107,7 @@ while [[ $# -gt 0 ]]; do
         --workers)
             if [[ -z "$2" ]] || [[ "$2" =~ ^- ]]; then
                 echo "Error: --workers requires a comma-separated list of PIDs"
-                exit 1
+                exit $EXIT_USAGE
             fi
             SPECIFIC_WORKERS="$2"
             shift 2
@@ -117,13 +118,13 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             show_help
-            exit 0
+            exit $EXIT_OK
             ;;
         *)
             echo "Unknown option: $1"
             echo ""
             show_help
-            exit 1
+            exit $EXIT_USAGE
             ;;
     esac
 done
@@ -134,7 +135,7 @@ if [ "$STOP_ORCHESTRATOR" = true ]; then
 
     if [ ! -f "$orchestrator_lock" ]; then
         echo "No orchestrator process running"
-        exit 0
+        exit $EXIT_OK
     fi
 
     orchestrator_pid=$(cat "$orchestrator_lock" 2>/dev/null)
@@ -143,7 +144,7 @@ if [ "$STOP_ORCHESTRATOR" = true ]; then
     if ! [[ "$orchestrator_pid" =~ ^[0-9]+$ ]]; then
         echo "Invalid orchestrator PID, cleaning lock file"
         rm -f "$orchestrator_lock"
-        exit 0
+        exit $EXIT_OK
     fi
 
     # Check if process is running and is wiggum-run
@@ -152,23 +153,23 @@ if [ "$STOP_ORCHESTRATOR" = true ]; then
             echo "Stopping orchestrator (PID: $orchestrator_pid)..."
             kill -TERM "$orchestrator_pid"
             echo "Orchestrator stopped (workers will also be terminated by orchestrator cleanup)"
-            exit 0
+            exit $EXIT_OK
         else
             echo "Process $orchestrator_pid is not wiggum-run (PID reused?)"
             rm -f "$orchestrator_lock"
-            exit 0
+            exit $EXIT_OK
         fi
     else
         echo "Orchestrator process not running, cleaning stale lock"
         rm -f "$orchestrator_lock"
-        exit 0
+        exit $EXIT_OK
     fi
 fi
 
 # Check for active workers by scanning worker directories
 if [ ! -d "$RALPH_DIR/workers" ]; then
     echo "No wiggum workers found"
-    exit 0
+    exit $EXIT_OK
 fi
 
 # Collect active workers using shared library
@@ -181,7 +182,7 @@ done < <(scan_active_workers "$RALPH_DIR")
 # Check if any workers are running
 if [ ${#worker_pids_map[@]} -eq 0 ]; then
     echo "No wiggum workers running"
-    exit 0
+    exit $EXIT_OK
 fi
 
 if [ -n "$SPECIFIC_WORKERS" ]; then
