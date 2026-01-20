@@ -13,9 +13,13 @@ WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
 PROJECT_DIR="$(pwd)"
 RALPH_DIR="$PROJECT_DIR/.ralph"
 
+# Source shared libraries
 source "$WIGGUM_HOME/lib/logger.sh"
 source "$WIGGUM_HOME/lib/task-parser.sh"
 source "$WIGGUM_HOME/lib/audit-logger.sh"
+source "$WIGGUM_HOME/lib/worker-lifecycle.sh"
+source "$WIGGUM_HOME/lib/validation-review.sh"
+source "$WIGGUM_HOME/lib/git-operations.sh"
 
 # Default configuration (can be overridden by env vars)
 MAX_ITERATIONS="${WIGGUM_MAX_ITERATIONS:-20}"
@@ -51,82 +55,9 @@ Examples:
 EOF
 }
 
-# Resolve partial worker ID to full worker directory path
-# Returns: worker_dir path on stdout, or error message on stderr
-resolve_worker_id() {
-    local partial="$1"
-    local matches=()
+# resolve_worker_id is now provided by lib/worker-lifecycle.sh
 
-    if [ ! -d "$RALPH_DIR/workers" ]; then
-        echo "Error: No workers directory found at $RALPH_DIR/workers" >&2
-        return 1
-    fi
-
-    for worker_dir in "$RALPH_DIR/workers"/worker-*; do
-        [ -d "$worker_dir" ] || continue
-        local worker_id
-        worker_id=$(basename "$worker_dir")
-
-        # Check if partial matches any part of worker_id
-        if [[ "$worker_id" == *"$partial"* ]]; then
-            matches+=("$worker_dir")
-        fi
-    done
-
-    case ${#matches[@]} in
-        0)
-            echo "Error: No worker matches '$partial'" >&2
-            echo "Use 'wiggum status' to see available workers." >&2
-            return 1
-            ;;
-        1)
-            echo "${matches[0]}"
-            return 0
-            ;;
-        *)
-            echo "Error: Multiple workers match '$partial':" >&2
-            for m in "${matches[@]}"; do
-                echo "  - $(basename "$m")" >&2
-            done
-            echo "Please be more specific." >&2
-            return 1
-            ;;
-    esac
-}
-
-# Get worker PID from worker directory, validate it's still running
-get_worker_pid() {
-    local worker_dir="$1"
-    local pid_file="$worker_dir/worker.pid"
-
-    if [ ! -f "$pid_file" ]; then
-        echo "Error: No PID file found for worker (not running?)" >&2
-        return 1
-    fi
-
-    local pid
-    pid=$(cat "$pid_file" 2>/dev/null)
-
-    # Validate PID is a number
-    if ! [[ "$pid" =~ ^[0-9]+$ ]]; then
-        echo "Error: Invalid PID in worker.pid file" >&2
-        return 1
-    fi
-
-    # Check if process is running AND is a worker process
-    if kill -0 "$pid" 2>/dev/null; then
-        if ps -p "$pid" -o args= 2>/dev/null | grep -q "lib/worker.sh"; then
-            echo "$pid"
-            return 0
-        else
-            echo "Error: PID $pid exists but is not a worker process (PID reused?)" >&2
-            return 1
-        fi
-    else
-        echo "Error: Worker process $pid is not running" >&2
-        return 1
-    fi
-}
+# get_worker_pid is now provided by lib/worker-lifecycle.sh
 
 # Stop worker gracefully (SIGTERM)
 cmd_stop() {
@@ -246,243 +177,36 @@ prepare_resume_context() {
 
 # Resume from validation phase (summary.txt exists, work is complete)
 # Runs validation review, then commits and creates PR if passed
+# Uses shared libraries: validation-review.sh and git-operations.sh
 resume_from_validation() {
     local worker_dir="$1"
     local task_id="$2"
-    local worker_id
-    worker_id=$(basename "$worker_dir")
 
-    # Source worker dependencies
-    source "$WIGGUM_HOME/lib/run-agent-once.sh"
-    source "$WIGGUM_HOME/lib/calculate-cost.sh"
-    source "$WIGGUM_HOME/lib/task-parser.sh"
+    # Run validation review using shared library
+    run_validation_review "$worker_dir" 5
 
-    echo "Running validation review..."
-
-    local review_system_prompt="VALIDATION REVIEWER ROLE:
-
-You are a code reviewer and validation agent. Your job is to review completed work
-and verify it meets the requirements specified in the PRD.
-
-WORKSPACE: $worker_dir/workspace
-
-You have READ-ONLY intent - focus on reviewing and validating, not making changes.
-If you find issues, document them clearly but do not attempt fixes."
-
-    local review_user_prompt="VALIDATION AND REVIEW TASK:
-
-Review the completed work in this workspace against the requirements in @../prd.md.
-
-REVIEW CHECKLIST:
-
-1. **Requirements Verification**
-   - Read the PRD and identify all requirements
-   - For each completed task, verify the implementation meets the stated requirements
-   - Check for any missed requirements or partial implementations
-
-2. **Code Quality Review**
-   - Check for obvious bugs, errors, or anti-patterns
-   - Verify error handling is appropriate
-   - Look for potential security issues (injection, XSS, hardcoded secrets, etc.)
-   - Check for proper input validation at boundaries
-
-3. **Implementation Consistency**
-   - Verify code follows existing project patterns and conventions
-   - Check naming conventions are consistent
-   - Verify file organization matches project structure
-
-4. **Testing Coverage**
-   - Identify what testing was performed (documented in PRD or summaries)
-   - Note any gaps in test coverage
-   - Check if edge cases were considered
-
-DECISION CRITERIA:
-
-- PASS: All requirements met, no critical issues, code is production-ready
-- FAIL: Missing requirements, critical bugs, security vulnerabilities, or broken functionality
-
-OUTPUT FORMAT:
-
-You MUST provide your response in this EXACT structure with both tags:
-
-<review>
-
-## Requirements Check
-
-| Requirement | Status | Notes |
-|-------------|--------|-------|
-| [requirement] | [PASS/FAIL] | [brief note] |
-
-## Issues Found
-
-### Critical (blocks release)
-- [issue description and location]
-
-### Warnings (should fix)
-- [issue description and location]
-
-### Suggestions (optional)
-- [suggestion]
-
-## Security Review
-
-[Any security concerns found, or confirmation that common issues were checked]
-
-## Summary
-
-[Brief overall assessment]
-
-</review>
-
-<result>PASS</result>
-
-OR
-
-<result>FAIL</result>
-
-CRITICAL: The <result> tag MUST contain exactly one word: either PASS or FAIL. No other text.
-This tag is parsed programmatically to determine if the work can proceed to commit/PR creation."
-
-    mkdir -p "$worker_dir/logs"
-    run_agent_once "$worker_dir/workspace" "$review_system_prompt" "$review_user_prompt" "$worker_dir/logs/validation-review.log" 5
-    local validation_exit=$?
-    local validation_result="UNKNOWN"
-
-    # Extract review content between <review> tags
-    if [ -f "$worker_dir/logs/validation-review.log" ]; then
-        if grep -q '<review>' "$worker_dir/logs/validation-review.log"; then
-            sed -n '/<review>/,/<\/review>/p' "$worker_dir/logs/validation-review.log" | sed '1d;$d' > "$worker_dir/validation-review.md"
-            echo "Validation review saved to validation-review.md"
-        fi
-
-        # Extract result tag (PASS or FAIL)
-        validation_result=$(grep -oP '(?<=<result>)(PASS|FAIL)(?=</result>)' "$worker_dir/logs/validation-review.log" | head -1)
-        if [ -z "$validation_result" ]; then
-            validation_result="UNKNOWN"
-        fi
-    fi
-
-    echo "Validation result: $validation_result"
-    echo "$validation_result" > "$worker_dir/validation-result.txt"
-
-    if [ "$validation_result" = "FAIL" ]; then
-        echo "Validation FAILED - cannot proceed with commit/PR"
-        return 1
-    elif [ "$validation_result" = "UNKNOWN" ]; then
-        echo "Validation result UNKNOWN - cannot proceed safely"
+    # Check validation result
+    if ! check_validation_result "$worker_dir"; then
+        local result
+        result=$(cat "$worker_dir/validation-result.txt" 2>/dev/null || echo "UNKNOWN")
+        echo "Validation $result - cannot proceed with commit/PR"
         return 1
     fi
 
-    # Validation passed - proceed with commit and PR
     echo "Validation PASSED - creating commit and PR..."
 
-    cd "$worker_dir/workspace" || return 1
+    # Use shared library for git operations
+    if git_finalize_worker "$worker_dir" "$task_id" "$PROJECT_DIR"; then
+        echo "PR URL: $GIT_PR_URL"
 
-    # Get task description from kanban
-    local task_desc
-    task_desc=$(grep "**\[$task_id\]**" "$PROJECT_DIR/.ralph/kanban.md" | sed 's/.*\*\*\[.*\]\*\* //' | head -1)
-
-    # Get task priority
-    local task_priority
-    task_priority=$(grep -A2 "**\[$task_id\]**" "$PROJECT_DIR/.ralph/kanban.md" | grep "Priority:" | sed 's/.*Priority: //')
-
-    # Check if there are changes to commit
-    if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
-        echo "No changes to commit"
-        return 1
-    fi
-
-    # Create branch and commit
-    local timestamp=$(date +%s)
-    local branch_name="task/$task_id-$timestamp"
-
-    if ! git checkout -b "$branch_name" 2>&1; then
-        echo "Error: Failed to create branch $branch_name"
-        return 1
-    fi
-
-    git add -A
-
-    local commit_msg="${task_id}: ${task_desc}
-
-Worker: $worker_id
-Priority: ${task_priority:-MEDIUM}
-Completed by Chief Wiggum autonomous worker.
-
-Co-Authored-By: Chief Wiggum Worker <noreply@chief-wiggum.local>"
-
-    git commit --no-gpg-sign -m "$commit_msg" 2>&1
-    local commit_hash=$(git rev-parse HEAD)
-    echo "Created commit: $commit_hash on branch $branch_name"
-
-    # Push and create PR
-    if git push -u origin "$branch_name" 2>&1; then
-        echo "Pushed branch $branch_name to remote"
-
-        if command -v gh &> /dev/null; then
-            local changes_section
-            changes_section=$(cat "$worker_dir/summary.txt")
-
-            # Calculate metrics
-            calculate_worker_cost "$worker_dir/worker.log" > "$worker_dir/metrics.txt" 2>&1 || true
-
-            local metrics_section=""
-            if [ -f "$worker_dir/metrics.txt" ]; then
-                metrics_section="
-## Metrics
-
-\`\`\`
-$(tail -n +3 "$worker_dir/metrics.txt")
-\`\`\`
-"
-            fi
-
-            local prd_body=""
-            if [ -f "$worker_dir/prd.md" ]; then
-                prd_body=$(cat "$worker_dir/prd.md")
-            fi
-
-            local pr_body="## Summary
-
-$prd_body
-
-## Changes
-
-${changes_section}
-${metrics_section}
----
-🤖 Generated by [Chief Wiggum](https://github.com/0kenx/chief-wiggum)"
-
-            if gh pr create \
-                --title "$task_id: $task_desc" \
-                --body "$pr_body" \
-                --base main \
-                --head "$branch_name" 2>&1; then
-
-                echo "✓ Created Pull Request for $task_id"
-
-                local pr_url
-                pr_url=$(gh pr view "$branch_name" --json url -q .url)
-                echo "$pr_url" > "$worker_dir/pr_url.txt"
-                echo "PR URL: $pr_url"
-
-                # Update kanban to done
-                source "$WIGGUM_HOME/lib/task-parser.sh"
-                if update_kanban "$PROJECT_DIR/.ralph/kanban.md" "$task_id"; then
-                    echo "Task $task_id marked as complete in kanban"
-                fi
-
-                return 0
-            else
-                echo "Warning: Failed to create PR, but branch is pushed"
-                return 1
-            fi
-        else
-            echo "gh CLI not found, skipping PR creation. Branch pushed: $branch_name"
-            return 1
+        # Update kanban to done
+        if update_kanban "$PROJECT_DIR/.ralph/kanban.md" "$task_id"; then
+            echo "Task $task_id marked as complete in kanban"
         fi
+
+        return 0
     else
-        echo "Failed to push branch"
+        echo "Failed to create commit/PR"
         return 1
     fi
 }
@@ -617,9 +341,9 @@ cmd_start() {
         exit 1
     fi
 
-    # Check if a worker already exists for this task
+    # Check if a worker already exists for this task (using shared library)
     local existing
-    existing=$(find "$RALPH_DIR/workers" -maxdepth 1 -type d -name "worker-$task_id-*" 2>/dev/null | head -1)
+    existing=$(find_any_worker_by_task_id "$RALPH_DIR" "$task_id")
     if [ -n "$existing" ]; then
         echo "Warning: Worker already exists for $task_id: $(basename "$existing")"
         echo "Use 'wiggum worker $task_id resume' to resume it, or clean it up first."
@@ -694,7 +418,7 @@ main() {
             fi
 
             local worker_dir
-            worker_dir=$(resolve_worker_id "$partial_id") || exit 1
+            worker_dir=$(resolve_worker_id "$RALPH_DIR" "$partial_id") || exit 1
 
             case "$action" in
                 stop)

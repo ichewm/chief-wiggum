@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Clean up Chief Wiggum worktrees and worker directories
 
-PROJECT_DIR="$(pwd)"
-RALPH_DIR="$PROJECT_DIR/.ralph"
+WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
+source "$WIGGUM_HOME/lib/defaults.sh"
+source "$WIGGUM_HOME/lib/worker-lifecycle.sh"
+
 SKIP_CONFIRM=false
 
 show_help() {
@@ -57,20 +59,12 @@ confirm() {
     esac
 }
 
-# Check if a worker is running
+# Check if a worker is running (wrapper around shared library)
 # Returns 0 if running, 1 if not
-is_worker_running() {
+check_worker_running() {
     local worker_name="$1"
-    local pid_file="$RALPH_DIR/workers/$worker_name/worker.pid"
-
-    if [ -f "$pid_file" ]; then
-        local pid
-        pid=$(cat "$pid_file" 2>/dev/null)
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            return 0
-        fi
-    fi
-    return 1
+    local worker_dir="$RALPH_DIR/workers/$worker_name"
+    is_worker_running "$worker_dir"
 }
 
 # Find matching worker directories for a pattern
@@ -239,7 +233,7 @@ mapfile -t workers_array <<< "$workers_to_clean"
 # Check for running workers
 running_workers=()
 for worker in "${workers_array[@]}"; do
-    if is_worker_running "$worker"; then
+    if check_worker_running "$worker"; then
         running_workers+=("$worker")
     fi
 done

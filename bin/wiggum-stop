@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Stop all workers
 
-PROJECT_DIR="$(pwd)"
-RALPH_DIR="$PROJECT_DIR/.ralph"
+WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
+source "$WIGGUM_HOME/lib/defaults.sh"
+source "$WIGGUM_HOME/lib/worker-lifecycle.sh"
 
 show_help() {
     cat << EOF
@@ -29,6 +30,72 @@ Examples:
   wiggum stop --workers 12345,67890  # Stop workers 12345 and 67890
 
 EOF
+}
+
+# Shared function to stop workers and wait for termination
+# Args: pids_array_name worker_map_name
+# Uses associative array passed by name for PID -> worker_id mapping
+stop_workers_gracefully() {
+    local -n pids_ref=$1
+    local -n map_ref=$2
+    local timeout=10
+
+    if [ ${#pids_ref[@]} -eq 0 ]; then
+        echo "No workers to stop"
+        return 0
+    fi
+
+    # Send TERM signal to all workers
+    for pid in "${pids_ref[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Stopping ${map_ref[$pid]} (PID $pid)"
+            kill -TERM "$pid"
+        fi
+    done
+
+    # Wait for workers to stop
+    echo "Waiting for workers to terminate..."
+    local elapsed=0
+    local all_stopped=false
+
+    while [ $elapsed -lt $timeout ]; do
+        all_stopped=true
+        for pid in "${pids_ref[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                all_stopped=false
+                break
+            fi
+        done
+
+        if [ "$all_stopped" = true ]; then
+            break
+        fi
+
+        sleep 1
+        ((elapsed++))
+    done
+
+    # Force kill any remaining workers
+    if [ "$all_stopped" = false ]; then
+        echo "Warning: Some workers did not stop gracefully, force killing..."
+        for pid in "${pids_ref[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                echo "Force killing ${map_ref[$pid]} (PID $pid)"
+                kill -9 "$pid" 2>/dev/null || true
+            fi
+        done
+        sleep 1
+    fi
+
+    # Count successfully stopped workers
+    local stopped_count=0
+    for pid in "${pids_ref[@]}"; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            ((stopped_count++))
+        fi
+    done
+
+    echo "Stopped $stopped_count workers"
 }
 
 # Parse options
@@ -104,36 +171,12 @@ if [ ! -d "$RALPH_DIR/workers" ]; then
     exit 0
 fi
 
-# Collect active workers from worker directories
+# Collect active workers using shared library
 declare -A worker_pids_map  # pid -> worker_id
-for worker_dir in "$RALPH_DIR/workers"/worker-*; do
-    [ -d "$worker_dir" ] || continue
-
-    pid_file="$worker_dir/worker.pid"
-    [ -f "$pid_file" ] || continue
-
-    pid=$(cat "$pid_file" 2>/dev/null)
-    worker_id=$(basename "$worker_dir")
-
-    # Validate PID is a number
-    if ! [[ "$pid" =~ ^[0-9]+$ ]]; then
-        rm -f "$pid_file"
-        continue
-    fi
-
-    if kill -0 "$pid" 2>/dev/null; then
-        # Verify it's actually a worker process
-        if ps -p "$pid" -o args= 2>/dev/null | grep -q "lib/worker.sh"; then
-            worker_pids_map[$pid]="$worker_id"
-        else
-            # Stale PID file (PID reused)
-            rm -f "$pid_file"
-        fi
-    else
-        # Process no longer running
-        rm -f "$pid_file"
-    fi
-done
+while read -r pid task_id worker_id; do
+    [ -n "$pid" ] || continue
+    worker_pids_map[$pid]="$worker_id"
+done < <(scan_active_workers "$RALPH_DIR")
 
 # Check if any workers are running
 if [ ${#worker_pids_map[@]} -eq 0 ]; then
@@ -162,8 +205,6 @@ if [ -n "$SPECIFIC_WORKERS" ]; then
         fi
 
         if kill -0 "$pid" 2>/dev/null; then
-            echo "Stopping worker ${worker_pids_map[$pid]} (PID $pid)"
-            kill -TERM "$pid"
             pids_to_stop+=("$pid")
         else
             echo "Worker PID $pid already stopped"
@@ -176,114 +217,20 @@ if [ -n "$SPECIFIC_WORKERS" ]; then
         echo "Use 'wiggum status' to see valid worker PIDs"
     fi
 
-    # Wait for workers to stop (up to 10 seconds)
-    if [ ${#pids_to_stop[@]} -gt 0 ]; then
-        echo "Waiting for workers to terminate..."
-        local timeout=10
-        local elapsed=0
-        local all_stopped=false
-
-        while [ $elapsed -lt $timeout ]; do
-            all_stopped=true
-            for pid in "${pids_to_stop[@]}"; do
-                if kill -0 "$pid" 2>/dev/null; then
-                    all_stopped=false
-                    break
-                fi
-            done
-
-            if [ "$all_stopped" = true ]; then
-                break
-            fi
-
-            sleep 1
-            ((elapsed++))
-        done
-
-        # Force kill any remaining workers
-        if [ "$all_stopped" = false ]; then
-            echo "Warning: Some workers did not stop gracefully, force killing..."
-            for pid in "${pids_to_stop[@]}"; do
-                if kill -0 "$pid" 2>/dev/null; then
-                    echo "Force killing ${worker_pids_map[$pid]} (PID $pid)"
-                    kill -9 "$pid" 2>/dev/null || true
-                fi
-            done
-            sleep 1
-        fi
-
-        # Count successfully stopped workers
-        stopped_count=0
-        for pid in "${pids_to_stop[@]}"; do
-            if ! kill -0 "$pid" 2>/dev/null; then
-                ((stopped_count++))
-            fi
-        done
-
-        echo "Stopped $stopped_count workers"
-    else
-        echo "No workers were running"
-    fi
+    # Stop the workers using shared function
+    stop_workers_gracefully pids_to_stop worker_pids_map
 else
     # Stop all workers
     echo "Stopping all workers..."
 
-    # Send TERM signal to all workers
-    declare -a pids_to_stop=()
+    # Get all running PIDs
+    declare -a all_pids=()
     for pid in "${!worker_pids_map[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
-            echo "Stopping ${worker_pids_map[$pid]} (PID $pid)"
-            kill -TERM "$pid"
-            pids_to_stop+=("$pid")
+            all_pids+=("$pid")
         fi
     done
 
-    # Wait for workers to stop (up to 10 seconds)
-    if [ ${#pids_to_stop[@]} -gt 0 ]; then
-        echo "Waiting for workers to terminate..."
-        local timeout=10
-        local elapsed=0
-        local all_stopped=false
-
-        while [ $elapsed -lt $timeout ]; do
-            all_stopped=true
-            for pid in "${pids_to_stop[@]}"; do
-                if kill -0 "$pid" 2>/dev/null; then
-                    all_stopped=false
-                    break
-                fi
-            done
-
-            if [ "$all_stopped" = true ]; then
-                break
-            fi
-
-            sleep 1
-            ((elapsed++))
-        done
-
-        # Force kill any remaining workers
-        if [ "$all_stopped" = false ]; then
-            echo "Warning: Some workers did not stop gracefully, force killing..."
-            for pid in "${pids_to_stop[@]}"; do
-                if kill -0 "$pid" 2>/dev/null; then
-                    echo "Force killing ${worker_pids_map[$pid]} (PID $pid)"
-                    kill -9 "$pid" 2>/dev/null || true
-                fi
-            done
-            sleep 1
-        fi
-
-        # Count successfully stopped workers
-        stopped_count=0
-        for pid in "${pids_to_stop[@]}"; do
-            if ! kill -0 "$pid" 2>/dev/null; then
-                ((stopped_count++))
-            fi
-        done
-
-        echo "Stopped $stopped_count workers"
-    else
-        echo "No workers to stop"
-    fi
+    # Stop the workers using shared function
+    stop_workers_gracefully all_pids worker_pids_map
 fi

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Review and manage worker PRs using gh CLI
 
-PROJECT_DIR="$(pwd)"
-RALPH_DIR="$PROJECT_DIR/.ralph"
+WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
+source "$WIGGUM_HOME/lib/defaults.sh"
 
 show_help() {
     cat << EOF

@@ -14,13 +14,14 @@ TASK_ID=$(echo "$WORKER_ID" | sed -E 's/worker-(TASK-[0-9]+)-.*/\1/')  # e.g., T
 MAX_ITERATIONS="${WIGGUM_MAX_ITERATIONS:-20}"           # Max outer loop iterations
 MAX_TURNS_PER_SESSION="${WIGGUM_MAX_TURNS:-50}"         # Max turns per Claude session (controls context window)
 
+# Source shared libraries
 source "$WIGGUM_HOME/lib/ralph-loop.sh"
 source "$WIGGUM_HOME/lib/logger.sh"
 source "$WIGGUM_HOME/lib/file-lock.sh"
-source "$WIGGUM_HOME/lib/calculate-cost.sh"
 source "$WIGGUM_HOME/lib/audit-logger.sh"
 source "$WIGGUM_HOME/lib/task-parser.sh"
-source "$WIGGUM_HOME/lib/run-agent-once.sh"
+source "$WIGGUM_HOME/lib/validation-review.sh"
+source "$WIGGUM_HOME/lib/git-operations.sh"
 
 # Save references to sourced kanban functions before defining wrapper
 eval "_kanban_mark_done() $(declare -f update_kanban | sed '1d')"
@@ -89,120 +90,10 @@ main() {
         fi
     fi
 
-    # Run validation review on completed work
+    # Run validation review on completed work using shared library
     if [ -d "$WORKER_DIR/workspace" ]; then
         log "Running validation review on completed work"
-
-        local review_system_prompt="VALIDATION REVIEWER ROLE:
-
-You are a code reviewer and validation agent. Your job is to review completed work
-and verify it meets the requirements specified in the PRD.
-
-WORKSPACE: $WORKER_DIR/workspace
-
-You have READ-ONLY intent - focus on reviewing and validating, not making changes.
-If you find issues, document them clearly but do not attempt fixes."
-
-        local review_user_prompt="VALIDATION AND REVIEW TASK:
-
-Review the completed work in this workspace against the requirements in @../prd.md.
-
-REVIEW CHECKLIST:
-
-1. **Requirements Verification**
-   - Read the PRD and identify all requirements
-   - For each completed task, verify the implementation meets the stated requirements
-   - Check for any missed requirements or partial implementations
-
-2. **Code Quality Review**
-   - Check for obvious bugs, errors, or anti-patterns
-   - Verify error handling is appropriate
-   - Look for potential security issues (injection, XSS, hardcoded secrets, etc.)
-   - Check for proper input validation at boundaries
-
-3. **Implementation Consistency**
-   - Verify code follows existing project patterns and conventions
-   - Check naming conventions are consistent
-   - Verify file organization matches project structure
-
-4. **Testing Coverage**
-   - Identify what testing was performed (documented in PRD or summaries)
-   - Note any gaps in test coverage
-   - Check if edge cases were considered
-
-DECISION CRITERIA:
-
-- PASS: All requirements met, no critical issues, code is production-ready
-- FAIL: Missing requirements, critical bugs, security vulnerabilities, or broken functionality
-
-OUTPUT FORMAT:
-
-You MUST provide your response in this EXACT structure with both tags:
-
-<review>
-
-## Requirements Check
-
-| Requirement | Status | Notes |
-|-------------|--------|-------|
-| [requirement] | [PASS/FAIL] | [brief note] |
-
-## Issues Found
-
-### Critical (blocks release)
-- [issue description and location]
-
-### Warnings (should fix)
-- [issue description and location]
-
-### Suggestions (optional)
-- [suggestion]
-
-## Security Review
-
-[Any security concerns found, or confirmation that common issues were checked]
-
-## Summary
-
-[Brief overall assessment]
-
-</review>
-
-<result>PASS</result>
-
-OR
-
-<result>FAIL</result>
-
-CRITICAL: The <result> tag MUST contain exactly one word: either PASS or FAIL. No other text.
-This tag is parsed programmatically to determine if the work can proceed to commit/PR creation."
-
-        run_agent_once "$WORKER_DIR/workspace" "$review_system_prompt" "$review_user_prompt" "$WORKER_DIR/logs/validation-review.log" 5
-        local validation_exit=$?
-        local validation_result="UNKNOWN"
-
-        # Extract review content between <review> tags
-        if [ -f "$WORKER_DIR/logs/validation-review.log" ]; then
-            if grep -q '<review>' "$WORKER_DIR/logs/validation-review.log"; then
-                sed -n '/<review>/,/<\/review>/p' "$WORKER_DIR/logs/validation-review.log" | sed '1d;$d' > "$WORKER_DIR/validation-review.md"
-                log "Validation review saved to validation-review.md"
-            fi
-
-            # Extract result tag (PASS or FAIL)
-            validation_result=$(grep -oP '(?<=<result>)(PASS|FAIL)(?=</result>)' "$WORKER_DIR/logs/validation-review.log" | head -1)
-            if [ -z "$validation_result" ]; then
-                validation_result="UNKNOWN"
-            fi
-        fi
-
-        if [ $validation_exit -eq 0 ]; then
-            log "Validation review completed with result: $validation_result"
-        else
-            log_warn "Validation review failed or had issues (exit: $validation_exit)"
-        fi
-
-        # Store validation result for flow control
-        echo "$validation_result" > "$WORKER_DIR/validation-result.txt"
+        run_validation_review "$WORKER_DIR" 5
     fi
 
     # Determine final status
@@ -236,12 +127,12 @@ This tag is parsed programmatically to determine if the work can proceed to comm
             # Get task priority
             local task_priority=$(grep -A2 "**\[$TASK_ID\]**" "$PROJECT_DIR/.ralph/kanban.md" | grep "Priority:" | sed 's/.*Priority: //')
 
-            # Create commit
-            if git_commit "$task_desc" "$task_priority"; then
+            # Create commit using shared library
+            if git_create_commit "$WORKER_DIR/workspace" "$TASK_ID" "$task_desc" "$task_priority" "$WORKER_ID"; then
                 local branch_name="$GIT_COMMIT_BRANCH"
 
-                # Create PR
-                git_pr "$branch_name" "$task_desc"
+                # Create PR using shared library
+                git_create_pr "$branch_name" "$TASK_ID" "$task_desc" "$WORKER_DIR" "$PROJECT_DIR"
                 pr_url="$GIT_PR_URL"
             else
                 final_status="FAILED"
@@ -367,126 +258,6 @@ determine_finality() {
     FINALITY_STATUS="$final_status"
 }
 
-git_commit() {
-    local task_desc="$1"
-    local task_priority="$2"
-
-    # Commit any changes in the worktree
-    if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
-        log "Creating branch and PR for $TASK_ID"
-
-        # Create a unique branch for this task attempt (include timestamp to avoid conflicts)
-        local timestamp=$(date +%s)
-        local branch_name="task/$TASK_ID-$timestamp"
-
-        if ! git checkout -b "$branch_name" 2>&1 | tee -a "$WORKER_DIR/worker.log"; then
-            log_error "Failed to create branch $branch_name"
-            GIT_COMMIT_BRANCH=""
-            return 1
-        fi
-
-        # Stage all changes
-        git add -A
-
-        # Create commit
-        local commit_msg="${TASK_ID}: ${task_desc}
-
-Worker: $WORKER_ID
-Priority: ${task_priority:-MEDIUM}
-Completed by Chief Wiggum autonomous worker.
-
-Co-Authored-By: Chief Wiggum Worker <noreply@chief-wiggum.local>"
-
-        git commit --no-gpg-sign -m "$commit_msg" 2>&1 | tee -a "$WORKER_DIR/worker.log"
-
-        local commit_hash=$(git rev-parse HEAD)
-        log "Created commit: $commit_hash on branch $branch_name"
-
-        GIT_COMMIT_BRANCH="$branch_name"
-        return 0
-    else
-        log_error "No changes to commit for $TASK_ID - marking as FAILED"
-        GIT_COMMIT_BRANCH=""
-        return 1
-    fi
-}
-
-git_pr() {
-    local branch_name="$1"
-    local task_desc="$2"
-
-    # Push the branch
-    if git push -u origin "$branch_name" 2>&1 | tee -a "$WORKER_DIR/worker.log"; then
-        log "Pushed branch $branch_name to remote"
-
-        # Create Pull Request using gh CLI
-        if command -v gh &> /dev/null; then
-            # Build Changes section from detailed summary if available
-            local changes_section="This PR contains the automated implementation of the task requirements."
-            if [ -f "$WORKER_DIR/summary.txt" ]; then
-                changes_section=$(cat "$WORKER_DIR/summary.txt")
-            fi
-
-            # Calculate time and cost metrics
-            calculate_worker_cost "$WORKER_DIR/worker.log" > "$WORKER_DIR/metrics.txt" 2>&1
-
-            local metrics_section=""
-            if [ -f "$WORKER_DIR/metrics.txt" ]; then
-                metrics_section="
-## Metrics
-
-\`\`\`
-$(tail -n +3 "$WORKER_DIR/metrics.txt")
-\`\`\`
-"
-            fi
-
-            # Read prd.md body for PR description
-            local prd_body=""
-            if [ -f "$WORKER_DIR/prd.md" ]; then
-                prd_body=$(cat "$WORKER_DIR/prd.md")
-            fi
-
-            local pr_body="## Summary
-
-$prd_body
-
-## Changes
-
-${changes_section}
-${metrics_section}
----
-🤖 Generated by [Chief Wiggum](https://github.com/0kenx/chief-wiggum)"
-
-            if gh pr create \
-                --title "$TASK_ID: $task_desc" \
-                --body "$pr_body" \
-                --base main \
-                --head "$branch_name" 2>&1 | tee -a "$WORKER_DIR/worker.log"; then
-
-                log "✓ Created Pull Request for $TASK_ID"
-
-                # Save PR URL
-                GIT_PR_URL=$(gh pr view "$branch_name" --json url -q .url)
-                echo "$GIT_PR_URL" > "$WORKER_DIR/pr_url.txt"
-                return 0
-            else
-                log "Failed to create PR (gh CLI error), but branch is pushed"
-                GIT_PR_URL="N/A"
-                return 1
-            fi
-        else
-            log "gh CLI not found, skipping PR creation. Branch pushed: $branch_name"
-            GIT_PR_URL="N/A"
-            return 1
-        fi
-    else
-        log "Failed to push branch (no remote configured?)"
-        GIT_PR_URL="N/A"
-        return 1
-    fi
-}
-
 cleanup_worktree() {
     local final_status="$1"
 
@@ -494,18 +265,9 @@ cleanup_worktree() {
     cd "$PROJECT_DIR" || exit 1
     local can_cleanup=false
     if [ "$final_status" = "COMPLETE" ]; then
-        # Get local commit from worktree
-        local local_commit=$(git -C "$WORKER_DIR/workspace" rev-parse HEAD 2>/dev/null)
-
-        # Check if commit exists on remote branch and PR exists
-        local remote_commit=$(git ls-remote --heads origin "task/$TASK_ID-*" 2>/dev/null | head -1 | cut -f1)
-        local pr_exists=$(gh pr list --head "task/$TASK_ID-*" --json number -q '.[0].number' 2>/dev/null)
-
-        if [ -n "$remote_commit" ] && [ "$local_commit" = "$remote_commit" ] && [ -n "$pr_exists" ]; then
+        # Use shared library to verify push status
+        if git_verify_pushed "$WORKER_DIR/workspace" "$TASK_ID"; then
             can_cleanup=true
-            log_debug "Verified: commit $local_commit pushed and PR #$pr_exists exists on GitHub"
-        else
-            log "GitHub verification failed: local=$local_commit, remote=${remote_commit:-none}, pr=$([ -n "$pr_exists" ] && echo '#'$pr_exists || echo 'no')"
         fi
     fi
 

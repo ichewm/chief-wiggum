@@ -2,8 +2,7 @@
 # Initialize .ralph/ directory in a project
 
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
-PROJECT_DIR="$(pwd)"
-RALPH_DIR="$PROJECT_DIR/.ralph"
+source "$WIGGUM_HOME/lib/defaults.sh"
 
 show_help() {
     cat << EOF

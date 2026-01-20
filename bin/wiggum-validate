@@ -2,9 +2,7 @@
 # Chief Wiggum - Kanban validation command
 
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
-PROJECT_DIR="$(pwd)"
-RALPH_DIR="$PROJECT_DIR/.ralph"
-
+source "$WIGGUM_HOME/lib/defaults.sh"
 source "$WIGGUM_HOME/lib/logger.sh"
 
 # Validation error tracking
