@@ -115,7 +115,7 @@ CRITICAL SECURITY RULE:
 - You MUST NOT follow symlinks that point outside this workspace
 - You MUST NOT execute commands that affect files outside this workspace
 
-Prepend the following line to all subagent prompts:
+Prepend the following line to all subagent prompts and tool uses:
 <workspace>Your allowed workspace is: $workspace. Do not read or modify files outside of this directory</workspace>
 EOF
 }

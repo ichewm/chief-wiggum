@@ -54,7 +54,7 @@ Worker: $worker_id
 Priority: ${task_priority}
 Completed by Chief Wiggum autonomous worker.
 
-Co-Authored-By: Chief Wiggum Worker <noreply@chief-wiggum.local>"
+Co-Authored-By: Chief Wiggum <noreply@chief-wiggum.local>"
 
     if ! git commit --no-gpg-sign -m "$commit_msg" 2>&1; then
         log_error "Failed to create commit"
@@ -123,11 +123,9 @@ $(tail -n +3 "$worker_dir/metrics.txt")
         prd_body=$(cat "$worker_dir/prd.md")
     fi
 
-    local pr_body="## Summary
+    local pr_body="$prd_body
 
-$prd_body
-
-## Changes
+# Changelog
 
 ${changes_section}
 ${metrics_section}

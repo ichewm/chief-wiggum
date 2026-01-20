@@ -6,6 +6,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/logger.sh"
+source "$SCRIPT_DIR/defaults.sh"
 
 # Resume an existing Claude session with a new prompt
 #
@@ -30,7 +31,7 @@ run_agent_resume() {
     log_debug "Resuming session $session_id (max_turns: $max_turns)"
 
     if [ -n "$output_file" ]; then
-        claude --resume "$session_id" \
+        "$CLAUDE" --resume "$session_id" \
             --max-turns "$max_turns" \
             --dangerously-skip-permissions \
             -p "$prompt" > "$output_file" 2>&1
@@ -38,7 +39,7 @@ run_agent_resume() {
         log_debug "Resume completed (exit_code: $exit_code, output: $output_file)"
         return $exit_code
     else
-        claude --resume "$session_id" \
+        "$CLAUDE" --resume "$session_id" \
             --max-turns "$max_turns" \
             --dangerously-skip-permissions \
             -p "$prompt" 2>&1

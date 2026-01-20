@@ -11,6 +11,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/logger.sh"
+source "$SCRIPT_DIR/defaults.sh"
 
 # Extract clean text from Claude CLI stream-JSON output
 # Filters out JSON and returns only assistant text responses
@@ -124,7 +125,7 @@ run_ralph_loop() {
         } > "$output_dir/logs/${session_prefix}-$iteration.log"
 
         # PHASE 1: Work session with turn limit
-        claude --verbose \
+        "$CLAUDE" --verbose \
             --output-format stream-json \
             ${WIGGUM_HOME:+--plugin-dir "$WIGGUM_HOME/skills"} \
             --append-system-prompt "$system_prompt" \
@@ -182,7 +183,7 @@ Please provide your summary based on the conversation so far, following this str
         log "Requesting summary for session $session_id"
 
         # Capture full output to iteration summary file (in output_dir root, not logs/)
-        local summary_full=$(claude --resume "$session_id" --max-turns 2 \
+        local summary_full=$("$CLAUDE" --resume "$session_id" --max-turns 2 \
             --dangerously-skip-permissions -p "$summary_prompt" 2>&1 | \
             tee "$output_dir/${session_prefix}-$iteration-summary.txt")
 
