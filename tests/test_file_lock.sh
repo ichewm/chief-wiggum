@@ -3,8 +3,12 @@
 
 set -e
 
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WIGGUM_HOME="$(dirname "$TESTS_DIR")"
+export WIGGUM_HOME
+
 # Source the file-lock utilities
-source lib/file-lock.sh
+source "$WIGGUM_HOME/lib/core/file-lock.sh"
 
 # Create a test directory
 TEST_DIR=$(mktemp -d)
