@@ -84,6 +84,11 @@ agent_source_ralph() {
     source "$WIGGUM_HOME/lib/claude/run-claude-ralph-loop.sh"
 }
 
+# Source supervised ralph loop (with periodic supervisor intervention)
+agent_source_ralph_supervised() {
+    source "$WIGGUM_HOME/lib/claude/run-claude-ralph-loop-supervised.sh"
+}
+
 # Source git operations
 agent_source_git() {
     source "$WIGGUM_HOME/lib/git/worktree-helpers.sh"
@@ -196,6 +201,8 @@ agent_on_signal() {
 #   AGENT_CONFIG_MAX_TURNS
 #   AGENT_CONFIG_TIMEOUT_SECONDS
 #   AGENT_CONFIG_AUTO_COMMIT
+#   AGENT_CONFIG_SUPERVISOR_INTERVAL
+#   AGENT_CONFIG_MAX_RESTARTS
 load_agent_config() {
     local agent_type="$1"
     local config_file="$WIGGUM_HOME/config/agents.json"
@@ -205,6 +212,8 @@ load_agent_config() {
     AGENT_CONFIG_MAX_TURNS=30
     AGENT_CONFIG_TIMEOUT_SECONDS=3600
     AGENT_CONFIG_AUTO_COMMIT=false
+    AGENT_CONFIG_SUPERVISOR_INTERVAL=3
+    AGENT_CONFIG_MAX_RESTARTS=2
 
     # Load from config file if it exists
     if [ -f "$config_file" ]; then
@@ -218,6 +227,8 @@ load_agent_config() {
             AGENT_CONFIG_MAX_TURNS=$(echo "$default_config" | jq -r '.max_turns // 30')
             AGENT_CONFIG_TIMEOUT_SECONDS=$(echo "$default_config" | jq -r '.timeout_seconds // 3600')
             AGENT_CONFIG_AUTO_COMMIT=$(echo "$default_config" | jq -r '.auto_commit // false')
+            AGENT_CONFIG_SUPERVISOR_INTERVAL=$(echo "$default_config" | jq -r '.supervisor_interval // 3')
+            AGENT_CONFIG_MAX_RESTARTS=$(echo "$default_config" | jq -r '.max_restarts // 2')
         fi
 
         # Override with agent-specific config
@@ -236,6 +247,12 @@ load_agent_config() {
 
             val=$(echo "$agent_config" | jq -r '.auto_commit // empty')
             [ -n "$val" ] && AGENT_CONFIG_AUTO_COMMIT="$val"
+
+            val=$(echo "$agent_config" | jq -r '.supervisor_interval // empty')
+            [ -n "$val" ] && AGENT_CONFIG_SUPERVISOR_INTERVAL="$val"
+
+            val=$(echo "$agent_config" | jq -r '.max_restarts // empty')
+            [ -n "$val" ] && AGENT_CONFIG_MAX_RESTARTS="$val"
         fi
     fi
 
@@ -244,6 +261,8 @@ load_agent_config() {
     export AGENT_CONFIG_MAX_TURNS
     export AGENT_CONFIG_TIMEOUT_SECONDS
     export AGENT_CONFIG_AUTO_COMMIT
+    export AGENT_CONFIG_SUPERVISOR_INTERVAL
+    export AGENT_CONFIG_MAX_RESTARTS
 }
 
 # =============================================================================
