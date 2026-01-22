@@ -75,8 +75,9 @@ spawn_worker() {
     # Handle specific exit codes
     if [ "$start_exit_code" -eq "$EXIT_WORKER_ALREADY_EXISTS" ]; then
         # Worker directory exists from previous run
+        # Exclude plan workers (worker-TASK-xxx-plan-*) - those are read-only planning sessions
         local existing_dir
-        existing_dir=$(find_any_worker_by_task_id "$RALPH_DIR" "$task_id")
+        existing_dir=$(find_any_worker_by_task_id "$RALPH_DIR" "$task_id" | grep -v -- '-plan-' || true)
         if [ -n "$existing_dir" ]; then
             # Check if the worker process is still running
             local stale_pid

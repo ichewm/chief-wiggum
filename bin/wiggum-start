@@ -2,7 +2,8 @@
 # wiggum start - Manually start a worker for a task
 #
 # Usage:
-#   wiggum start <TASK-ID>    Start a new worker for the specified task
+#   wiggum start <TASK-ID>         Start a new worker for the specified task
+#   wiggum start <TASK-ID> plan    Start with planning phase first
 
 set -euo pipefail
 
@@ -27,7 +28,8 @@ show_help() {
 wiggum start - Manually start a worker for a task
 
 Usage:
-  wiggum start <id>    Start a new worker for the specified task
+  wiggum start <id>         Start a new worker for the specified task
+  wiggum start <id> plan    Start with planning phase first
 
 Task ID Resolution:
   Task IDs can be partial as long as they match exactly one task:
@@ -39,12 +41,15 @@ Options:
   -h, --help    Show this help message
 
 Examples:
-  wiggum start TASK-030     # Start worker for TASK-030
-  wiggum start 030          # Start worker matching "030"
-  wiggum start FEAT-001     # Start worker for FEAT-001
+  wiggum start TASK-030          # Start worker for TASK-030
+  wiggum start 030               # Start worker matching "030"
+  wiggum start FEAT-001          # Start worker for FEAT-001
+  wiggum start TASK-030 plan     # Start with planning phase
 
 Notes:
   - The task must exist in .ralph/kanban.md
+  - Use 'plan' to run the plan-mode agent before execution
+  - If a plan already exists in .ralph/plans/, it will be used automatically
   - Use 'wiggum run' for automated orchestration of multiple tasks
   - Use 'wiggum resume <id>' to resume a stopped worker
 
@@ -78,8 +83,9 @@ do_start() {
     task_id=$(resolve_task_id "$RALPH_DIR/kanban.md" "$input_id") || exit $EXIT_WORKER_TASK_NOT_FOUND
 
     # Check if a worker already exists for this task (using shared library)
+    # Exclude plan workers (worker-TASK-xxx-plan-*) - those are read-only planning sessions
     local existing
-    existing=$(find_any_worker_by_task_id "$RALPH_DIR" "$task_id")
+    existing=$(find_any_worker_by_task_id "$RALPH_DIR" "$task_id" | grep -v -- '-plan-' || true)
     if [ -n "$existing" ]; then
         echo "Warning: Worker already exists for $task_id: $(basename "$existing")"
         echo "Use 'wiggum resume $task_id' to resume it, or 'wiggum clean $task_id' first."
@@ -144,8 +150,14 @@ main() {
     # Require task ID
     if [ $# -eq 0 ]; then
         echo "Error: Task ID required"
-        echo "Usage: wiggum start <TASK-ID>"
+        echo "Usage: wiggum start <TASK-ID> [plan]"
         exit $EXIT_USAGE
+    fi
+
+    # Check for plan mode
+    if [[ "${2:-}" == "plan" ]]; then
+        AGENT_TYPE="task-worker-plan-mode"
+        echo "Using plan mode agent"
     fi
 
     do_start "$1"
