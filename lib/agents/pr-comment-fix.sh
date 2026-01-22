@@ -234,7 +234,7 @@ _init_comment_status() {
         # Count the number of ### headers that represent comments
         local count
         count=$(grep -c '^### ' "$comments_file" 2>/dev/null || echo "0")
-        for i in $(seq 1 $count); do
+        for i in $(seq 1 "$count"); do
             echo "- [ ] Comment item $i" >> "$status_file"
         done
     fi

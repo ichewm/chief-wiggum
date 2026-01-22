@@ -101,10 +101,10 @@ calculate_worker_cost() {
     echo "Web Searches: $web_search_requests"
     echo ""
     echo "Token Usage:"
-    echo "  Input tokens: $(printf "%'d" $input_tokens)"
-    echo "  Output tokens: $(printf "%'d" $output_tokens)"
-    echo "  Cache creation tokens: $(printf "%'d" $cache_creation_tokens)"
-    echo "  Cache read tokens: $(printf "%'d" $cache_read_tokens)"
+    echo "  Input tokens: $(printf "%'d" "$input_tokens")"
+    echo "  Output tokens: $(printf "%'d" "$output_tokens")"
+    echo "  Cache creation tokens: $(printf "%'d" "$cache_creation_tokens")"
+    echo "  Cache read tokens: $(printf "%'d" "$cache_read_tokens")"
     echo "  Total tokens: $(printf "%'d" $((input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens)))"
     echo ""
     echo "Per-Model Usage:"
@@ -140,7 +140,7 @@ calculate_worker_cost() {
     done < <(echo "$totals" | jq -c '.model_usage | to_entries[]')
     echo ""
 
-    echo "Total Cost: \$$(printf "%.2f" $total_cost)"
+    echo "Total Cost: \$$(printf "%.2f" "$total_cost")"
     echo ""
 
     # Calculate total context usage for primary model (use the one with highest usage)
@@ -151,7 +151,7 @@ calculate_worker_cost() {
 
     # Export for use in PR summary
     export WORKER_TIME_SPENT="$time_formatted"
-    WORKER_TOTAL_COST=$(printf "%.2f" $total_cost)
+    WORKER_TOTAL_COST=$(printf "%.2f" "$total_cost")
     export WORKER_TOTAL_COST
     export WORKER_INPUT_TOKENS=$input_tokens
     export WORKER_OUTPUT_TOKENS=$output_tokens

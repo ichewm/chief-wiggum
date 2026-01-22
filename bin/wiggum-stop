@@ -220,8 +220,7 @@ main() {
 
     # Check for special target: orchestrator
     if [ "$target" = "orchestrator" ]; then
-        stop_orchestrator
-        exit $EXIT_OK
+        stop_orchestrator  # This function always exits
     fi
 
     # Otherwise, treat as worker ID pattern

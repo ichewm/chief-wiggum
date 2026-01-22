@@ -31,17 +31,27 @@ git_create_commit() {
         return 1
     fi
 
-    log "Creating branch and commit for $task_id"
+    # Check if already on a task branch
+    local current_branch
+    current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    local branch_name
 
-    # Create a unique branch for this task attempt
-    local timestamp
-    timestamp=$(date +%s)
-    local branch_name="task/$task_id-$timestamp"
+    if [[ "$current_branch" == task/* ]]; then
+        # Already on a task branch - use it
+        branch_name="$current_branch"
+        log "Using existing branch: $branch_name"
+    else
+        # Create a unique branch for this task attempt
+        local timestamp
+        timestamp=$(date +%s)
+        branch_name="task/$task_id-$timestamp"
+        log "Creating new branch: $branch_name"
 
-    if ! git checkout -b "$branch_name" 2>&1; then
-        log_error "Failed to create branch $branch_name"
-        GIT_COMMIT_BRANCH=""
-        return 1
+        if ! git checkout -b "$branch_name" 2>&1; then
+            log_error "Failed to create branch $branch_name"
+            GIT_COMMIT_BRANCH=""
+            return 1
+        fi
     fi
 
     # Stage all changes
@@ -171,7 +181,7 @@ git_verify_pushed() {
         log_debug "Verified: commit $local_commit pushed and PR #$pr_exists exists on GitHub"
         return 0
     else
-        log "GitHub verification failed: local=$local_commit, remote=${remote_commit:-none}, pr=$([ -n "$pr_exists" ] && echo '#'$pr_exists || echo 'no')"
+        log "GitHub verification failed: local=$local_commit, remote=${remote_commit:-none}, pr=$([ -n "$pr_exists" ] && echo "#$pr_exists" || echo 'no')"
         return 1
     fi
 }

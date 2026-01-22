@@ -30,6 +30,7 @@ Commands:
   status                    Show integration status
   task <patterns> sync      Sync PR comments for tasks matching patterns
   task <patterns> fix       Fix PR comments using ralph loop
+  task <pattern> resolve    Sync with main and resolve merge conflicts
   task <pattern> commit     Create commit in worker workspace
   task <pattern> push       Push worker branch to remote
   task <pattern> pr         Create PR for worker branch
@@ -39,6 +40,7 @@ Options:
   --auto-merge      Auto-merge without confirmation (use with caution)
   --squash          Squash commits when merging
   --rebase          Rebase instead of merge
+  --no-fetch        Skip fetch/merge from main (for resolve command)
 
 Task Pattern Examples:
   TASK-030                  Single task
@@ -63,6 +65,8 @@ Examples:
   wiggum review task TASK-030 sync      # Sync comments for TASK-030
   wiggum review task TASK-030,TASK-031 sync  # Sync multiple tasks
   wiggum review task TASK-030 fix       # Fix synced comments
+  wiggum review task TASK-030 resolve   # Sync main & resolve conflicts
+  wiggum review task TASK-030 resolve --no-fetch  # Resolve without syncing
   wiggum review task TASK-030 commit    # Create commit for task
   wiggum review task TASK-030 push      # Push branch to remote
   wiggum review task TASK-030 pr        # Create PR (pushes first if needed)
@@ -292,12 +296,11 @@ cmd_global_sync() {
     local comments_count=0
 
     # Process each PR
-    echo "$all_prs" | jq -c '.[]' | while read -r pr; do
-        local pr_number branch state merged_at
+    while read -r pr; do
+        local pr_number branch state
         pr_number=$(echo "$pr" | jq -r '.number')
         branch=$(echo "$pr" | jq -r '.headRefName')
         state=$(echo "$pr" | jq -r '.state')
-        merged_at=$(echo "$pr" | jq -r '.mergedAt')
 
         # Extract task ID from branch name (task/TASK-001-description -> TASK-001)
         local task_id
@@ -338,7 +341,7 @@ cmd_global_sync() {
                 fi
             fi
         fi
-    done
+    done < <(echo "$all_prs" | jq -c '.[]')
 
     echo ""
     log "Sync complete:"
@@ -348,7 +351,7 @@ cmd_global_sync() {
     if [ -s "$tasks_needing_fix" ]; then
         echo ""
         log "Tasks needing fix:"
-        cat "$tasks_needing_fix" | sed 's/^/  - /'
+        sed 's/^/  - /' "$tasks_needing_fix"
     fi
 }
 
@@ -418,6 +421,97 @@ cmd_task_fix() {
 
     log "Starting comment fix loop for $(basename "$worker_dir")"
     run_agent "pr-comment-fix" "$worker_dir" "$(pwd)"
+}
+
+# Resolve git merge conflicts in worker workspace
+cmd_task_resolve() {
+    local pattern="$1"
+    local no_fetch="$2"
+
+    if [ -z "$pattern" ]; then
+        error "Task pattern required"
+        echo "Usage: wiggum review task <pattern> resolve [--no-fetch]"
+        return 1
+    fi
+
+    # Find worker directory for this task
+    local worker_dir
+    worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$pattern")
+
+    if [ -z "$worker_dir" ] || [ ! -d "$worker_dir" ]; then
+        error "No worker directory found for pattern: $pattern"
+        return 1
+    fi
+
+    local workspace="$worker_dir/workspace"
+    if [ ! -d "$workspace" ]; then
+        error "Workspace not found: $workspace"
+        return 1
+    fi
+
+    # Sync with main unless --no-fetch is specified
+    if [ "$no_fetch" != "true" ]; then
+        log "Fetching and merging origin/main..."
+
+        if ! git -C "$workspace" fetch origin main 2>&1; then
+            error "Failed to fetch origin/main"
+            return 1
+        fi
+
+        # Try to merge main - this may create conflicts
+        if git -C "$workspace" merge origin/main --no-edit 2>&1; then
+            log "Merged origin/main successfully (no conflicts)"
+        else
+            log "Merge initiated - conflicts detected"
+        fi
+    fi
+
+    # Check for conflicts
+    local conflicted_files
+    conflicted_files=$(git -C "$workspace" diff --name-only --diff-filter=U 2>/dev/null)
+
+    if [ -z "$conflicted_files" ]; then
+        log "No merge conflicts detected in workspace"
+        return 0
+    fi
+
+    local count
+    count=$(echo "$conflicted_files" | wc -l)
+    log "Found $count file(s) with merge conflicts"
+    # shellcheck disable=SC2001  # Can't use param expansion for multiline prefix
+    sed 's/^/  - /' <<< "$conflicted_files"
+    echo ""
+
+    log "Starting conflict resolver for $(basename "$worker_dir")"
+    log "Progress: $worker_dir/logs/resolve-*.log"
+
+    # Run agent (conversation logs go to logs/resolve-*.log)
+    run_agent "git-conflict-resolver" "$worker_dir" "$(pwd)" 0 \
+        > /dev/null 2>&1
+
+    local exit_code=$?
+
+    # Show results
+    if [ -f "$worker_dir/resolution-summary.md" ]; then
+        echo ""
+        echo "=== Resolution Summary ==="
+        cat "$worker_dir/resolution-summary.md"
+    fi
+
+    # Check remaining conflicts
+    local remaining
+    remaining=$(git -C "$workspace" diff --name-only --diff-filter=U 2>/dev/null)
+
+    if [ -z "$remaining" ]; then
+        log "All conflicts resolved and staged"
+        log "Next: wiggum review task $pattern commit && wiggum review task $pattern push"
+    else
+        local remaining_count
+        remaining_count=$(echo "$remaining" | wc -l)
+        log "Warning: $remaining_count file(s) still have unresolved conflicts"
+    fi
+
+    return $exit_code
 }
 
 # Create commit in worker workspace
@@ -591,6 +685,7 @@ cmd_task_pr() {
 # Parse arguments
 AUTO_MERGE=false
 MERGE_METHOD="merge"
+NO_FETCH=false
 COMMAND="${1:-list}"
 
 shift 2>/dev/null || true
@@ -611,6 +706,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --rebase)
             MERGE_METHOD="rebase"
+            shift
+            ;;
+        --no-fetch)
+            NO_FETCH=true
             shift
             ;;
         *)
@@ -672,6 +771,9 @@ case "$COMMAND" in
             fix)
                 cmd_task_fix "$TASK_PATTERNS"
                 ;;
+            resolve)
+                cmd_task_resolve "$TASK_PATTERNS" "$NO_FETCH"
+                ;;
             commit)
                 cmd_task_commit "$TASK_PATTERNS"
                 ;;
@@ -683,7 +785,7 @@ case "$COMMAND" in
                 ;;
             *)
                 error "Unknown task action: $TASK_ACTION"
-                echo "Valid actions: sync, fix, commit, push, pr"
+                echo "Valid actions: sync, fix, resolve, commit, push, pr"
                 exit $EXIT_USAGE
                 ;;
         esac

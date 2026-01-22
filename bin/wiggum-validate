@@ -10,6 +10,19 @@ source "$WIGGUM_HOME/lib/core/logger.sh"
 declare -a VALIDATION_ERRORS=()
 VALID=true
 
+# Task summary tracking
+declare -i TASK_COUNT_TODO=0
+declare -i TASK_COUNT_DONE=0
+declare -i TASK_COUNT_IN_PROGRESS=0
+declare -i TASK_COUNT_PENDING_APPROVAL=0
+declare -i TASK_COUNT_NOT_PLANNED=0
+declare -i TASK_COUNT_FAILED=0
+declare -i TASK_COUNT_TOTAL=0
+declare -i PRIORITY_CRITICAL=0
+declare -i PRIORITY_HIGH=0
+declare -i PRIORITY_MEDIUM=0
+declare -i PRIORITY_LOW=0
+
 show_help() {
     cat << EOF
 wiggum validate - Validate kanban.md format and structure
@@ -49,6 +62,28 @@ add_error() {
     local message="$2"
     VALIDATION_ERRORS+=("Line $line_num: $message")
     VALID=false
+}
+
+show_summary() {
+    echo "Task Summary"
+    echo "============"
+    echo ""
+    echo "By Status:"
+    printf "  %-20s %3d\n" "Done [x]:" "$TASK_COUNT_DONE"
+    printf "  %-20s %3d\n" "Pending Approval [P]:" "$TASK_COUNT_PENDING_APPROVAL"
+    printf "  %-20s %3d\n" "In Progress [=]:" "$TASK_COUNT_IN_PROGRESS"
+    printf "  %-20s %3d\n" "TODO [ ]:" "$TASK_COUNT_TODO"
+    printf "  %-20s %3d\n" "Failed [*]:" "$TASK_COUNT_FAILED"
+    printf "  %-20s %3d\n" "Not Planned [N]:" "$TASK_COUNT_NOT_PLANNED"
+    echo "  --------------------"
+    printf "  %-20s %3d\n" "Total:" "$TASK_COUNT_TOTAL"
+    echo ""
+    echo "By Priority:"
+    printf "  %-20s %3d\n" "CRITICAL:" "$PRIORITY_CRITICAL"
+    printf "  %-20s %3d\n" "HIGH:" "$PRIORITY_HIGH"
+    printf "  %-20s %3d\n" "MEDIUM:" "$PRIORITY_MEDIUM"
+    printf "  %-20s %3d\n" "LOW:" "$PRIORITY_LOW"
+    echo ""
 }
 
 validate_kanban() {
@@ -95,8 +130,21 @@ validate_kanban() {
         fi
 
         # Check for task line: - [ ] **[TASK-ID]** or - [x] **[TASK-ID]** etc.
-        if [[ "$line" =~ ^-[[:space:]]\[[[:space:]x=\*]\][[:space:]]\*\*\[([A-Za-z0-9-]+)\]\*\* ]]; then
-            local task_id="${BASH_REMATCH[1]}"
+        # Status markers: space=pending, x=complete, ==in-progress, P=pending-approval, N=not-planned, *=failed
+        if [[ "$line" =~ ^-[[:space:]]\[([[:space:]x=PN\*])\][[:space:]]\*\*\[([A-Za-z0-9-]+)\]\*\* ]]; then
+            local task_state="${BASH_REMATCH[1]}"
+            local task_id="${BASH_REMATCH[2]}"
+
+            # Track task state
+            ((TASK_COUNT_TOTAL++))
+            case "$task_state" in
+                " ") ((TASK_COUNT_TODO++)) ;;
+                "x") ((TASK_COUNT_DONE++)) ;;
+                "=") ((TASK_COUNT_IN_PROGRESS++)) ;;
+                "P") ((TASK_COUNT_PENDING_APPROVAL++)) ;;
+                "N") ((TASK_COUNT_NOT_PLANNED++)) ;;
+                "*") ((TASK_COUNT_FAILED++)) ;;
+            esac
 
             # Validate task ID format
             if [[ ! "$task_id" =~ ^[A-Za-z]{2,8}-[0-9]+$ ]]; then
@@ -163,6 +211,14 @@ validate_kanban() {
                 priority_value="${priority_value%%[[:space:]]*}"  # Trim trailing whitespace
                 if [[ ! "$priority_value" =~ ^(CRITICAL|HIGH|MEDIUM|LOW)$ ]]; then
                     add_error "$line_num" "Invalid priority '$priority_value' for task '$current_task_id' - must be CRITICAL, HIGH, MEDIUM, or LOW"
+                else
+                    # Track priority counts
+                    case "$priority_value" in
+                        "CRITICAL") ((PRIORITY_CRITICAL++)) ;;
+                        "HIGH") ((PRIORITY_HIGH++)) ;;
+                        "MEDIUM") ((PRIORITY_MEDIUM++)) ;;
+                        "LOW") ((PRIORITY_LOW++)) ;;
+                    esac
                 fi
                 in_scope=false
                 in_oos=false
@@ -311,6 +367,11 @@ main() {
 
     if [ $validate_result -eq $EXIT_VALIDATE_FILE_NOT_FOUND ]; then
         exit $EXIT_VALIDATE_FILE_NOT_FOUND
+    fi
+
+    # Show summary unless quiet mode
+    if [ "$quiet" = false ]; then
+        show_summary
     fi
 
     # Report results

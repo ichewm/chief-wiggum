@@ -56,7 +56,8 @@ run_ralph_loop() {
     local shutdown_requested=false
     local last_session_id=""
 
-    # Signal handler for graceful shutdown
+    # Signal handler for graceful shutdown (invoked by trap)
+    # shellcheck disable=SC2329
     _ralph_loop_signal_handler() {
         log "Ralph loop received shutdown signal"
         shutdown_requested=true
@@ -79,7 +80,7 @@ run_ralph_loop() {
     mkdir -p "$output_dir/summaries"
 
     # Track the last session ID for potential final summary
-    while [ $iteration -lt $max_iterations ]; do
+    while [ $iteration -lt "$max_iterations" ]; do
         # Check for shutdown request
         if [ "$shutdown_requested" = true ]; then
             log "Ralph loop shutting down due to signal"
@@ -242,7 +243,7 @@ Please provide your summary based on the conversation so far, following this str
     end_time=$(date +%s)
     local duration=$((end_time - start_time))
 
-    if [ $iteration -ge $max_iterations ]; then
+    if [ $iteration -ge "$max_iterations" ]; then
         log_error "Ralph loop reached max iterations ($max_iterations) without completing"
         echo "[$(date -Iseconds)] LOOP_INCOMPLETE end_time=$end_time duration_sec=$duration iterations=$iteration max_iterations=$max_iterations" >> "$output_dir/worker.log" 2>/dev/null || true
         return 1

@@ -480,7 +480,7 @@ main() {
         # Spawn workers for ready tasks (up to MAX_WORKERS limit)
         for task_id in $ready_tasks; do
             # Check if we're at max capacity
-            if [ ${#active_workers[@]} -ge $MAX_WORKERS ]; then
+            if [ ${#active_workers[@]} -ge "$MAX_WORKERS" ]; then
                 break
             fi
 
@@ -544,7 +544,7 @@ main() {
         local ready_count
         ready_count=$(echo "$ready_tasks" | grep -c . 2>/dev/null)
         ready_count=${ready_count:-0}
-        if [ "$ready_count" -gt 0 ] && [ ${#active_workers[@]} -ge $MAX_WORKERS ]; then
+        if [ "$ready_count" -gt 0 ] && [ ${#active_workers[@]} -ge "$MAX_WORKERS" ]; then
             echo "Ready (waiting for worker slots): $ready_count tasks"
         fi
 

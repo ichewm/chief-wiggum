@@ -38,8 +38,9 @@ start_violation_monitor() {
         while kill -0 "$agent_pid" 2>/dev/null; do
             sleep 0.1
 
-            # Find the current iteration log file
+            # Find the current iteration log file (filenames are predictable)
             local new_log
+            # shellcheck disable=SC2012
             new_log=$(ls -t "$logs_dir"/iteration-*.log 2>/dev/null | head -1)
 
             # If log file changed, reset position

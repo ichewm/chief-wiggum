@@ -23,6 +23,21 @@
     "validation-review": {
       "max_iterations": 5,
       "max_turns": 50
+    },
+    "git-conflict-resolver": {
+      "max_iterations": 10,
+      "max_turns": 40,
+      "timeout_seconds": 1800
+    },
+    "security-audit": {
+      "max_iterations": 8,
+      "max_turns": 60,
+      "timeout_seconds": 2400
+    },
+    "code-review": {
+      "max_iterations": 6,
+      "max_turns": 50,
+      "timeout_seconds": 1800
     }
   },
   "defaults": {

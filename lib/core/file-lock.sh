@@ -10,7 +10,7 @@ with_file_lock() {
     local lock_file="${file}.lock"
     local retry=0
 
-    while [ $retry -lt $max_retries ]; do
+    while [ $retry -lt "$max_retries" ]; do
         # Try to acquire lock with flock
         (
             flock -w 10 200 || exit 1
@@ -30,7 +30,7 @@ with_file_lock() {
 
         # Failed - retry after delay
         ((retry++))
-        if [ $retry -lt $max_retries ]; then
+        if [ $retry -lt "$max_retries" ]; then
             sleep $((retry * 2))  # Exponential backoff
         fi
     done

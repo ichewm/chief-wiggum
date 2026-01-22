@@ -145,7 +145,8 @@ resolve_patterns() {
 
         if [ "$match_count" -gt 1 ]; then
             echo "Multiple workers match '$pattern':" >&2
-            echo "$matches" | sed 's/^/  /' >&2
+            # shellcheck disable=SC2001  # Can't use param expansion for multiline prefix
+            sed 's/^/  /' <<< "$matches" >&2
             echo "Please be more specific." >&2
             return 1
         fi
