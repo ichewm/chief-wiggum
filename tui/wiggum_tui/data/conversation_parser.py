@@ -132,6 +132,11 @@ def _group_into_turns(entries: list[dict[str, Any]]) -> list[ConversationTurn]:
         entry_iteration = entry.get("_iteration_idx", 0)
         entry_log_name = entry.get("_log_name", "")
 
+        # Skip nested messages from subagents (Task tool execution)
+        # These have parent_tool_use_id set to the Task tool's ID
+        if entry.get("parent_tool_use_id"):
+            continue
+
         if entry_type == "assistant":
             current_iteration = entry_iteration
             current_log_name = entry_log_name
@@ -163,6 +168,14 @@ def _group_into_turns(entries: list[dict[str, Any]]) -> list[ConversationTurn]:
             # Tool result
             result = entry.get("tool_use_result")
             parent_id = entry.get("parent_tool_use_id")
+
+            # If parent_tool_use_id is not set, try to extract from message.content
+            if not parent_id:
+                message_content = entry.get("message", {}).get("content", [])
+                for block in message_content:
+                    if block.get("type") == "tool_result":
+                        parent_id = block.get("tool_use_id")
+                        break
 
             if parent_id and parent_id in all_tool_calls:
                 # Explicit parent ID - link to that tool call
