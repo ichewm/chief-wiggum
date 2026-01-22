@@ -94,18 +94,25 @@ test_git_create_commit_message_format() {
     assert_output_contains "$commit_msg" "Test description" "Commit message should include description"
     assert_output_contains "$commit_msg" "Worker: worker-test" "Commit message should include worker ID"
     assert_output_contains "$commit_msg" "Priority: HIGH" "Commit message should include priority"
-    assert_output_contains "$commit_msg" "Chief Wiggum" "Commit message should include co-author"
+    assert_output_contains "$commit_msg" "Ralph Wiggum" "Commit message should include co-author"
     cd "$TESTS_DIR" || return 1
 }
 
-test_git_create_commit_fails_no_changes() {
-    # No changes to commit
+test_git_create_commit_succeeds_no_uncommitted_changes() {
+    # No uncommitted changes - should still succeed (sub-agents may have already committed)
     local result
     git_create_commit "$WORKSPACE" "TASK-004" "No changes" "LOW" "worker-004" > /dev/null 2>&1
     result=$?
 
-    assert_equals "1" "$result" "Should fail when no changes to commit"
-    assert_equals "" "$GIT_COMMIT_BRANCH" "GIT_COMMIT_BRANCH should be empty on failure"
+    assert_equals "0" "$result" "Should succeed even with no uncommitted changes"
+    # Branch should still be set
+    if [[ "$GIT_COMMIT_BRANCH" == task/TASK-004-* ]]; then
+        echo -e "  ${GREEN}✓${NC} GIT_COMMIT_BRANCH set correctly"
+    else
+        echo -e "  ${RED}X${NC} GIT_COMMIT_BRANCH should be set: $GIT_COMMIT_BRANCH"
+        FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
+    fi
+    ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
 }
 
 test_git_create_commit_fails_invalid_workspace() {
@@ -205,6 +212,176 @@ test_branch_naming_includes_timestamp() {
 }
 
 # =============================================================================
+# git_is_readonly_agent() Tests
+# =============================================================================
+
+test_git_is_readonly_agent() {
+    # These should be read-only
+    git_is_readonly_agent "security-audit"
+    assert_equals "0" "$?" "security-audit should be read-only"
+
+    git_is_readonly_agent "validation-review"
+    assert_equals "0" "$?" "validation-review should be read-only"
+
+    git_is_readonly_agent "plan-mode"
+    assert_equals "0" "$?" "plan-mode should be read-only"
+
+    git_is_readonly_agent "code-review"
+    assert_equals "0" "$?" "code-review should be read-only"
+
+    # These should NOT be read-only
+    git_is_readonly_agent "task-worker"
+    assert_equals "1" "$?" "task-worker should NOT be read-only"
+
+    git_is_readonly_agent "security-fix"
+    assert_equals "1" "$?" "security-fix should NOT be read-only"
+
+    git_is_readonly_agent "test-coverage"
+    assert_equals "1" "$?" "test-coverage should NOT be read-only"
+}
+
+# =============================================================================
+# git_safety_checkpoint() Tests
+# =============================================================================
+
+test_git_safety_checkpoint_creates_commit() {
+    # Add uncommitted changes
+    echo "uncommitted work" > "$WORKSPACE/uncommitted.txt"
+
+    git_safety_checkpoint "$WORKSPACE"
+    local result=$?
+
+    assert_equals "0" "$result" "Checkpoint should succeed"
+
+    # Verify checkpoint SHA is set
+    if [ -n "$GIT_SAFETY_CHECKPOINT_SHA" ]; then
+        echo -e "  ${GREEN}✓${NC} Checkpoint SHA is set"
+    else
+        echo -e "  ${RED}X${NC} Checkpoint SHA should be set"
+        FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
+    fi
+    ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
+
+    # Verify changes were committed
+    cd "$WORKSPACE" || return 1
+    local status
+    status=$(git status --porcelain)
+    if [ -z "$status" ]; then
+        echo -e "  ${GREEN}✓${NC} Working directory is clean after checkpoint"
+    else
+        echo -e "  ${RED}X${NC} Working directory should be clean after checkpoint"
+        FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
+    fi
+    ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
+    cd "$TESTS_DIR" || return 1
+}
+
+test_git_safety_checkpoint_no_changes() {
+    # No uncommitted changes
+    git_safety_checkpoint "$WORKSPACE"
+    local result=$?
+
+    assert_equals "0" "$result" "Checkpoint should succeed even with no changes"
+
+    # Verify checkpoint SHA is set (should be current HEAD)
+    if [ -n "$GIT_SAFETY_CHECKPOINT_SHA" ]; then
+        echo -e "  ${GREEN}✓${NC} Checkpoint SHA is set"
+    else
+        echo -e "  ${RED}X${NC} Checkpoint SHA should be set"
+        FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
+    fi
+    ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
+}
+
+# =============================================================================
+# git_safety_restore() Tests
+# =============================================================================
+
+test_git_safety_restore_discards_changes() {
+    # Create checkpoint
+    git_safety_checkpoint "$WORKSPACE"
+    local checkpoint="$GIT_SAFETY_CHECKPOINT_SHA"
+
+    # Simulate read-only agent making accidental changes
+    echo "accidental change" > "$WORKSPACE/accidental.txt"
+    echo "modified" >> "$WORKSPACE/README.md"
+
+    # Restore to checkpoint
+    git_safety_restore "$WORKSPACE" "$checkpoint"
+    local result=$?
+
+    assert_equals "0" "$result" "Restore should succeed"
+
+    # Verify changes were discarded
+    cd "$WORKSPACE" || return 1
+    if [ ! -f "$WORKSPACE/accidental.txt" ]; then
+        echo -e "  ${GREEN}✓${NC} Accidental file was removed"
+    else
+        echo -e "  ${RED}X${NC} Accidental file should have been removed"
+        FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
+    fi
+    ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
+
+    local status
+    status=$(git status --porcelain)
+    if [ -z "$status" ]; then
+        echo -e "  ${GREEN}✓${NC} Working directory is clean after restore"
+    else
+        echo -e "  ${RED}X${NC} Working directory should be clean after restore"
+        FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
+    fi
+    ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
+    cd "$TESTS_DIR" || return 1
+}
+
+test_git_safety_restore_resets_commits() {
+    # Create checkpoint
+    git_safety_checkpoint "$WORKSPACE"
+    local checkpoint="$GIT_SAFETY_CHECKPOINT_SHA"
+
+    # Simulate read-only agent making a commit (which it shouldn't)
+    cd "$WORKSPACE" || return 1
+    echo "bad commit content" > "$WORKSPACE/bad_commit.txt"
+    git add bad_commit.txt
+    git commit -q -m "Bad commit by read-only agent"
+    cd "$TESTS_DIR" || return 1
+
+    # Verify HEAD moved
+    cd "$WORKSPACE" || return 1
+    local bad_sha
+    bad_sha=$(git rev-parse HEAD)
+    cd "$TESTS_DIR" || return 1
+
+    if [ "$bad_sha" != "$checkpoint" ]; then
+        echo -e "  ${GREEN}✓${NC} HEAD moved (as expected for test setup)"
+    else
+        echo -e "  ${RED}X${NC} HEAD should have moved for test"
+        FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
+    fi
+    ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
+
+    # Restore to checkpoint
+    git_safety_restore "$WORKSPACE" "$checkpoint"
+
+    # Verify HEAD is back to checkpoint
+    cd "$WORKSPACE" || return 1
+    local current_sha
+    current_sha=$(git rev-parse HEAD)
+    cd "$TESTS_DIR" || return 1
+
+    assert_equals "$checkpoint" "$current_sha" "HEAD should be reset to checkpoint"
+
+    # Verify bad file is gone
+    if [ ! -f "$WORKSPACE/bad_commit.txt" ]; then
+        echo -e "  ${GREEN}✓${NC} Bad commit file was removed"
+    else
+        echo -e "  ${RED}X${NC} Bad commit file should have been removed"
+        FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
+    fi
+    ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
+}
+
+# =============================================================================
 # Run All Tests
 # =============================================================================
 
@@ -212,7 +389,7 @@ test_branch_naming_includes_timestamp() {
 run_test test_git_create_commit_creates_branch
 run_test test_git_create_commit_sets_branch_variable
 run_test test_git_create_commit_message_format
-run_test test_git_create_commit_fails_no_changes
+run_test test_git_create_commit_succeeds_no_uncommitted_changes
 run_test test_git_create_commit_fails_invalid_workspace
 run_test test_git_create_commit_stages_all_changes
 
@@ -224,6 +401,13 @@ run_test test_git_verify_pushed_fails_no_remote
 
 # branch naming tests
 run_test test_branch_naming_includes_timestamp
+
+# git safety tests
+run_test test_git_is_readonly_agent
+run_test test_git_safety_checkpoint_creates_commit
+run_test test_git_safety_checkpoint_no_changes
+run_test test_git_safety_restore_discards_changes
+run_test test_git_safety_restore_resets_commits
 
 print_test_summary
 exit_with_test_result

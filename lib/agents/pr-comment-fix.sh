@@ -285,7 +285,13 @@ _commit_and_push_fixes() {
 Automated fixes for PR review feedback.
 See comment-status.md for details on addressed items.
 
-Co-Authored-By: Chief Wiggum Worker <noreply@chief-wiggum.local>"
+Co-Authored-By: Ralph Wiggum <ralph@wiggum.local>"
+
+    # Set git author/committer identity
+    export GIT_AUTHOR_NAME="Ralph Wiggum"
+    export GIT_AUTHOR_EMAIL="ralph@wiggum.local"
+    export GIT_COMMITTER_NAME="Ralph Wiggum"
+    export GIT_COMMITTER_EMAIL="ralph@wiggum.local"
 
     if ! git commit --no-gpg-sign -m "$commit_msg" 2>&1; then
         log_error "Failed to create commit"

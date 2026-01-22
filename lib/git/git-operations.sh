@@ -7,6 +7,126 @@
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/metrics/calculate-cost.sh"
 
+# =============================================================================
+# READ-ONLY AGENT GIT SAFETY
+# =============================================================================
+# These functions provide git-based workspace protection for read-only agents.
+# Before a read-only agent runs, we commit all uncommitted changes to create
+# a checkpoint. After the agent exits, we revert to that checkpoint, discarding
+# any changes the agent may have made (which it shouldn't have).
+
+# List of agent types that are read-only (should not modify workspace)
+_GIT_READONLY_AGENTS="security-audit validation-review plan-mode code-review"
+
+# Check if an agent type is read-only
+# Args: <agent_type>
+# Returns: 0 if read-only, 1 if not
+git_is_readonly_agent() {
+    local agent_type="$1"
+    [[ " $_GIT_READONLY_AGENTS " == *" $agent_type "* ]]
+}
+
+# Create a git checkpoint before running a read-only agent
+# Commits all uncommitted changes so we can revert after the agent exits
+#
+# Args: <workspace>
+# Sets: GIT_SAFETY_CHECKPOINT_SHA (commit SHA to revert to)
+# Returns: 0 on success, 1 on failure
+git_safety_checkpoint() {
+    local workspace="$1"
+
+    cd "$workspace" || {
+        log_error "git_safety_checkpoint: Failed to cd to workspace: $workspace"
+        GIT_SAFETY_CHECKPOINT_SHA=""
+        return 1
+    }
+
+    # Store current HEAD as checkpoint (before any potential commit)
+    local current_sha
+    current_sha=$(git rev-parse HEAD 2>/dev/null)
+
+    # Check if there are uncommitted changes
+    if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+        # Stage all changes
+        git add -A 2>/dev/null || true
+
+        # Check if there are staged changes to commit
+        if ! git diff --staged --quiet; then
+            # Set git identity for checkpoint commit
+            export GIT_AUTHOR_NAME="Ralph Wiggum"
+            export GIT_AUTHOR_EMAIL="ralph@wiggum.local"
+            export GIT_COMMITTER_NAME="Ralph Wiggum"
+            export GIT_COMMITTER_EMAIL="ralph@wiggum.local"
+
+            # Create checkpoint commit
+            if git commit --no-gpg-sign -m "chore: checkpoint before read-only agent" >/dev/null 2>&1; then
+                current_sha=$(git rev-parse HEAD 2>/dev/null)
+                log_debug "Created checkpoint commit: $current_sha"
+            else
+                log_warn "git_safety_checkpoint: Failed to create checkpoint commit"
+            fi
+        fi
+    fi
+
+    GIT_SAFETY_CHECKPOINT_SHA="$current_sha"
+    log_debug "Git safety checkpoint set: $GIT_SAFETY_CHECKPOINT_SHA"
+    return 0
+}
+
+# Restore workspace to checkpoint after read-only agent exits
+# Discards any changes made by the agent (which shouldn't have made any)
+#
+# Args: <workspace> <checkpoint_sha>
+# Returns: 0 on success, 1 on failure
+git_safety_restore() {
+    local workspace="$1"
+    local checkpoint_sha="$2"
+
+    if [ -z "$checkpoint_sha" ]; then
+        log_warn "git_safety_restore: No checkpoint SHA provided, skipping restore"
+        return 0
+    fi
+
+    cd "$workspace" || {
+        log_error "git_safety_restore: Failed to cd to workspace: $workspace"
+        return 1
+    }
+
+    # Check current state
+    local current_sha
+    current_sha=$(git rev-parse HEAD 2>/dev/null)
+
+    # Check if there are any uncommitted changes (agent shouldn't have made any)
+    local has_changes=false
+    if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+        has_changes=true
+        log_warn "Read-only agent left uncommitted changes - discarding"
+    fi
+
+    # Check if HEAD moved (agent shouldn't have committed)
+    if [ "$current_sha" != "$checkpoint_sha" ]; then
+        log_warn "Read-only agent moved HEAD from $checkpoint_sha to $current_sha - resetting"
+        has_changes=true
+    fi
+
+    # Restore to checkpoint if anything changed
+    if [ "$has_changes" = true ]; then
+        # Hard reset to checkpoint (discards all changes)
+        if git reset --hard "$checkpoint_sha" >/dev/null 2>&1; then
+            # Clean untracked files
+            git clean -fd >/dev/null 2>&1 || true
+            log "Restored workspace to checkpoint: $checkpoint_sha"
+        else
+            log_error "git_safety_restore: Failed to reset to checkpoint $checkpoint_sha"
+            return 1
+        fi
+    else
+        log_debug "Workspace unchanged, no restore needed"
+    fi
+
+    return 0
+}
+
 # Create a commit in the worker workspace
 # Args: <workspace> <task_id> <task_desc> <task_priority> <worker_id>
 # Sets: GIT_COMMIT_BRANCH (branch name on success, empty on failure)
@@ -24,11 +144,10 @@ git_create_commit() {
         return 1
     }
 
-    # Check if there are changes to commit
-    if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
-        log_error "No changes to commit for $task_id"
-        GIT_COMMIT_BRANCH=""
-        return 1
+    # Check if there are uncommitted changes
+    local has_uncommitted_changes=false
+    if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+        has_uncommitted_changes=true
     fi
 
     # Check if already on a task branch
@@ -54,27 +173,39 @@ git_create_commit() {
         fi
     fi
 
-    # Stage all changes
-    git add -A
+    # If there are uncommitted changes, stage and commit them
+    if [ "$has_uncommitted_changes" = true ]; then
+        # Stage all changes
+        git add -A
 
-    # Create commit message
-    local commit_msg="${task_id}: ${task_desc}
+        # Create commit message
+        local commit_msg="${task_id}: ${task_desc}
 
 Worker: $worker_id
 Priority: ${task_priority}
-Completed by Chief Wiggum autonomous worker.
+Completed by Ralph Wiggum autonomous worker.
 
-Co-Authored-By: Chief Wiggum <noreply@chief-wiggum.local>"
+Co-Authored-By: Ralph Wiggum <ralph@wiggum.local>"
 
-    if ! git commit --no-gpg-sign -m "$commit_msg" 2>&1; then
-        log_error "Failed to create commit"
-        GIT_COMMIT_BRANCH=""
-        return 1
+        # Set git author/committer identity for this commit
+        export GIT_AUTHOR_NAME="Ralph Wiggum"
+        export GIT_AUTHOR_EMAIL="ralph@wiggum.local"
+        export GIT_COMMITTER_NAME="Ralph Wiggum"
+        export GIT_COMMITTER_EMAIL="ralph@wiggum.local"
+
+        if ! git commit --no-gpg-sign -m "$commit_msg" 2>&1; then
+            log_error "Failed to create commit"
+            GIT_COMMIT_BRANCH=""
+            return 1
+        fi
+
+        local commit_hash
+        commit_hash=$(git rev-parse HEAD)
+        log "Created commit: $commit_hash on branch $branch_name"
+    else
+        # No uncommitted changes - sub-agents already committed everything
+        log "No uncommitted changes - sub-agents already committed all work"
     fi
-
-    local commit_hash
-    commit_hash=$(git rev-parse HEAD)
-    log "Created commit: $commit_hash on branch $branch_name"
 
     GIT_COMMIT_BRANCH="$branch_name"
     return 0

@@ -22,6 +22,7 @@ source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
 source "$WIGGUM_HOME/lib/worker/agent-runner.sh"
+source "$WIGGUM_HOME/lib/git/git-operations.sh"
 
 # Track currently loaded agent to prevent re-sourcing
 _LOADED_AGENT=""
@@ -363,9 +364,28 @@ run_sub_agent() {
         fi
     fi
 
+    # For read-only agents, create a git checkpoint before running
+    # This allows us to discard any accidental changes after the agent exits
+    local workspace="$worker_dir/workspace"
+    local git_checkpoint=""
+    if git_is_readonly_agent "$agent_type" && [ -d "$workspace" ]; then
+        log_debug "Creating git safety checkpoint for read-only agent: $agent_type"
+        if git_safety_checkpoint "$workspace"; then
+            git_checkpoint="$GIT_SAFETY_CHECKPOINT_SHA"
+        else
+            log_warn "Failed to create git checkpoint, proceeding without safety net"
+        fi
+    fi
+
     # Run the agent (no lifecycle management)
     agent_run "$worker_dir" "$project_dir" "$@"
     local exit_code=$?
+
+    # For read-only agents, restore to checkpoint (discard any changes)
+    if [ -n "$git_checkpoint" ] && [ -d "$workspace" ]; then
+        log_debug "Restoring git safety checkpoint for read-only agent: $agent_type"
+        git_safety_restore "$workspace" "$git_checkpoint"
+    fi
 
     # Validate output files exist and are non-empty
     if ! validate_agent_outputs "$worker_dir"; then

@@ -89,7 +89,13 @@ _commit_subagent_changes() {
     # Create commit
     local commit_msg="chore($agent_name): automated changes
 
-Co-Authored-By: Wiggum <noreply@wiggum.ai>"
+Co-Authored-By: Ralph Wiggum <ralph@wiggum.local>"
+
+    # Set git author/committer identity
+    export GIT_AUTHOR_NAME="Ralph Wiggum"
+    export GIT_AUTHOR_EMAIL="ralph@wiggum.local"
+    export GIT_COMMITTER_NAME="Ralph Wiggum"
+    export GIT_COMMITTER_EMAIL="ralph@wiggum.local"
 
     if git commit -m "$commit_msg" >/dev/null 2>&1; then
         log "Committed $agent_name changes"
