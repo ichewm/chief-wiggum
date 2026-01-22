@@ -229,7 +229,7 @@ main() {
                 shift
                 ;;
             --max-workers)
-                if [[ -z "$2" ]] || [[ "$2" =~ ^- ]]; then
+                if [[ -z "${2:-}" ]] || [[ "${2:-}" =~ ^- ]]; then
                     echo "Error: --max-workers requires a number argument"
                     exit $EXIT_USAGE
                 fi
@@ -237,7 +237,7 @@ main() {
                 shift 2
                 ;;
             --max-iters)
-                if [[ -z "$2" ]] || [[ "$2" =~ ^- ]]; then
+                if [[ -z "${2:-}" ]] || [[ "${2:-}" =~ ^- ]]; then
                     echo "Error: --max-iters requires a number argument"
                     exit $EXIT_USAGE
                 fi
@@ -245,7 +245,7 @@ main() {
                 shift 2
                 ;;
             --max-turns)
-                if [[ -z "$2" ]] || [[ "$2" =~ ^- ]]; then
+                if [[ -z "${2:-}" ]] || [[ "${2:-}" =~ ^- ]]; then
                     echo "Error: --max-turns requires a number argument"
                     exit $EXIT_USAGE
                 fi

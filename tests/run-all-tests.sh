@@ -27,6 +27,10 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --suite|-s)
+            if [[ -z "${2:-}" ]]; then
+                echo "Error: --suite requires a suite name argument"
+                exit 1
+            fi
             SPECIFIC_SUITE="$2"
             shift 2
             ;;

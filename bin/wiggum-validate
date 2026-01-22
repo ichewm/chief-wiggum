@@ -332,7 +332,7 @@ main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -f|--file)
-                if [[ -z "$2" ]] || [[ "$2" =~ ^- ]]; then
+                if [[ -z "${2:-}" ]] || [[ "${2:-}" =~ ^- ]]; then
                     echo "Error: --file requires a path argument"
                     exit $EXIT_USAGE
                 fi

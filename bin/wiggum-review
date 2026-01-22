@@ -687,6 +687,7 @@ cmd_task_pr() {
 AUTO_MERGE=false
 MERGE_METHOD="merge"
 NO_FETCH=false
+ARGS=()
 COMMAND="${1:-list}"
 
 shift 2>/dev/null || true
@@ -729,8 +730,8 @@ case "$COMMAND" in
         cmd_global_sync
         ;;
     pr)
-        PR_NUMBER="${ARGS[0]}"
-        PR_ACTION="${ARGS[1]}"
+        PR_NUMBER="${ARGS[0]:-}"
+        PR_ACTION="${ARGS[1]:-}"
         if [ -z "$PR_NUMBER" ]; then
             error "PR number required"
             echo "Usage: wiggum review pr [PR#] [view|merge]"

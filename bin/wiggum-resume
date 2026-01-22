@@ -306,10 +306,18 @@ main() {
                 shift
                 ;;
             --max-iters)
+                if [[ -z "${2:-}" ]] || [[ "${2:-}" =~ ^- ]]; then
+                    echo "Error: --max-iters requires a number argument"
+                    exit $EXIT_USAGE
+                fi
                 MAX_ITERATIONS="$2"
                 shift 2
                 ;;
             --max-turns)
+                if [[ -z "${2:-}" ]] || [[ "${2:-}" =~ ^- ]]; then
+                    echo "Error: --max-turns requires a number argument"
+                    exit $EXIT_USAGE
+                fi
                 MAX_TURNS="$2"
                 shift 2
                 ;;
