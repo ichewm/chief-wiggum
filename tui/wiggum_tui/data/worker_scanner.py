@@ -205,3 +205,52 @@ def get_worker_counts(workers: list[Worker]) -> dict[str, int]:
     for worker in workers:
         counts[worker.status.value] += 1
     return counts
+
+
+def get_running_worker_for_task(ralph_dir: Path, task_id: str) -> Worker | None:
+    """Find a running worker for a specific task ID.
+
+    Args:
+        ralph_dir: Path to .ralph directory.
+        task_id: Task ID to search for (e.g., "TASK-001").
+
+    Returns:
+        Worker if a running worker is found for the task, None otherwise.
+    """
+    workers = scan_workers(ralph_dir)
+    for worker in workers:
+        if worker.task_id == task_id and worker.status == WorkerStatus.RUNNING:
+            return worker
+    return None
+
+
+def get_task_running_status(ralph_dir: Path, task_ids: list[str]) -> dict[str, tuple[bool, int | None]]:
+    """Get running status for multiple tasks at once (more efficient).
+
+    Args:
+        ralph_dir: Path to .ralph directory.
+        task_ids: List of task IDs to check.
+
+    Returns:
+        Dictionary mapping task_id to (is_running, start_timestamp).
+        start_timestamp is the worker directory mtime when running.
+    """
+    workers = scan_workers(ralph_dir)
+    result: dict[str, tuple[bool, int | None]] = {}
+
+    # Build a map of task_id -> running worker
+    running_workers: dict[str, Worker] = {}
+    for worker in workers:
+        if worker.status == WorkerStatus.RUNNING:
+            # Use the most recent worker for each task
+            if worker.task_id not in running_workers:
+                running_workers[worker.task_id] = worker
+
+    for task_id in task_ids:
+        if task_id in running_workers:
+            worker = running_workers[task_id]
+            result[task_id] = (True, worker.timestamp)
+        else:
+            result[task_id] = (False, None)
+
+    return result

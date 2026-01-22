@@ -48,6 +48,9 @@ class Task:
     scope: list[str] = field(default_factory=list)
     out_of_scope: list[str] = field(default_factory=list)
     acceptance_criteria: list[str] = field(default_factory=list)
+    # Runtime status for in-progress tasks
+    is_running: bool | None = None  # None = not checked, True = process running, False = not running
+    start_time: int | None = None  # Unix timestamp when worker started
 
 
 @dataclass

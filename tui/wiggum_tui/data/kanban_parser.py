@@ -3,6 +3,7 @@
 import re
 from pathlib import Path
 from .models import Task, TaskStatus
+from .worker_scanner import get_task_running_status
 
 
 STATUS_MAP = {
@@ -146,3 +147,35 @@ def get_task_counts(tasks: list[Task]) -> dict[str, int]:
         "failed": len(grouped[TaskStatus.FAILED]),
         "total": len(tasks),
     }
+
+
+def parse_kanban_with_status(file_path: Path, ralph_dir: Path) -> list[Task]:
+    """Parse kanban.md and enrich in-progress tasks with running status.
+
+    Args:
+        file_path: Path to kanban.md file.
+        ralph_dir: Path to .ralph directory for worker status.
+
+    Returns:
+        List of Task objects with is_running and start_time populated
+        for IN_PROGRESS tasks.
+    """
+    tasks = parse_kanban(file_path)
+
+    # Get task IDs for in-progress tasks
+    in_progress_ids = [t.id for t in tasks if t.status == TaskStatus.IN_PROGRESS]
+
+    if not in_progress_ids:
+        return tasks
+
+    # Get running status for all in-progress tasks at once
+    running_status = get_task_running_status(ralph_dir, in_progress_ids)
+
+    # Enrich tasks with running status
+    for task in tasks:
+        if task.status == TaskStatus.IN_PROGRESS and task.id in running_status:
+            is_running, start_time = running_status[task.id]
+            task.is_running = is_running
+            task.start_time = start_time
+
+    return tasks

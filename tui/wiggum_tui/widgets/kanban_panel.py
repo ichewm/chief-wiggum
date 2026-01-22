@@ -1,5 +1,6 @@
 """Kanban board panel widget."""
 
+import time
 from pathlib import Path
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll, Center
@@ -9,8 +10,25 @@ from textual.screen import ModalScreen
 from textual.binding import Binding
 from textual import events
 
-from ..data.kanban_parser import parse_kanban, group_tasks_by_status
+from ..data.kanban_parser import parse_kanban_with_status, group_tasks_by_status
 from ..data.models import Task, TaskStatus
+
+
+def format_duration(start_timestamp: int) -> str:
+    """Format duration from start timestamp to now as HH:MM:SS or MM:SS."""
+    now = int(time.time())
+    elapsed = now - start_timestamp
+    if elapsed < 0:
+        elapsed = 0
+
+    hours = elapsed // 3600
+    minutes = (elapsed % 3600) // 60
+    seconds = elapsed % 60
+
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    else:
+        return f"{minutes}:{seconds:02d}"
 
 
 class TaskDetailModal(ModalScreen[None]):
@@ -233,8 +251,23 @@ class TaskCard(Static):
         if len(title) > 30:
             title = title[:27] + "..."
 
+        # Build the first line with task ID and priority
+        first_line = f"[bold #f59e0b]{self._task_data.id}[/] [{priority_class}]{priority_indicator}[/]"
+
+        # For in-progress tasks, show running status indicator and duration
+        if self._task_data.status == TaskStatus.IN_PROGRESS and self._task_data.is_running is not None:
+            if self._task_data.is_running:
+                # Green indicator for running, with duration
+                duration = ""
+                if self._task_data.start_time:
+                    duration = f" {format_duration(self._task_data.start_time)}"
+                first_line += f" [bold #22c55e]●{duration}[/]"
+            else:
+                # Red indicator for not running (stalled)
+                first_line += " [bold #dc2626]●[/]"
+
         lines = [
-            f"[bold #f59e0b]{self._task_data.id}[/] [{priority_class}]{priority_indicator}[/]",
+            first_line,
             f"[#e2e8f0]{title}[/]",
         ]
         return "\n".join(lines)
@@ -356,6 +389,26 @@ class KanbanPanel(Widget):
         self.ralph_dir = ralph_dir
         self.kanban_path = ralph_dir / "kanban.md"
         self._tasks_list: list[Task] = []
+        self._timer = None
+
+    def on_mount(self) -> None:
+        """Start the timer for updating running task durations."""
+        self._timer = self.set_interval(1, self._update_running_cards)
+
+    def on_unmount(self) -> None:
+        """Stop the timer when unmounted."""
+        if self._timer:
+            self._timer.stop()
+
+    def _update_running_cards(self) -> None:
+        """Update only the running task cards to refresh their duration display."""
+        try:
+            for card in self.query(TaskCard):
+                task = card._task_data
+                if task.status == TaskStatus.IN_PROGRESS and task.is_running:
+                    card.refresh()
+        except Exception:
+            pass
 
     def compose(self) -> ComposeResult:
         self._load_tasks()
@@ -388,8 +441,8 @@ class KanbanPanel(Widget):
         )
 
     def _load_tasks(self) -> None:
-        """Load tasks from kanban.md."""
-        self._tasks_list = parse_kanban(self.kanban_path)
+        """Load tasks from kanban.md with running status."""
+        self._tasks_list = parse_kanban_with_status(self.kanban_path, self.ralph_dir)
 
     def refresh_data(self) -> None:
         """Refresh task data and re-render."""
