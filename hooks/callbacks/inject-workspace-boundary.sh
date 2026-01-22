@@ -45,6 +45,7 @@ SECURITY RULES - YOU MUST FOLLOW THESE:
 3. Use ONLY relative paths (e.g., ./src, ../prd.md) for file operations
 4. If you discover absolute paths outside your workspace, do NOT use them
 5. The parent directory '../' is allowed ONLY for accessing ../prd.md
+6. The .ralph/plans/ directory is readable for implementation plans (read-only)
 
 Any file paths you return or suggest MUST be within: ${workspace}
 

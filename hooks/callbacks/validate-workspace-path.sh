@@ -92,7 +92,20 @@ validate_path_within_workspace() {
     if [[ "$abs_path" == "$prd_abs" ]]; then
         # Allow PRD access (needed to mark tasks complete)
         return 0
-    elif [[ "$abs_path" != "$workspace_abs"* ]]; then
+    fi
+
+    # Check if path is in the plans directory (allowed for reading implementation plans)
+    # Plans are stored at .ralph/plans/ which is ../../../plans/ from workspace
+    local plans_dir="$workspace/../../../plans"
+    local plans_abs
+    plans_abs=$(realpath -m "$plans_dir" 2>/dev/null)
+
+    if [[ "$abs_path" == "$plans_abs"* ]]; then
+        # Allow read access to plans directory
+        return 0
+    fi
+
+    if [[ "$abs_path" != "$workspace_abs"* ]]; then
         # Path is outside workspace
         return 1
     fi
@@ -148,7 +161,7 @@ if [[ -n "$file_path" ]]; then
 
         echo "" >&2
         echo "You can only access files within your workspace directory." >&2
-        echo "Exception: ../prd.md is allowed for task tracking." >&2
+        echo "Exceptions: ../prd.md and .ralph/plans/ are allowed." >&2
         echo "" >&2
         echo "Use relative paths (e.g., ./file.txt or file.txt) instead." >&2
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
