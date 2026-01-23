@@ -128,9 +128,10 @@ class TaskDetailModal(ModalScreen[None]):
         Binding("q", "close", "Close"),
     ]
 
-    def __init__(self, task: Task) -> None:
+    def __init__(self, task: Task, ralph_dir: Path | None = None) -> None:
         super().__init__()
         self._task = task
+        self._ralph_dir = ralph_dir
 
     def compose(self) -> ComposeResult:
         task = self._task
@@ -145,6 +146,12 @@ class TaskDetailModal(ModalScreen[None]):
                 f"[{status_class}]Status: {task.status.value.upper()}[/]  │  "
                 f"[{priority_class}]Priority: {task.priority}[/]",
             )
+
+            # Plan indicator
+            if self._ralph_dir:
+                plan_path = self._ralph_dir / "plans" / f"{task.id}.md"
+                if plan_path.exists():
+                    yield Static("[#a6e3a1]Plan: available[/]")
 
             # Description
             if task.description:
@@ -275,11 +282,13 @@ class TaskCard(Static):
 
     def on_click(self) -> None:
         """Handle click to show task details."""
-        self.app.push_screen(TaskDetailModal(self._task_data))
+        ralph_dir = getattr(self.app, "ralph_dir", None)
+        self.app.push_screen(TaskDetailModal(self._task_data, ralph_dir=ralph_dir))
 
     def key_enter(self) -> None:
         """Handle Enter key to show task details."""
-        self.app.push_screen(TaskDetailModal(self._task_data))
+        ralph_dir = getattr(self.app, "ralph_dir", None)
+        self.app.push_screen(TaskDetailModal(self._task_data, ralph_dir=ralph_dir))
 
 
 class KanbanColumn(Widget):
@@ -611,5 +620,5 @@ class KanbanPanel(Widget):
         cards = self._get_all_cards()
         for card in cards:
             if card.has_focus:
-                self.app.push_screen(TaskDetailModal(card._task_data))
+                self.app.push_screen(TaskDetailModal(card._task_data, ralph_dir=self.ralph_dir))
                 break

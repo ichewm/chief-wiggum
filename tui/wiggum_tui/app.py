@@ -14,6 +14,7 @@ from .widgets.workers_panel import WorkersPanel
 from .widgets.logs_panel import LogsPanel
 from .widgets.metrics_panel import MetricsPanel
 from .widgets.conversation_panel import ConversationPanel
+from .widgets.plan_panel import PlanPanel
 from .data.watcher import RalphWatcher
 
 
@@ -58,7 +59,8 @@ class WiggumApp(App):
         Binding("2", "switch_tab('workers')", "Workers", show=True),
         Binding("3", "switch_tab('logs')", "Logs", show=True),
         Binding("4", "switch_tab('conversations')", "Chat", show=True),
-        Binding("5", "switch_tab('metrics')", "Metrics", show=True),
+        Binding("5", "switch_tab('plans')", "Plans", show=True),
+        Binding("6", "switch_tab('metrics')", "Metrics", show=True),
         Binding("r", "refresh", "Refresh"),
         Binding("?", "help", "Help"),
         # Vim-style tab navigation
@@ -84,6 +86,8 @@ class WiggumApp(App):
                 yield LogsPanel(self.ralph_dir)
             with TabPane("Conversations", id="conversations"):
                 yield ConversationPanel(self.ralph_dir)
+            with TabPane("Plans", id="plans"):
+                yield PlanPanel(self.ralph_dir)
             with TabPane("Metrics", id="metrics"):
                 yield MetricsPanel(self.ralph_dir)
         yield Footer()
@@ -171,8 +175,12 @@ class WiggumApp(App):
             self.query_one(ConversationPanel).refresh_data()
         except Exception:
             pass
+        try:
+            self.query_one(PlanPanel).refresh_data()
+        except Exception:
+            pass
 
-    TAB_ORDER = ["kanban", "workers", "logs", "conversations", "metrics"]
+    TAB_ORDER = ["kanban", "workers", "logs", "conversations", "plans", "metrics"]
 
     def action_switch_tab(self, tab_id: str) -> None:
         """Switch to a specific tab."""
@@ -233,12 +241,16 @@ class WiggumApp(App):
             self.query_one(ConversationPanel).refresh_data()
         except Exception:
             pass
+        try:
+            self.query_one(PlanPanel).refresh_data()
+        except Exception:
+            pass
 
     def action_help(self) -> None:
         """Show help dialog."""
         self.notify(
             "Keyboard shortcuts:\n"
-            "1-5: Switch tabs │ h/l: Prev/Next tab │ H/L: First/Last tab\n"
+            "1-6: Switch tabs │ h/l: Prev/Next tab │ H/L: First/Last tab\n"
             "j/k: Down/Up │ g/G: Top/Bottom │ Ctrl+d/u: Half page\n"
             "Workers: s-Stop K-Kill c-Chat L-Logs │ Logs: f-Filter\n"
             "Tree: h/l-Collapse/Expand o-Toggle e-ExpandAll C-CollapseAll\n"

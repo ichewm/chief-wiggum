@@ -175,6 +175,7 @@ class ConversationPanel(Widget):
             # Auto-select first worker
             first_worker_id = self._workers_list[0][0]
             self._load_conversation(first_worker_id)
+        self.set_interval(3, self._refresh_workers_list)
 
     def _load_workers(self) -> None:
         """Load list of workers with conversations."""
@@ -195,6 +196,23 @@ class ConversationPanel(Widget):
         # Sort by creation time ascending (oldest first)
         workers_with_mtime.sort(key=lambda x: x[2])
         self._workers_list = [(w[0], w[1]) for w in workers_with_mtime]
+
+    def _refresh_workers_list(self) -> None:
+        """Periodically refresh the worker dropdown options."""
+        old_list = self._workers_list[:]
+        self._load_workers()
+        if old_list != self._workers_list:
+            try:
+                select = self.query_one("#worker-select", Select)
+                select.set_options(
+                    [(label, worker_id) for worker_id, label in self._workers_list]
+                )
+                # Restore selection if still valid
+                new_ids = [w[0] for w in self._workers_list]
+                if self.current_worker and self.current_worker in new_ids:
+                    select.value = self.current_worker
+            except Exception:
+                pass
 
     def _load_conversation(self, worker_id: str) -> None:
         """Load conversation for a worker."""

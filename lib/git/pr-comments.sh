@@ -112,12 +112,13 @@ get_current_github_user() {
 
 # Find PRs matching task regex patterns
 # Args: <comma-separated-patterns>
-# Output: JSON array of PR info (number, headRefName, url)
+# Output: JSON array of PR info (number, headRefName, url, state)
 # Supports:
 #   - Full task ID: PIPELINE-001, TASK-030
 #   - Partial number: 001, 030 (searches for branches containing the pattern)
 find_prs_by_task_patterns() {
     local patterns="$1"
+    local json_fields="number,headRefName,url,state"
 
     # Convert comma-separated patterns to array
     IFS=',' read -ra pattern_array <<< "$patterns"
@@ -129,24 +130,23 @@ find_prs_by_task_patterns() {
 
         local prs="[]"
 
-        # Try exact match first: head:task/$pattern
-        prs=$(_gh_pr_list_with_error_handling "head:task/$pattern" "number,headRefName,url" "$WIGGUM_GH_TIMEOUT" "--state open")
+        # Try exact match on open PRs first: head:task/$pattern
+        prs=$(_gh_pr_list_with_error_handling "head:task/$pattern" "$json_fields" "$WIGGUM_GH_TIMEOUT" "--state open")
 
         # If not found, try partial match by listing all task/* branches and filtering
         if [ "$(echo "$prs" | jq 'length')" -eq 0 ]; then
-            # Get all PRs with task/ branches and filter locally for pattern match
             local all_task_prs
-            all_task_prs=$(_gh_pr_list_with_error_handling "head:task/" "number,headRefName,url" "$WIGGUM_GH_TIMEOUT" "--state open")
+            all_task_prs=$(_gh_pr_list_with_error_handling "head:task/" "$json_fields" "$WIGGUM_GH_TIMEOUT" "--state open")
             prs=$(echo "$all_task_prs" | jq --arg pat "$pattern" '[.[] | select(.headRefName | contains($pat))]')
         fi
 
-        # If still not found, try without state filter (might be merged/closed)
+        # If still not found, search all states (merged/closed)
         if [ "$(echo "$prs" | jq 'length')" -eq 0 ]; then
-            prs=$(_gh_pr_list_with_error_handling "head:task/$pattern" "number,headRefName,url")
+            prs=$(_gh_pr_list_with_error_handling "head:task/$pattern" "$json_fields" "$WIGGUM_GH_TIMEOUT" "--state all")
 
             if [ "$(echo "$prs" | jq 'length')" -eq 0 ]; then
                 local all_task_prs
-                all_task_prs=$(_gh_pr_list_with_error_handling "head:task/" "number,headRefName,url")
+                all_task_prs=$(_gh_pr_list_with_error_handling "head:task/" "$json_fields" "$WIGGUM_GH_TIMEOUT" "--state all")
                 prs=$(echo "$all_task_prs" | jq --arg pat "$pattern" '[.[] | select(.headRefName | contains($pat))]')
             fi
         fi
