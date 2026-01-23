@@ -83,45 +83,68 @@ test_agent_setup_context() {
 }
 
 # =============================================================================
-# Test: Config Loading
+# Test: Config Loading (uses test fixture to decouple from real config)
 # =============================================================================
 
-test_config_loading_task_worker() {
-    source "$WIGGUM_HOME/lib/core/agent-base.sh"
+# Helper: set up isolated config environment using test fixture
+_setup_config_fixture() {
+    local fixture_home
+    fixture_home=$(mktemp -d)
+    mkdir -p "$fixture_home/config"
+    cp "$SCRIPT_DIR/fixtures/test-agents.json" "$fixture_home/config/agents.json"
+    # Copy lib so agent-base.sh can be sourced from fixture home
+    ln -s "$PROJECT_ROOT/lib" "$fixture_home/lib"
+    echo "$fixture_home"
+}
 
-    load_agent_config "task-worker"
+test_config_loading_task_worker() {
+    local fixture_home
+    fixture_home=$(_setup_config_fixture)
+    WIGGUM_HOME="$fixture_home" source "$fixture_home/lib/core/agent-base.sh"
+
+    WIGGUM_HOME="$fixture_home" load_agent_config "task-worker"
 
     assert_equals "20" "$AGENT_CONFIG_MAX_ITERATIONS" "task-worker max_iterations should be 20"
     assert_equals "50" "$AGENT_CONFIG_MAX_TURNS" "task-worker max_turns should be 50"
     assert_equals "3600" "$AGENT_CONFIG_TIMEOUT_SECONDS" "task-worker timeout_seconds should be 3600"
+    rm -rf "$fixture_home"
 }
 
 test_config_loading_pr_comment_fix() {
-    source "$WIGGUM_HOME/lib/core/agent-base.sh"
+    local fixture_home
+    fixture_home=$(_setup_config_fixture)
+    WIGGUM_HOME="$fixture_home" source "$fixture_home/lib/core/agent-base.sh"
 
-    load_agent_config "pr-comment-fix"
+    WIGGUM_HOME="$fixture_home" load_agent_config "pr-comment-fix"
 
     assert_equals "10" "$AGENT_CONFIG_MAX_ITERATIONS" "pr-comment-fix max_iterations should be 10"
     assert_equals "30" "$AGENT_CONFIG_MAX_TURNS" "pr-comment-fix max_turns should be 30"
     assert_equals "true" "$AGENT_CONFIG_AUTO_COMMIT" "pr-comment-fix auto_commit should be true"
+    rm -rf "$fixture_home"
 }
 
 test_config_loading_validation_review() {
-    source "$WIGGUM_HOME/lib/core/agent-base.sh"
+    local fixture_home
+    fixture_home=$(_setup_config_fixture)
+    WIGGUM_HOME="$fixture_home" source "$fixture_home/lib/core/agent-base.sh"
 
-    load_agent_config "validation-review"
+    WIGGUM_HOME="$fixture_home" load_agent_config "validation-review"
 
     assert_equals "5" "$AGENT_CONFIG_MAX_ITERATIONS" "validation-review max_iterations should be 5"
     assert_equals "50" "$AGENT_CONFIG_MAX_TURNS" "validation-review max_turns should be 50"
+    rm -rf "$fixture_home"
 }
 
 test_config_loading_unknown_agent_uses_defaults() {
-    source "$WIGGUM_HOME/lib/core/agent-base.sh"
+    local fixture_home
+    fixture_home=$(_setup_config_fixture)
+    WIGGUM_HOME="$fixture_home" source "$fixture_home/lib/core/agent-base.sh"
 
-    load_agent_config "unknown-agent-type"
+    WIGGUM_HOME="$fixture_home" load_agent_config "unknown-agent-type"
 
     assert_equals "10" "$AGENT_CONFIG_MAX_ITERATIONS" "unknown agent should use default max_iterations"
     assert_equals "30" "$AGENT_CONFIG_MAX_TURNS" "unknown agent should use default max_turns"
+    rm -rf "$fixture_home"
 }
 
 # =============================================================================

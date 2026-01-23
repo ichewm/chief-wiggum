@@ -218,11 +218,14 @@ main() {
             run_shellcheck
         fi
 
-        # 3. Integration tests
+        # 3. Unit tests (test_*.sh files)
+        run_suite "Unit Tests" "$SCRIPT_DIR/test-runner.sh"
+
+        # 4. Integration tests
         run_suite "Agent Lifecycle" "$SCRIPT_DIR/integration/test-agent-lifecycle.sh"
         run_suite "Worker Coordination" "$SCRIPT_DIR/integration/test-worker-coordination.sh"
 
-        # 4. E2E tests (slower)
+        # 5. E2E tests (slower)
         if [ "$QUICK_MODE" = false ]; then
             run_suite "E2E Smoke Tests" "$SCRIPT_DIR/e2e/test-smoke.sh"
         fi

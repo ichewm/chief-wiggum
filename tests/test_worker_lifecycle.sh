@@ -8,6 +8,20 @@ export WIGGUM_HOME
 source "$TESTS_DIR/test-framework.sh"
 source "$WIGGUM_HOME/lib/worker/worker-lifecycle.sh"
 
+# Helper: wait for a PID to become visible to kill -0 (max ~1s)
+_wait_pid_ready() {
+    local pid="$1"
+    local attempts=0
+    while ! kill -0 "$pid" 2>/dev/null; do
+        attempts=$((attempts + 1))
+        if [ $attempts -ge 20 ]; then
+            return 1
+        fi
+        sleep 0.05
+    done
+    return 0
+}
+
 # Create temp dir for test isolation
 TEST_DIR=""
 RALPH_DIR=""
@@ -28,16 +42,10 @@ teardown() {
 
 test_find_worker_by_task_id_returns_newest() {
     # Create multiple workers for same task with different timestamps
+    # The function uses `sort -r` on paths, so lexicographic order determines "newest"
     mkdir -p "$RALPH_DIR/workers/worker-TASK-001-1000"
     mkdir -p "$RALPH_DIR/workers/worker-TASK-001-2000"
     mkdir -p "$RALPH_DIR/workers/worker-TASK-001-3000"
-
-    # Touch them in order to set modification times
-    touch "$RALPH_DIR/workers/worker-TASK-001-1000"
-    sleep 0.1
-    touch "$RALPH_DIR/workers/worker-TASK-001-2000"
-    sleep 0.1
-    touch "$RALPH_DIR/workers/worker-TASK-001-3000"
 
     local result
     result=$(find_worker_by_task_id "$RALPH_DIR" "TASK-001")
@@ -137,8 +145,7 @@ test_get_valid_worker_pid_valid_bash_process() {
     local pid_file="$TEST_DIR/test.pid"
     echo "$pid" > "$pid_file"
 
-    # Small delay to ensure process is running
-    sleep 0.2
+    _wait_pid_ready $pid
 
     local result
     result=$(get_valid_worker_pid "$pid_file" "bash")
@@ -196,8 +203,7 @@ test_is_worker_running_true_when_running() {
     local pid=$!
     echo "$pid" > "$worker_dir/agent.pid"
 
-    # Small delay to ensure process is running
-    sleep 0.2
+    _wait_pid_ready $pid
 
     is_worker_running "$worker_dir"
     local result=$?
@@ -242,8 +248,7 @@ test_cleanup_stale_pid_keeps_running() {
     local pid_file="$TEST_DIR/running.pid"
     echo "$pid" > "$pid_file"
 
-    # Small delay to ensure process is running
-    sleep 0.2
+    _wait_pid_ready $pid
 
     cleanup_stale_pid "$pid_file" "bash"
     local result=$?
@@ -304,8 +309,7 @@ test_scan_active_workers_finds_running() {
     local pid=$!
     echo "$pid" > "$worker_dir/agent.pid"
 
-    # Small delay to ensure process is running
-    sleep 0.2
+    _wait_pid_ready $pid
 
     local result
     result=$(scan_active_workers "$RALPH_DIR")
