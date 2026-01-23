@@ -76,7 +76,8 @@ _usage_analyze_session() {
     jq -s -r --arg session_id "$session_id" --arg project "$project_name" '
         # Collect all data in a single pass
         reduce .[] as $msg (
-            {"timestamps": [], "prompts": 0, "sonnet": 0, "opus": 0};
+            {"timestamps": [], "prompts": 0, "sonnet": 0, "opus": 0,
+             "input_tokens": 0, "output_tokens": 0};
 
             # Collect timestamps
             (if $msg.timestamp then
@@ -113,13 +114,16 @@ _usage_analyze_session() {
                 end
             else . end) |
 
-            # Count model responses by type
+            # Count model responses by type and accumulate tokens
             (if $msg.type == "assistant" then
                 (($msg.message // {}).model // "" | ascii_downcase) as $model |
-                if ($model | contains("opus")) then .opus += 1
+                (($msg.message // {}).usage // {}) as $usage |
+                (if ($model | contains("opus")) then .opus += 1
                 elif ($model | contains("sonnet")) then .sonnet += 1
                 else .
-                end
+                end) |
+                .input_tokens += (($usage.input_tokens // 0) + ($usage.cache_read_input_tokens // 0) + ($usage.cache_creation_input_tokens // 0)) |
+                .output_tokens += ($usage.output_tokens // 0)
             else . end)
         ) |
 
@@ -155,7 +159,9 @@ _usage_analyze_session() {
             duration_hours: $duration,
             prompt_count: .prompts,
             sonnet_responses: .sonnet,
-            opus_responses: .opus
+            opus_responses: .opus,
+            input_tokens: .input_tokens,
+            output_tokens: .output_tokens
         }
     ' "$jsonl_path" 2>/dev/null || echo '{}'
 }
@@ -192,7 +198,8 @@ usage_tracker_calculate() {
     sessions_ndjson=$(find "$_USAGE_TRACKER_PROJECTS_DIR" "${find_args[@]}" -print0 2>/dev/null | \
         xargs -0 -P"${USAGE_TRACKER_JOBS:-$(nproc)}" -n1 jq -s -r '
             reduce .[] as $msg (
-                {"timestamps": [], "prompts": 0, "sonnet": 0, "opus": 0};
+                {"timestamps": [], "prompts": 0, "sonnet": 0, "opus": 0,
+                 "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_create_tokens": 0};
 
                 (if $msg.timestamp then
                     .timestamps += [$msg.timestamp]
@@ -227,10 +234,13 @@ usage_tracker_calculate() {
 
                 (if $msg.type == "assistant" then
                     (($msg.message // {}).model // "" | ascii_downcase) as $model |
-                    if ($model | contains("opus")) then .opus += 1
+                    (($msg.message // {}).usage // {}) as $usage |
+                    (if ($model | contains("opus")) then .opus += 1
                     elif ($model | contains("sonnet")) then .sonnet += 1
                     else .
-                    end
+                    end) |
+                    .input_tokens += (($usage.input_tokens // 0) + ($usage.cache_read_input_tokens // 0) + ($usage.cache_creation_input_tokens // 0)) |
+                    .output_tokens += ($usage.output_tokens // 0)
                 else . end)
             ) |
 
@@ -260,7 +270,9 @@ usage_tracker_calculate() {
                 duration_hours: $duration,
                 prompt_count: .prompts,
                 sonnet_responses: .sonnet,
-                opus_responses: .opus
+                opus_responses: .opus,
+                input_tokens: .input_tokens,
+                output_tokens: .output_tokens
             }
         ' 2>/dev/null | grep -v '^{}$')
 
@@ -276,9 +288,13 @@ usage_tracker_calculate() {
 
         # 5-hour cycle stats
         ($cycle_sessions | map(.prompt_count) | add // 0) as $cycle_prompts |
+        ($cycle_sessions | map(.input_tokens) | add // 0) as $cycle_input_tokens |
+        ($cycle_sessions | map(.output_tokens) | add // 0) as $cycle_output_tokens |
 
         # Weekly stats
         ($week_sessions | map(.prompt_count) | add // 0) as $weekly_prompts |
+        ($week_sessions | map(.input_tokens) | add // 0) as $weekly_input_tokens |
+        ($week_sessions | map(.output_tokens) | add // 0) as $weekly_output_tokens |
 
         # Model-specific hours (proportioned by response ratio)
         ($week_sessions | reduce .[] as $s (
@@ -294,14 +310,18 @@ usage_tracker_calculate() {
         {
             current_5h_cycle: {
                 start_time: ($cycle_start * 1000 | floor),
-                total_prompts: $cycle_prompts
+                total_prompts: $cycle_prompts,
+                input_tokens: $cycle_input_tokens,
+                output_tokens: $cycle_output_tokens
             },
             current_week: {
                 start_time: ($week_start * 1000 | floor),
                 sonnet_hours: ($model_hours.sonnet_hours * 100 | round / 100),
                 opus_hours: ($model_hours.opus_hours * 100 | round / 100),
                 total_prompts: $weekly_prompts,
-                total_sessions: ($week_sessions | length)
+                total_sessions: ($week_sessions | length),
+                input_tokens: $weekly_input_tokens,
+                output_tokens: $weekly_output_tokens
             },
             last_updated: (now * 1000 | floor)
         }
@@ -319,14 +339,18 @@ _usage_empty_result() {
 {
   "current_5h_cycle": {
     "start_time": $(( cycle_start * 1000 )),
-    "total_prompts": 0
+    "total_prompts": 0,
+    "input_tokens": 0,
+    "output_tokens": 0
   },
   "current_week": {
     "start_time": $(( week_start * 1000 )),
     "sonnet_hours": 0,
     "opus_hours": 0,
     "total_prompts": 0,
-    "total_sessions": 0
+    "total_sessions": 0,
+    "input_tokens": 0,
+    "output_tokens": 0
   },
   "last_updated": $now_ms
 }
