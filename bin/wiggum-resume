@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wiggum resume - Resume a stopped worker
+# wiggum resume - Resume a stopped worker using LLM-driven step decision
 #
 # Usage:
 #   wiggum resume <id>        Resume a previously stopped worker
@@ -18,7 +18,6 @@ source "$WIGGUM_HOME/lib/metrics/audit-logger.sh"
 source "$WIGGUM_HOME/lib/worker/worker-lifecycle.sh"
 source "$WIGGUM_HOME/lib/worker/agent-registry.sh"
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
-source "$WIGGUM_HOME/lib/agents/validation-review.sh"
 source "$WIGGUM_HOME/lib/git/git-operations.sh"
 source "$WIGGUM_HOME/lib/core/file-lock.sh"
 
@@ -33,6 +32,20 @@ wiggum resume - Resume a stopped worker
 Usage:
   wiggum resume <id>        Resume a previously stopped worker
   wiggum resume <id> -f     Force resume, clearing violation status
+
+The resume process:
+  1. Converts worker logs to readable conversation format
+  2. Runs an LLM agent to analyze what happened and decide the resume step
+  3. Archives previous run artifacts (workspace is preserved)
+  4. Launches a fresh task-worker from the decided step
+
+Resume Steps (in order):
+  execution     - Restart the main work loop from scratch
+  audit         - Resume from security audit phase
+  test          - Resume from test coverage phase
+  docs          - Resume from documentation phase
+  validation    - Resume from validation review phase
+  finalization  - Resume from commit/PR creation phase
 
 Worker ID Resolution:
   Worker IDs can be partial as long as they match exactly one worker:
@@ -56,115 +69,28 @@ Examples:
 EOF
 }
 
-# Determine which iteration to resume from
-determine_resume_iteration() {
+# Archive previous run artifacts before resuming
+# Moves logs, summaries, checkpoints, conversations, etc. to history/
+# Workspace is LEFT UNTOUCHED (it has the actual code changes)
+archive_previous_run() {
     local worker_dir="$1"
-    local logs_dir="$worker_dir/logs"
-    local max_iter=-1
+    local archive_dir="$worker_dir/history/resume-$(date +%s)"
 
-    # Find the highest iteration number
-    if [ -d "$logs_dir" ]; then
-        for log_file in "$logs_dir"/iteration-*.log; do
-            [ -f "$log_file" ] || continue
-            local iter
-            iter=$(basename "$log_file" | sed 's/iteration-\([0-9]*\).log/\1/')
-            if [ "$iter" -gt "$max_iter" ]; then
-                max_iter=$iter
-            fi
-        done
-    fi
+    mkdir -p "$archive_dir"
 
-    if [ "$max_iter" -lt 0 ]; then
-        # No iterations found, start from 0
-        echo "0"
-        return
-    fi
+    # Move all run artifacts — workspace/ is LEFT UNTOUCHED
+    mv "$worker_dir/logs" "$archive_dir/" 2>/dev/null || true
+    mv "$worker_dir/summaries" "$archive_dir/" 2>/dev/null || true
+    mv "$worker_dir/checkpoints" "$archive_dir/" 2>/dev/null || true
+    mv "$worker_dir/conversations" "$archive_dir/" 2>/dev/null || true
+    mv "$worker_dir/supervisors" "$archive_dir/" 2>/dev/null || true
+    mv "$worker_dir/worker.log" "$archive_dir/" 2>/dev/null || true
+    mv "$worker_dir"/*-result.txt "$archive_dir/" 2>/dev/null || true
+    mv "$worker_dir"/*-report.md "$archive_dir/" 2>/dev/null || true
+    mv "$worker_dir/agent-result.json" "$archive_dir/" 2>/dev/null || true
+    # resume-instructions.md stays — needed by the resumed worker
 
-    # If N has summary, resume from N+1; else redo N
-    if [ -f "$worker_dir/summaries/iteration-${max_iter}-summary.txt" ]; then
-        echo "$((max_iter + 1))"
-    else
-        echo "$max_iter"
-    fi
-}
-
-# Prepare context for resume
-prepare_resume_context() {
-    local worker_dir="$1"
-    local resume_iter="$2"
-
-    if [ "$resume_iter" -gt 0 ]; then
-        local prev_iter=$((resume_iter - 1))
-        local prev_summary="$worker_dir/summaries/iteration-${prev_iter}-summary.txt"
-
-        if [ -f "$prev_summary" ]; then
-            # Use the previous summary as context
-            cp "$prev_summary" "$worker_dir/resume-context.md"
-            echo "Using summary from iteration $prev_iter as context"
-        else
-            # No summary available, try to generate from log
-            local prev_log="$worker_dir/logs/iteration-${prev_iter}.log"
-            if [ -f "$prev_log" ]; then
-                echo "Converting iteration $prev_iter log to markdown..."
-                "$WIGGUM_HOME/lib/log-converter.sh" "$prev_log" "$worker_dir/resume-context.md"
-            else
-                echo "Warning: No context available for resume (starting fresh)"
-                touch "$worker_dir/resume-context.md"
-            fi
-        fi
-    else
-        # Starting from iteration 0, no context needed
-        touch "$worker_dir/resume-context.md"
-    fi
-}
-
-# Resume from validation phase (summary.txt exists, work is complete)
-# Runs validation review, then commits and creates PR if passed
-resume_from_validation() {
-    local worker_dir="$1"
-    local task_id="$2"
-
-    # Mark task as in-progress before running validation
-    update_kanban_status "$PROJECT_DIR/.ralph/kanban.md" "$task_id" "="
-
-    # Run validation-review as top-level agent (handles PID internally)
-    # Note: using 0 for monitor_interval since validation is quick and read-only
-    run_agent "validation-review" "$worker_dir" "$PROJECT_DIR" 0 10
-
-    # Check validation result using reader function
-    if ! check_validation_result "$worker_dir"; then
-        local result
-        result=$(agent_read_subagent_result "$worker_dir" "VALIDATION_result" "validation-result.txt")
-        echo "Validation $result - cannot proceed with commit/PR"
-        # Mark task as failed in kanban
-        update_kanban_failed "$PROJECT_DIR/.ralph/kanban.md" "$task_id"
-        return 1
-    fi
-
-    echo "Validation PASSED - creating commit and PR..."
-
-    # Use shared library for git operations
-    if git_finalize_worker "$worker_dir" "$task_id" "$PROJECT_DIR"; then
-        echo "PR URL: $GIT_PR_URL"
-
-        # If PR was created, mark as Pending Approval [P] - wiggum review sync will mark [x] when merged
-        # If no PR (gh CLI unavailable), mark as complete [x] directly
-        if [ -n "$GIT_PR_URL" ] && [ "$GIT_PR_URL" != "N/A" ]; then
-            if update_kanban_pending_approval "$PROJECT_DIR/.ralph/kanban.md" "$task_id"; then
-                echo "Task $task_id marked as pending approval [P] in kanban"
-            fi
-        else
-            if update_kanban "$PROJECT_DIR/.ralph/kanban.md" "$task_id"; then
-                echo "Task $task_id marked as complete [x] in kanban (no PR)"
-            fi
-        fi
-
-        return 0
-    else
-        echo "Failed to create commit/PR"
-        update_kanban_failed "$PROJECT_DIR/.ralph/kanban.md" "$task_id"
-        return 1
-    fi
+    echo "Archived previous run to $(basename "$archive_dir")"
 }
 
 # Resume a stopped worker
@@ -174,7 +100,8 @@ do_resume() {
     local worker_id
     worker_id=$(basename "$worker_dir")
     local task_id
-    task_id=$(echo "$worker_id" | sed -E 's/worker-(TASK-[0-9]+)-.*/\1/')
+    # Match any task prefix format: TASK-001, PIPELINE-001, etc.
+    task_id=$(echo "$worker_id" | sed -E 's/worker-([A-Z]+-[0-9]+)-.*/\1/')
 
     # Check if already running
     if [ -f "$worker_dir/agent.pid" ]; then
@@ -245,31 +172,63 @@ do_resume() {
         exit $EXIT_ERROR
     fi
 
-    # Check if summary.txt exists - work is complete, run validation/finalize
-    if [ -f "$worker_dir/summaries/summary.txt" ]; then
-        echo "Summary found - work is complete, running validation and finalization..."
-        resume_from_validation "$worker_dir" "$task_id"
-        return $?
+    echo "Resuming worker $worker_id for task $task_id"
+    echo ""
+
+    # === STEP 1: Convert logs to conversations ===
+    echo "Converting logs to readable conversations..."
+    if [ -d "$worker_dir/logs" ]; then
+        "$WIGGUM_HOME/lib/workers/log-to-conversation.sh" "$worker_dir"
+    else
+        echo "  No logs directory found — starting fresh"
+        mkdir -p "$worker_dir/conversations"
+        # Create a minimal worker.log so resume-decide has something to read
+        if [ ! -f "$worker_dir/worker.log" ]; then
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Worker was interrupted before producing logs" > "$worker_dir/worker.log"
+        fi
     fi
 
-    # Determine resume iteration
-    local resume_iteration
-    resume_iteration=$(determine_resume_iteration "$worker_dir")
+    # === STEP 2: Run resume-decide agent ===
+    echo "Analyzing previous run to decide resume step..."
+    run_agent "resume-decide" "$worker_dir" "$PROJECT_DIR" 0 1 10
 
-    echo "Resuming worker $worker_id for task $task_id"
-    echo "Starting from iteration $resume_iteration"
+    # === STEP 3: Read decision ===
+    local resume_step
+    resume_step=$(cat "$worker_dir/resume-step.txt" 2>/dev/null || echo "ABORT")
+    resume_step=$(echo "$resume_step" | tr -d '[:space:]')
 
-    # Prepare context for resume
-    prepare_resume_context "$worker_dir" "$resume_iteration"
+    if [ "$resume_step" = "ABORT" ]; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "RESUME ABORTED"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        if [ -f "$worker_dir/resume-instructions.md" ]; then
+            echo "Reason:"
+            cat "$worker_dir/resume-instructions.md"
+        fi
+        echo ""
+        exit $EXIT_ERROR
+    fi
 
-    # Launch task-worker agent with resume context
-    export WIGGUM_RESUME_ITERATION="$resume_iteration"
-    export WIGGUM_RESUME_CONTEXT="$worker_dir/resume-context.md"
+    echo "Resume decision: start from '$resume_step' step"
+    echo ""
+
+    # === STEP 4: Archive old artifacts ===
+    archive_previous_run "$worker_dir"
+
+    # === STEP 5: Re-create required directories ===
+    mkdir -p "$worker_dir/logs" "$worker_dir/summaries"
+
+    # === STEP 6: Launch task-worker ===
+    # Always use normal task-worker (not plan-mode) — it picks up existing plan files
+    echo "Launching task-worker from step: $resume_step"
 
     mkdir -p "$RALPH_DIR/logs"
     (
         # Run agent in subshell to isolate it
-        run_agent "task-worker" "$worker_dir" "$PROJECT_DIR" 30 "$MAX_ITERATIONS" "$MAX_TURNS"
+        run_agent "task-worker" "$worker_dir" "$PROJECT_DIR" 30 "$MAX_ITERATIONS" "$MAX_TURNS" \
+            "$resume_step" "$worker_dir/resume-instructions.md"
     ) >> "$RALPH_DIR/logs/workers.log" 2>&1 &
 
     # Wait briefly for agent.pid to be created

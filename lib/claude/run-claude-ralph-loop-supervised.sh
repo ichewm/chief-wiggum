@@ -279,6 +279,18 @@ run_ralph_loop_supervised() {
         # Log work phase completion
         echo "[$(date -Iseconds)] WORK_PHASE_COMPLETE iteration=$iteration exit_code=$exit_code" >> "$output_dir/worker.log" 2>/dev/null || true
 
+        # Create checkpoint after work phase (deterministic: status from exit code, files from log parsing)
+        local checkpoint_status="in_progress"
+        if [ $exit_code -eq 130 ] || [ $exit_code -eq 143 ]; then
+            checkpoint_status="interrupted"
+        elif [ $exit_code -ne 0 ]; then
+            checkpoint_status="failed"
+        fi
+        local files_modified
+        files_modified=$(checkpoint_extract_files_modified "$log_file")
+        checkpoint_write "$output_dir" "$iteration" "$session_id" "$checkpoint_status" \
+            "$files_modified" "[]" "[]" ""
+
         # Check for interruption signals
         if [ $exit_code -eq 130 ] || [ $exit_code -eq 143 ]; then
             log "Work phase was interrupted by signal (exit code: $exit_code)"
@@ -344,6 +356,9 @@ Please provide your summary based on the conversation so far, following this str
 
         echo "$summary" > "$summary_txt"
         log "Summary generated for iteration $iteration"
+
+        # Update checkpoint with summary prose (deterministic: reads saved text file)
+        checkpoint_update_summary "$output_dir" "$iteration" "$summary_txt"
 
         # Log iteration completion
         {
@@ -442,6 +457,11 @@ Please provide your summary based on the conversation so far, following this str
 
             log "Supervisor decision: $decision"
             echo "[$(date -Iseconds)] SUPERVISOR_COMPLETE iteration=$iteration decision=$decision" >> "$output_dir/worker.log" 2>/dev/null || true
+
+            # Update checkpoint with supervisor decision (deterministic: decision extracted via regex from log)
+            # iteration was already incremented, so the reviewed work is at iteration-1
+            local reviewed_iteration=$((iteration - 1))
+            checkpoint_update_supervisor "$output_dir" "$reviewed_iteration" "$decision" "$supervisor_feedback"
 
             # Handle decision
             case "$decision" in

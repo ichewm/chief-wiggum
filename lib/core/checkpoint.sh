@@ -244,6 +244,77 @@ checkpoint_update_status() {
     return 0
 }
 
+# Update checkpoint with prose summary
+#
+# Args:
+#   worker_dir    - Worker directory path
+#   iteration     - Iteration number
+#   summary_file  - Path to summary text file
+#
+# Returns: 0 on success, 1 on failure
+checkpoint_update_summary() {
+    local worker_dir="$1"
+    local iteration="$2"
+    local summary_file="$3"
+
+    local checkpoint_file
+    checkpoint_file=$(checkpoint_get_path "$worker_dir" "$iteration")
+
+    if [ ! -f "$checkpoint_file" ]; then
+        log_error "Checkpoint not found: $checkpoint_file"
+        return 1
+    fi
+
+    local prose_summary=""
+    if [ -f "$summary_file" ]; then
+        prose_summary=$(cat "$summary_file")
+    fi
+
+    local tmp_file
+    tmp_file=$(mktemp)
+
+    jq --arg summary "$prose_summary" '.prose_summary = $summary' "$checkpoint_file" > "$tmp_file"
+    mv "$tmp_file" "$checkpoint_file"
+
+    log_debug "Checkpoint $iteration updated with summary"
+    return 0
+}
+
+# Update checkpoint with supervisor decision
+#
+# Args:
+#   worker_dir   - Worker directory path
+#   iteration    - Iteration number
+#   decision     - Supervisor decision (CONTINUE|STOP|RESTART)
+#   guidance     - Supervisor guidance text (optional)
+#
+# Returns: 0 on success, 1 on failure
+checkpoint_update_supervisor() {
+    local worker_dir="$1"
+    local iteration="$2"
+    local decision="$3"
+    local guidance="${4:-}"
+
+    local checkpoint_file
+    checkpoint_file=$(checkpoint_get_path "$worker_dir" "$iteration")
+
+    if [ ! -f "$checkpoint_file" ]; then
+        log_error "Checkpoint not found: $checkpoint_file"
+        return 1
+    fi
+
+    local tmp_file
+    tmp_file=$(mktemp)
+
+    jq --arg decision "$decision" --arg guidance "$guidance" \
+        '.supervisor_decision = $decision | .supervisor_guidance = $guidance' \
+        "$checkpoint_file" > "$tmp_file"
+    mv "$tmp_file" "$checkpoint_file"
+
+    log_debug "Checkpoint $iteration updated with supervisor decision: $decision"
+    return 0
+}
+
 # Extract files modified from iteration log
 #
 # Args:

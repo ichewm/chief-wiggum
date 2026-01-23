@@ -163,6 +163,18 @@ run_ralph_loop() {
         # Log work phase completion
         echo "[$(date -Iseconds)] WORK_PHASE_COMPLETE iteration=$iteration exit_code=$exit_code" >> "$output_dir/worker.log" 2>/dev/null || true
 
+        # Create checkpoint after work phase (deterministic: status from exit code, files from log parsing)
+        local checkpoint_status="in_progress"
+        if [ $exit_code -eq 130 ] || [ $exit_code -eq 143 ]; then
+            checkpoint_status="interrupted"
+        elif [ $exit_code -ne 0 ]; then
+            checkpoint_status="failed"
+        fi
+        local files_modified
+        files_modified=$(checkpoint_extract_files_modified "$log_file")
+        checkpoint_write "$output_dir" "$iteration" "$session_id" "$checkpoint_status" \
+            "$files_modified" "[]" "[]" ""
+
         # Check for interruption signals
         if [ $exit_code -eq 130 ] || [ $exit_code -eq 143 ]; then
             log "Work phase was interrupted by signal (exit code: $exit_code)"
@@ -232,13 +244,8 @@ Please provide your summary based on the conversation so far, following this str
 
         log "Summary generated for iteration $iteration"
 
-        # Create structured checkpoint for this iteration
-        local checkpoint_status="in_progress"
-        if [ $exit_code -ne 0 ]; then
-            checkpoint_status="failed"
-        fi
-        checkpoint_from_summary "$output_dir" "$iteration" "$session_id" "$checkpoint_status" \
-            "$log_file" "$summary_txt"
+        # Update checkpoint with summary prose (deterministic: reads saved text file)
+        checkpoint_update_summary "$output_dir" "$iteration" "$summary_txt"
 
         # Log iteration completion to iteration log file as JSON
         {

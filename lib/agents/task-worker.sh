@@ -48,6 +48,25 @@ agent_source_registry
 # Source exit codes for standardized returns
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 
+# Step ordering for resume support
+_step_order() {
+    case "$1" in
+        execution)    echo 0 ;;
+        audit)        echo 1 ;;
+        test)         echo 2 ;;
+        docs)         echo 3 ;;
+        validation)   echo 4 ;;
+        finalization) echo 5 ;;
+        *)            echo 0 ;;
+    esac
+}
+
+_should_run_step() {
+    local current_step="$1"
+    local start_step="$2"
+    [ "$(_step_order "$current_step")" -ge "$(_step_order "$start_step")" ]
+}
+
 # Save references to sourced kanban functions before defining wrappers
 eval "_kanban_mark_done() $(declare -f update_kanban | sed '1d')"
 eval "_kanban_mark_failed() $(declare -f update_kanban_failed | sed '1d')"
@@ -110,10 +129,8 @@ agent_run() {
     local project_dir="$2"
     local max_iterations="${3:-${AGENT_CONFIG_MAX_ITERATIONS:-20}}"
     local max_turns="${4:-${AGENT_CONFIG_MAX_TURNS:-50}}"
-
-    # Resume mode support
-    local resume_iteration="${WIGGUM_RESUME_ITERATION:-0}"
-    local resume_context="${WIGGUM_RESUME_CONTEXT:-}"
+    local start_from_step="${5:-execution}"
+    local resume_instructions="${6:-}"
 
     # Extract worker and task IDs
     local worker_id task_id
@@ -132,6 +149,9 @@ agent_run() {
     agent_log_start "$worker_dir" "$task_id"
 
     log "Task worker agent starting for $task_id (max $max_turns turns per session)"
+    if [ "$start_from_step" != "execution" ]; then
+        log "Resuming from step: $start_from_step (skipping earlier phases)"
+    fi
 
     # Log worker start to audit log
     audit_log_worker_start "$task_id" "$worker_id"
@@ -173,21 +193,26 @@ agent_run() {
     # Set up callback context using base library
     agent_setup_context "$worker_dir" "$workspace" "$project_dir" "$task_id"
     _TASK_PRD_FILE="$prd_file"
-    _TASK_RESUME_ITERATION="$resume_iteration"
-    _TASK_RESUME_CONTEXT="$resume_context"
+    _TASK_RESUME_INSTRUCTIONS="$resume_instructions"
 
-    # Supervisor interval (run supervisor every N iterations)
-    local supervisor_interval="${WIGGUM_SUPERVISOR_INTERVAL:-3}"
+    local loop_result=0
 
-    # Run main work loop with supervision
-    run_ralph_loop_supervised "$workspace" \
-        "$(_get_system_prompt "$workspace")" \
-        "_task_user_prompt" \
-        "_task_completion_check" \
-        "$max_iterations" "$max_turns" "$worker_dir" "iteration" \
-        "$supervisor_interval"
+    if _should_run_step "execution" "$start_from_step"; then
+        # Supervisor interval (run supervisor every N iterations)
+        local supervisor_interval="${WIGGUM_SUPERVISOR_INTERVAL:-3}"
 
-    local loop_result=$?
+        # Run main work loop with supervision
+        run_ralph_loop_supervised "$workspace" \
+            "$(_get_system_prompt "$workspace")" \
+            "_task_user_prompt" \
+            "_task_completion_check" \
+            "$max_iterations" "$max_turns" "$worker_dir" "iteration" \
+            "$supervisor_interval"
+
+        loop_result=$?
+    else
+        log "Skipping execution phase (resuming from $start_from_step)"
+    fi
 
     # Generate final summary (hardcoded prompt - not configurable)
     if [ -n "$RALPH_LOOP_LAST_SESSION_ID" ] && [ $loop_result -eq 0 ]; then
@@ -208,7 +233,7 @@ agent_run() {
     fi
 
     # === SECURITY AUDIT PHASE ===
-    if [ -d "$workspace" ] && [ $loop_result -eq 0 ]; then
+    if [ -d "$workspace" ] && [ $loop_result -eq 0 ] && _should_run_step "audit" "$start_from_step"; then
         log "Running security audit on completed work"
         run_sub_agent "security-audit" "$worker_dir" "$project_dir"
 
@@ -249,7 +274,7 @@ agent_run() {
     fi
 
     # === TEST COVERAGE PHASE ===
-    if [ -d "$workspace" ] && [ $loop_result -eq 0 ]; then
+    if [ -d "$workspace" ] && [ $loop_result -eq 0 ] && _should_run_step "test" "$start_from_step"; then
         log "Running test generation and execution on completed work"
         run_sub_agent "test-coverage" "$worker_dir" "$project_dir"
 
@@ -282,7 +307,7 @@ agent_run() {
 
     # === DOCUMENTATION WRITER PHASE ===
     # Note: documentation-writer is non-blocking and never fails
-    if [ -d "$workspace" ] && [ $loop_result -eq 0 ]; then
+    if [ -d "$workspace" ] && [ $loop_result -eq 0 ] && _should_run_step "docs" "$start_from_step"; then
         log "Running documentation update on completed work"
         run_sub_agent "documentation-writer" "$worker_dir" "$project_dir"
 
@@ -312,13 +337,23 @@ agent_run() {
     # Stop violation monitor before validation
     stop_violation_monitor "$VIOLATION_MONITOR_PID"
 
-    # Run validation-review as a nested sub-agent
-    if [ -d "$workspace" ]; then
-        log "Running validation review on completed work"
-        run_sub_agent "validation-review" "$worker_dir" "$project_dir"
+    if _should_run_step "validation" "$start_from_step"; then
+        # Run validation-review as a nested sub-agent
+        if [ -d "$workspace" ]; then
+            log "Running validation review on completed work"
+            run_sub_agent "validation-review" "$worker_dir" "$project_dir"
+        fi
+    else
+        log "Skipping validation phase (resuming from $start_from_step)"
     fi
 
     # === FINALIZATION PHASE ===
+    if ! _should_run_step "finalization" "$start_from_step"; then
+        log "Skipping finalization phase (resuming from $start_from_step)"
+        agent_log_complete "$worker_dir" "$loop_result" "$start_time"
+        return $loop_result
+    fi
+
     _determine_finality "$worker_dir" "$workspace" "$project_dir" "$prd_file"
     local has_violations="$FINALITY_HAS_VIOLATIONS"
     local final_status="$FINALITY_STATUS"
@@ -712,32 +747,34 @@ The plan provides guidance on:
 PLAN_EOF
     fi
 
-    # Add context from previous iterations if available
-    if [ "$iteration" -gt 0 ]; then
-        # Check if this is a resumed iteration with resume context
-        if [ "$iteration" -eq "$_TASK_RESUME_ITERATION" ] && [ -n "$_TASK_RESUME_CONTEXT" ] && [ -f "$_TASK_RESUME_CONTEXT" ]; then
-            cat << 'RESUME_EOF'
+    # Add resume instructions at iteration 0 if resuming
+    if [ "$iteration" -eq 0 ] && [ -n "$_TASK_RESUME_INSTRUCTIONS" ] && [ -f "$_TASK_RESUME_INSTRUCTIONS" ] && [ -s "$_TASK_RESUME_INSTRUCTIONS" ]; then
+        local resume_content
+        resume_content=$(cat "$_TASK_RESUME_INSTRUCTIONS")
+        cat << RESUME_EOF
 
 CONTEXT FROM PREVIOUS SESSION (RESUMED):
 
-This worker was previously interrupted and is now resuming.
+This worker is resuming from a previous interrupted run. The following context
+describes what was accomplished and what needs to happen now:
 
-To understand what was accomplished before the interruption:
-- Read the file @../resume-context.md - it contains a summary of the previous session's work
+$resume_content
 
 Continue from where the previous session left off:
 - Do NOT repeat work that was already completed
 - Pick up where the previous session stopped
 - If a task was partially completed, continue from where it left off
-- Use the context to maintain consistency in approach and patterns
+- Use the context above to maintain consistency in approach and patterns
 
 CRITICAL: Do NOT read files in the logs/ directory - they contain full conversation JSON streams that are too large and will deplete your context window.
 RESUME_EOF
-        else
-            # Normal iteration context - use previous iteration summaries
-            local prev_iter=$((iteration - 1))
-            if [ -f "$output_dir/summaries/iteration-$prev_iter-summary.txt" ]; then
-                cat << CONTEXT_EOF
+    fi
+
+    # Add context from previous iterations if available
+    if [ "$iteration" -gt 0 ]; then
+        local prev_iter=$((iteration - 1))
+        if [ -f "$output_dir/summaries/iteration-$prev_iter-summary.txt" ]; then
+            cat << CONTEXT_EOF
 
 CONTEXT FROM PREVIOUS ITERATION:
 
@@ -751,7 +788,6 @@ To understand what has already been accomplished and maintain continuity:
 
 CRITICAL: Do NOT read files in the logs/ directory - they contain full conversation JSON streams that are too large and will deplete your context window. Only read the summaries/iteration-X-summary.txt files for context.
 CONTEXT_EOF
-            fi
         fi
     fi
 }
