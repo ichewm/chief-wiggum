@@ -199,9 +199,9 @@ class TaskCard(Static):
         background: #181825;
         border: solid #45475a;
         margin: 0 0 1 0;
-        padding: 0 1;
+        padding: 0 0;
         height: auto;
-        min-height: 3;
+        min-height: 4;
     }
 
     TaskCard:hover {
@@ -247,31 +247,28 @@ class TaskCard(Static):
 
     def render(self) -> str:
         """Render task card content."""
-        priority_class = f"task-priority-{self._task_data.priority.lower()}"
         priority_indicator = {
-            "CRITICAL": "!!!",
-            "HIGH": "!!",
-            "MEDIUM": "!",
-            "LOW": "",
+            "CRITICAL": "❗",
+            "HIGH": "[#f38ba8]▲[/]",
+            "MEDIUM": "[#89b4fa]●[/]",
+            "LOW": "[#a6e3a1]▽[/]",
         }.get(self._task_data.priority, "")
 
         title = self._task_data.title
         if len(title) > 30:
             title = title[:27] + "..."
 
-        # Build the first line with task ID and priority
-        first_line = f"[bold #cba6f7]{self._task_data.id}[/] [{priority_class}]{priority_indicator}[/]"
+        # Build the first line with priority indicator and task ID
+        first_line = f"{priority_indicator} [bold #cba6f7]{self._task_data.id}[/]"
 
         # For in-progress tasks, show running status indicator and duration
         if self._task_data.status == TaskStatus.IN_PROGRESS and self._task_data.is_running is not None:
             if self._task_data.is_running:
-                # Green indicator for running, with duration
                 duration = ""
                 if self._task_data.start_time:
                     duration = f" {format_duration(self._task_data.start_time)}"
                 first_line += f" [bold #a6e3a1]●{duration}[/]"
             else:
-                # Red indicator for not running (stalled)
                 first_line += " [bold #f38ba8]●[/]"
 
         lines = [
@@ -343,11 +340,21 @@ class KanbanColumn(Widget):
         self._status = status
         self._tasks_list = tasks_list
 
+    COLUMN_EMOJI = {
+        TaskStatus.PENDING: "📋",
+        TaskStatus.IN_PROGRESS: "⚡",
+        TaskStatus.PENDING_APPROVAL: "👀",
+        TaskStatus.COMPLETE: "✅",
+        TaskStatus.FAILED: "❌",
+        TaskStatus.NOT_PLANNED: "🚫",
+    }
+
     def compose(self) -> ComposeResult:
         status_name = self._status.value.replace("_", " ").upper()
         header_class = f"column-header-{self._status.value}"
+        emoji = self.COLUMN_EMOJI.get(self._status, "")
         yield Static(
-            f"[{header_class}]{status_name} ({len(self._tasks_list)})[/]",
+            f"[{header_class}]{emoji} {status_name} ({len(self._tasks_list)})[/]",
             classes="column-header",
         )
         with VerticalScroll(classes="column-content"):
