@@ -530,9 +530,9 @@ main() {
     echo ""
 
     # Track active workers
-    declare -A active_workers      # PID -> task_id mapping
-    declare -A active_fix_workers  # PID -> "task_id|start_time"
-    declare -A skip_tasks          # task_id -> consecutive failure count
+    declare -A active_workers=()      # PID -> task_id mapping
+    declare -A active_fix_workers=()  # PID -> "task_id|start_time"
+    declare -A skip_tasks=()          # task_id -> consecutive failure count
     local all_pids=()
 
     # Restore active workers from existing worker directories (using shared library)

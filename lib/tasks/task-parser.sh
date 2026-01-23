@@ -201,7 +201,7 @@ get_dependency_depth() {
 
     # Build reverse dependency map: for each task, find who depends on it
     # Format: task_id -> list of tasks that have task_id as a dependency
-    declare -A reverse_deps
+    declare -A reverse_deps=()
     while IFS='|' read -r tid _status _priority deps; do
         [ -z "$tid" ] && continue
         [ -z "$deps" ] && continue
@@ -400,8 +400,8 @@ detect_circular_dependencies() {
 
     # DFS using iterative approach with explicit stack to avoid subshell issues
     # We use a simple Kahn's algorithm approach instead
-    local -A in_degree
-    local -A adj_list
+    local -A in_degree=()
+    local -A adj_list=()
 
     # Initialize
     for task_id in $tasks; do

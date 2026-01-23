@@ -106,9 +106,9 @@ validate_kanban() {
     local in_ac=false
 
     # Track all task IDs for uniqueness and dependency validation
-    declare -A task_ids
+    declare -A task_ids=()
     declare -a all_task_ids=()
-    declare -A task_dependencies
+    declare -A task_dependencies=()
 
     # First pass: collect all task IDs and their dependencies
     while IFS= read -r line || [ -n "$line" ]; do
