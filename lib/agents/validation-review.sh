@@ -27,7 +27,7 @@ agent_required_paths() {
 
 # Output files that must exist (non-empty) after agent completes
 agent_output_files() {
-    echo "validation-result.txt"
+    echo "results/validation-result.txt"
 }
 
 # Source dependencies using base library helpers
@@ -54,7 +54,7 @@ agent_run() {
     agent_create_directories "$worker_dir"
 
     # Clean up old validation files before re-running
-    rm -f "$worker_dir/validation-result.txt" "$worker_dir/validation-review.md"
+    rm -f "$worker_dir/results/validation-result.txt" "$worker_dir/reports/validation-review.md"
     rm -f "$worker_dir/logs/validation-"*.log
     rm -f "$worker_dir/summaries/validation-"*.txt
 

@@ -14,6 +14,7 @@ set -euo pipefail
 # OUTPUT_FILES:
 #   - resume-step.txt         : Contains the step name to resume from (or ABORT)
 #   - resume-instructions.md  : Context and guidance for the resumed worker
+#   - resume-result.txt       : Contains PASS, STOP, or FAIL
 # =============================================================================
 
 # Source base library and initialize metadata
@@ -29,7 +30,8 @@ agent_required_paths() {
 # Output files that must exist (non-empty) after agent completes
 agent_output_files() {
     echo "resume-step.txt"
-    echo "resume-instructions.md"
+    echo "reports/resume-instructions.md"
+    echo "results/resume-result.txt"
 }
 
 # Source dependencies
@@ -79,7 +81,8 @@ agent_run() {
     if [ ! -f "$worker_dir/resume-step.txt" ] || [ ! -s "$worker_dir/resume-step.txt" ]; then
         log_error "resume-decide failed to produce resume-step.txt"
         echo "ABORT" > "$worker_dir/resume-step.txt"
-        echo "Resume-decide agent failed to produce a decision." > "$worker_dir/resume-instructions.md"
+        echo "Resume-decide agent failed to produce a decision." > "$worker_dir/reports/resume-instructions.md"
+        echo "FAIL" > "$worker_dir/results/resume-result.txt"
         return 1
     fi
 
@@ -90,6 +93,9 @@ agent_run() {
     # Archive artifacts from the resume point onward (not earlier phases)
     if [ "$step" != "ABORT" ]; then
         archive_from_step "$worker_dir" "$step"
+        echo "PASS" > "$worker_dir/results/resume-result.txt"
+    else
+        echo "STOP" > "$worker_dir/results/resume-result.txt"
     fi
 
     return 0
@@ -142,12 +148,18 @@ archive_from_step() {
         done
     fi
 
-    # Archive result/report files with mtime >= reference file
-    for f in "$worker_dir"/*-result.txt "$worker_dir"/*-report.md "$worker_dir"/*-review.md; do
-        [ -f "$f" ] || continue
-        if [ ! "$f" -ot "$reference_file" ]; then
-            mv "$f" "$archive_dir/"
-        fi
+    # Archive results/ and reports/ directories
+    for subdir in results reports; do
+        [ -d "$worker_dir/$subdir" ] || continue
+        mkdir -p "$archive_dir/$subdir"
+        for f in "$worker_dir/$subdir"/*; do
+            [ -f "$f" ] || continue
+            if [ ! "$f" -ot "$reference_file" ]; then
+                mv "$f" "$archive_dir/$subdir/"
+            fi
+        done
+        # Remove subdir if now empty
+        rmdir "$worker_dir/$subdir" 2>/dev/null || true
     done
 
     # Archive artifact directories whose contents are entirely from the resume point onward
@@ -165,7 +177,11 @@ archive_from_step() {
         fi
     done
 
-    # resume-instructions.md stays — needed by the resumed worker
+    # Preserve resume-instructions.md — needed by the resumed worker
+    if [ -f "$archive_dir/reports/resume-instructions.md" ]; then
+        mkdir -p "$worker_dir/reports"
+        mv "$archive_dir/reports/resume-instructions.md" "$worker_dir/reports/"
+    fi
     log "Archived artifacts from step '$resume_step' (ref: $(basename "$reference_file")) to $(basename "$archive_dir")"
 }
 
@@ -181,9 +197,8 @@ _archive_all() {
     mv "$worker_dir/conversations" "$archive_dir/" 2>/dev/null || true
     mv "$worker_dir/supervisors" "$archive_dir/" 2>/dev/null || true
     mv "$worker_dir/worker.log" "$archive_dir/" 2>/dev/null || true
-    mv "$worker_dir"/*-result.txt "$archive_dir/" 2>/dev/null || true
-    mv "$worker_dir"/*-report.md "$archive_dir/" 2>/dev/null || true
-    mv "$worker_dir"/*-review.md "$archive_dir/" 2>/dev/null || true
+    mv "$worker_dir/results" "$archive_dir/" 2>/dev/null || true
+    mv "$worker_dir/reports" "$archive_dir/" 2>/dev/null || true
     mv "$worker_dir/agent-result.json" "$archive_dir/" 2>/dev/null || true
     log "Archived all run artifacts to $(basename "$archive_dir")"
 }
@@ -219,8 +234,8 @@ $worker_dir/
 │   └── ...              ← Other sub-agent conversations
 ├── logs/                ← Raw JSON stream logs (DO NOT READ - too large)
 ├── summaries/           ← Iteration summaries
-├── *-result.txt         ← Phase result files (PASS/FAIL/FIX/etc.)
-└── *-report.md          ← Phase report files
+├── results/             ← Phase result files (PASS/FAIL/FIX/etc.)
+└── reports/             ← Phase report files
 \`\`\`
 
 ## Pipeline Steps (in execution order)
@@ -239,10 +254,10 @@ $worker_dir/
 | Phase | Log Pattern (in worker.log) | Output File |
 |-------|---------------------------|-------------|
 | execution | "Task completed successfully" or "Ralph loop finished" | summaries/summary.txt |
-| audit | "Security audit result: PASS\|FIX\|STOP" | security-result.txt |
-| test | "Test coverage result: PASS\|FAIL\|SKIP" | test-result.txt |
-| docs | "Documentation writer result:" | docs-result.txt |
-| validation | "Validation review completed with result:" | validation-result.txt |
+| audit | "Security audit result: PASS\|FIX\|STOP" | results/security-result.txt |
+| test | "Test coverage result: PASS\|FAIL\|SKIP" | results/test-result.txt |
+| docs | "Documentation writer result:" | results/docs-result.txt |
+| validation | "Validation review completed with result:" | results/validation-result.txt |
 | finalization | "PR created:" or "Commit created" | pr_url.txt or agent-result.json |
 
 ## Git Restrictions (CRITICAL)
@@ -272,7 +287,7 @@ _build_user_prompt() {
 
     # List result files that exist
     local result_files=""
-    result_files=$(ls "$worker_dir/"*-result.txt 2>/dev/null | sort || true)
+    result_files=$(ls "$worker_dir/results/"*-result.txt 2>/dev/null | sort || true)
 
     cat << EOF
 RESUME ANALYSIS TASK:
@@ -424,7 +439,7 @@ _extract_decision() {
     if [ ! -f "$log_file" ]; then
         log_error "No resume-decide log file found at $log_file"
         echo "ABORT" > "$worker_dir/resume-step.txt"
-        echo "No decision log produced." > "$worker_dir/resume-instructions.md"
+        echo "No decision log produced." > "$worker_dir/reports/resume-instructions.md"
         return 1
     fi
 
@@ -439,7 +454,7 @@ _extract_decision() {
     if [ -z "$full_text" ]; then
         log_error "No assistant text found in resume-decide log"
         echo "ABORT" > "$worker_dir/resume-step.txt"
-        echo "Failed to extract decision from agent output." > "$worker_dir/resume-instructions.md"
+        echo "Failed to extract decision from agent output." > "$worker_dir/reports/resume-instructions.md"
         return 1
     fi
 
@@ -452,7 +467,7 @@ _extract_decision() {
     if [ -z "$step" ]; then
         log_error "No valid <step> tag found in resume-decide output"
         echo "ABORT" > "$worker_dir/resume-step.txt"
-        echo "Agent did not produce a valid step decision." > "$worker_dir/resume-instructions.md"
+        echo "Agent did not produce a valid step decision." > "$worker_dir/reports/resume-instructions.md"
         return 1
     fi
 
@@ -466,7 +481,7 @@ _extract_decision() {
         instructions="Resuming from step: $step. No detailed instructions available."
     fi
 
-    echo "$instructions" > "$worker_dir/resume-instructions.md"
+    echo "$instructions" > "$worker_dir/reports/resume-instructions.md"
 
     log "Extracted decision: step=$step"
     return 0

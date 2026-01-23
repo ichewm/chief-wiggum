@@ -3,12 +3,10 @@ set -euo pipefail
 # =============================================================================
 # AGENT METADATA
 # =============================================================================
-# AGENT_TYPE: task-worker
-# AGENT_DESCRIPTION: Main task execution agent that manages the complete task
-#   lifecycle from PRD. Handles git worktree setup, PRD task execution via
-#   ralph loop pattern, validation review (via nested sub-agent), commit and
-#   PR creation, kanban status updates, and worktree cleanup. The primary
-#   workhorse agent for automated task completion.
+# AGENT_TYPE: task-worker-plan-mode
+# AGENT_DESCRIPTION: Task execution agent with planning phase. Runs plan-mode
+#   sub-agent before main execution to create an implementation plan, then
+#   executes the task with plan guidance. Inherits all task-worker capabilities.
 # REQUIRED_PATHS:
 #   - prd.md : Product Requirements Document containing tasks to execute
 # NOTE: workspace is created by this agent, not required in advance
@@ -18,7 +16,7 @@ set -euo pipefail
 
 # Source base library and initialize metadata
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
-agent_init_metadata "task-worker" "Main task execution agent that manages the complete task lifecycle from PRD"
+agent_init_metadata "task-worker-plan-mode" "Task execution agent with planning phase"
 
 # Required paths before agent can run
 agent_required_paths() {
@@ -31,7 +29,7 @@ agent_output_files() {
     echo "worker.log"
     # Note: logs/*.log files are created per iteration
     # Note: summaries/summary.txt is optional (only on success)
-    # Note: validation-result.txt is created by validation-review sub-agent
+    # Note: results/validation-result.txt is created by validation-review sub-agent
 }
 
 # Source dependencies using base library helpers
@@ -204,7 +202,7 @@ _run_quality_gate() {
     esac
 }
 
-# Main entry point - manages complete task lifecycle
+# Main entry point - manages complete task lifecycle with planning
 agent_run() {
     local worker_dir="$1"
     local project_dir="$2"
@@ -229,7 +227,7 @@ agent_run() {
     start_time=$(date +%s)
     agent_log_start "$worker_dir" "$task_id"
 
-    log "Task worker agent starting for $task_id (max $max_turns turns per session)"
+    log "Task worker (plan-mode) agent starting for $task_id (max $max_turns turns per session)"
     if [ "$start_from_step" != "execution" ]; then
         log "Resuming from step: $start_from_step (skipping earlier phases)"
     fi
@@ -261,13 +259,34 @@ agent_run() {
     # Create standard directories
     agent_create_directories "$worker_dir"
 
-    # === CHECK FOR EXISTING PLAN ===
+    # === PLANNING PHASE ===
     _TASK_PLAN_FILE="$project_dir/.ralph/plans/${task_id}.md"
-    if [ -f "$_TASK_PLAN_FILE" ] && [ -s "$_TASK_PLAN_FILE" ]; then
-        log "Plan found at $_TASK_PLAN_FILE - will include in execution context"
+
+    if _should_run_step "execution" "$start_from_step"; then
+        # Only run planning if we're starting from execution
+        if [ -f "$_TASK_PLAN_FILE" ] && [ -s "$_TASK_PLAN_FILE" ]; then
+            # Plan already exists - skip planning phase
+            log "Plan already exists at $_TASK_PLAN_FILE - skipping planning phase"
+        else
+            # No existing plan - run planning phase
+            log "Running implementation planning phase"
+            run_sub_agent "plan-mode" "$worker_dir" "$project_dir"
+            local plan_result=$?
+
+            if [ $plan_result -eq 0 ] && [ -f "$_TASK_PLAN_FILE" ]; then
+                log "Plan created at $_TASK_PLAN_FILE"
+            else
+                log_warn "Planning did not complete (exit: ${plan_result:-0}) - continuing without plan"
+                _TASK_PLAN_FILE=""
+            fi
+        fi
     else
-        log_debug "No existing plan at $_TASK_PLAN_FILE"
-        _TASK_PLAN_FILE=""
+        # Resuming past execution - check for existing plan
+        if [ -f "$_TASK_PLAN_FILE" ] && [ -s "$_TASK_PLAN_FILE" ]; then
+            log "Plan found at $_TASK_PLAN_FILE (resuming past planning phase)"
+        else
+            _TASK_PLAN_FILE=""
+        fi
     fi
 
     # === EXECUTION PHASE ===
@@ -325,11 +344,11 @@ agent_run() {
                 run_sub_agent "security-fix" "$worker_dir" "$project_dir"
 
                 local fix_result
-                fix_result=$(cat "$worker_dir/fix-result.txt" 2>/dev/null || echo "UNKNOWN")
+                fix_result=$(cat "$worker_dir/results/fix-result.txt" 2>/dev/null || echo "UNKNOWN")
                 log "Security fix result: $fix_result"
                 _commit_subagent_changes "$workspace" "security-fix"
 
-                if [ "$fix_result" != "FIXED" ]; then
+                if [ "$fix_result" != "PASS" ]; then
                     log_warn "Security fix incomplete (result: $fix_result) - continuing with validation"
                 fi
             else
@@ -471,6 +490,7 @@ agent_run() {
         --arg validation_result "$validation_result" \
         --arg violation_type "$violation_type" \
         --arg violation_details "$violation_details" \
+        --arg plan_file "${_TASK_PLAN_FILE:-}" \
         --argjson phases "$phase_timings_json" \
         '{
             pr_url: $pr_url,
@@ -479,12 +499,13 @@ agent_run() {
             validation_result: $validation_result,
             violation_type: $violation_type,
             violation_details: $violation_details,
+            plan_file: $plan_file,
             phases: $phases
         }')
 
     agent_write_result "$worker_dir" "$result_status" "$result_exit_code" "$outputs_json"
 
-    log "Task worker finished: $worker_id"
+    log "Task worker (plan-mode) finished: $worker_id"
     return $loop_result
 }
 

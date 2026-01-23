@@ -13,6 +13,7 @@ set -euo pipefail
 #   - prd.md : Product Requirements Document containing task to plan
 # OUTPUT_FILES:
 #   - .ralph/plans/TASK-xxx.md : The generated implementation plan (TASK-xxx from input)
+#   - plan-result.txt          : Contains PASS or FAIL
 # =============================================================================
 
 # Source base library and initialize metadata
@@ -25,10 +26,9 @@ agent_required_paths() {
 }
 
 # Output files that must exist (non-empty) after agent completes
-# Note: Actual path is .ralph/plans/${task_id}.md - checked dynamically
+# Note: Plan path is .ralph/plans/${task_id}.md - checked dynamically
 agent_output_files() {
-    # Return empty - we check dynamically since path depends on task_id
-    echo ""
+    echo "results/plan-result.txt"
 }
 
 # Source dependencies using base library helpers
@@ -102,6 +102,9 @@ agent_run() {
     local result_status="failure"
     if [ $loop_result -eq 0 ] && [ -f "$plan_file" ] && [ -s "$plan_file" ]; then
         result_status="success"
+        echo "PASS" > "$worker_dir/results/plan-result.txt"
+    else
+        echo "FAIL" > "$worker_dir/results/plan-result.txt"
     fi
 
     # Build outputs JSON

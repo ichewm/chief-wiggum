@@ -26,7 +26,7 @@ agent_required_paths() {
 
 # Output files that must exist (non-empty) after agent completes
 agent_output_files() {
-    echo "security-result.txt"
+    echo "results/security-result.txt"
 }
 
 # Source dependencies using base library helpers
@@ -56,7 +56,7 @@ agent_run() {
     agent_create_directories "$worker_dir"
 
     # Clean up old audit files before re-running
-    rm -f "$worker_dir/security-result.txt" "$worker_dir/security-report.md"
+    rm -f "$worker_dir/results/security-result.txt" "$worker_dir/reports/security-report.md"
     rm -f "$worker_dir/logs/audit-"*.log
     rm -f "$worker_dir/summaries/audit-"*.txt
 
@@ -324,7 +324,7 @@ _extract_audit_result() {
 # Returns: 0 if PASS, 1 if FIX, 2 if STOP/UNKNOWN
 check_security_result() {
     local worker_dir="$1"
-    local result_file="$worker_dir/security-result.txt"
+    local result_file="$worker_dir/results/security-result.txt"
 
     if [ -f "$result_file" ]; then
         local result

@@ -67,16 +67,23 @@ result=$(agent_read_subagent_result "$worker_dir" "VALIDATION_result" "validatio
 result=$(jq -r '.outputs.VALIDATION_result' "$worker_dir/agent-result.json")
 ```
 
-### Legacy: Text Files
+### Gate Result Files
 
-Some agents still use text file output for simplicity:
+All agents produce a gate result file in `results/` with standardized values (PASS/FAIL/STOP/SKIP/FIX).
+Reports are written to `reports/`.
 
-| File | Agent | Values |
-|------|-------|--------|
-| `validation-result.txt` | validation-review | PASS, FAIL, UNKNOWN |
-| `security-result.txt` | security-audit | PASS, FIX, STOP |
-| `review-result.txt` | code-review | APPROVE, REQUEST_CHANGES, COMMENT |
-| `test-result.txt` | test-coverage | PASS, FAIL, SKIP |
+| Result File | Agent | Values |
+|-------------|-------|--------|
+| `results/validation-result.txt` | validation-review | PASS, FAIL |
+| `results/security-result.txt` | security-audit | PASS, FIX, STOP |
+| `results/review-result.txt` | code-review | PASS, FAIL, FIX |
+| `results/test-result.txt` | test-coverage | PASS, FAIL, SKIP |
+| `results/docs-result.txt` | documentation-writer | PASS, SKIP |
+| `results/fix-result.txt` | security-fix | PASS, FIX, FAIL |
+| `results/resolve-result.txt` | git-conflict-resolver | PASS, FAIL, SKIP |
+| `results/comment-fix-result.txt` | pr-comment-fix | PASS, FIX, FAIL, SKIP |
+| `results/plan-result.txt` | plan-mode | PASS, FAIL |
+| `results/resume-result.txt` | resume-decide | PASS, STOP, FAIL |
 
 ## Progress Communication
 

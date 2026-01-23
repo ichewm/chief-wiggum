@@ -283,6 +283,8 @@ agent_create_directories() {
     local worker_dir="$1"
     mkdir -p "$worker_dir/logs"
     mkdir -p "$worker_dir/summaries"
+    mkdir -p "$worker_dir/results"
+    mkdir -p "$worker_dir/reports"
 }
 
 # Log agent start event
@@ -528,13 +530,13 @@ agent_comm_path() {
             echo "$worker_dir/agent-result.json"
             ;;
         validation)
-            echo "$worker_dir/validation-result.txt"
+            echo "$worker_dir/results/validation-result.txt"
             ;;
         validation-review)
-            echo "$worker_dir/validation-review.md"
+            echo "$worker_dir/reports/validation-review.md"
             ;;
         status)
-            echo "$worker_dir/comment-status.md"
+            echo "$worker_dir/reports/comment-status.md"
             ;;
         comments)
             echo "$worker_dir/task-comments.md"
@@ -717,14 +719,15 @@ agent_extract_and_write_result() {
     log_file=$(find "$worker_dir/logs" -maxdepth 1 -name "${log_prefix}-*.log" ! -name "*summary*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
 
     if [ -n "$log_file" ] && [ -f "$log_file" ]; then
-        # Extract report content and save to .md file
-        local report_path="$worker_dir/$report_file"
+        # Extract report content and save to reports/ directory
+        local report_path="$worker_dir/reports/$report_file"
         local report_content
         report_content=$(_extract_tag_content_from_stream_json "$log_file" "$report_tag")
 
         if [ -n "$report_content" ]; then
+            mkdir -p "$worker_dir/reports"
             echo "$report_content" > "$report_path"
-            log "${agent_name} report saved to $report_file"
+            log "${agent_name} report saved to reports/$report_file"
         fi
 
         # Extract result value (LAST occurrence to avoid matching examples in prompts)
@@ -734,8 +737,9 @@ agent_extract_and_write_result() {
         fi
     fi
 
-    # Write legacy result file for backward compatibility
-    echo "$result" > "$worker_dir/$result_file"
+    # Write result file to results/ directory
+    mkdir -p "$worker_dir/results"
+    echo "$result" > "$worker_dir/results/$result_file"
 
     # Update agent-result.json outputs if it exists
     if [ -f "$worker_dir/$AGENT_RESULT_FILE" ]; then
@@ -768,9 +772,9 @@ agent_read_subagent_result() {
         result=$(agent_get_output "$worker_dir" "$output_key")
     fi
 
-    # Fall back to legacy file
-    if [ -z "$result" ] && [ -f "$worker_dir/$legacy_file" ]; then
-        result=$(cat "$worker_dir/$legacy_file" 2>/dev/null)
+    # Fall back to result file in results/ directory
+    if [ -z "$result" ] && [ -f "$worker_dir/results/$legacy_file" ]; then
+        result=$(cat "$worker_dir/results/$legacy_file" 2>/dev/null)
     fi
 
     # Default to UNKNOWN

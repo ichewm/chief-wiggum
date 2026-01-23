@@ -85,10 +85,14 @@ archive_previous_run() {
     mv "$worker_dir/conversations" "$archive_dir/" 2>/dev/null || true
     mv "$worker_dir/supervisors" "$archive_dir/" 2>/dev/null || true
     mv "$worker_dir/worker.log" "$archive_dir/" 2>/dev/null || true
-    mv "$worker_dir"/*-result.txt "$archive_dir/" 2>/dev/null || true
-    mv "$worker_dir"/*-report.md "$archive_dir/" 2>/dev/null || true
+    mv "$worker_dir/results" "$archive_dir/" 2>/dev/null || true
+    mv "$worker_dir/reports" "$archive_dir/" 2>/dev/null || true
     mv "$worker_dir/agent-result.json" "$archive_dir/" 2>/dev/null || true
-    # resume-instructions.md stays — needed by the resumed worker
+    # reports/resume-instructions.md stays — needed by the resumed worker
+    if [ -d "$archive_dir/reports" ] && [ -f "$archive_dir/reports/resume-instructions.md" ]; then
+        mkdir -p "$worker_dir/reports"
+        mv "$archive_dir/reports/resume-instructions.md" "$worker_dir/reports/"
+    fi
 
     echo "Archived previous run to $(basename "$archive_dir")"
 }
@@ -203,9 +207,9 @@ do_resume() {
         echo "RESUME ABORTED"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
-        if [ -f "$worker_dir/resume-instructions.md" ]; then
+        if [ -f "$worker_dir/reports/resume-instructions.md" ]; then
             echo "Reason:"
-            cat "$worker_dir/resume-instructions.md"
+            cat "$worker_dir/reports/resume-instructions.md"
         fi
         echo ""
         exit $EXIT_ERROR
@@ -238,7 +242,7 @@ do_resume() {
     (
         # Run agent in subshell to isolate it
         run_agent "task-worker" "$worker_dir" "$PROJECT_DIR" 30 "$MAX_ITERATIONS" "$MAX_TURNS" \
-            "$resume_step" "$worker_dir/resume-instructions.md"
+            "$resume_step" "$worker_dir/reports/resume-instructions.md"
     ) >> "$RALPH_DIR/logs/workers.log" 2>&1 &
 
     # Wait briefly for agent.pid to be created

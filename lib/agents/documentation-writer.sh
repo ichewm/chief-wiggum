@@ -25,7 +25,7 @@ agent_required_paths() {
 
 # Output files that must exist (non-empty) after agent completes
 agent_output_files() {
-    echo "docs-result.txt"
+    echo "results/docs-result.txt"
 }
 
 # Source dependencies using base library helpers
@@ -48,7 +48,8 @@ agent_run() {
     if [ ! -d "$workspace" ]; then
         log_error "Workspace not found: $workspace"
         DOCS_RESULT="SKIP"
-        echo "SKIP" > "$worker_dir/docs-result.txt"
+        mkdir -p "$worker_dir/results"
+        echo "SKIP" > "$worker_dir/results/docs-result.txt"
         return 0
     fi
 
@@ -56,7 +57,7 @@ agent_run() {
     agent_create_directories "$worker_dir"
 
     # Clean up old docs files before re-running
-    rm -f "$worker_dir/docs-result.txt" "$worker_dir/docs-report.md"
+    rm -f "$worker_dir/results/docs-result.txt" "$worker_dir/reports/docs-report.md"
     rm -f "$worker_dir/logs/docs-"*.log
 
     log "Running documentation update..."
@@ -82,7 +83,7 @@ agent_run() {
     # Documentation agent never fails - ensure we return PASS or SKIP
     if [ "$DOCS_RESULT" != "PASS" ] && [ "$DOCS_RESULT" != "SKIP" ]; then
         DOCS_RESULT="PASS"
-        echo "PASS" > "$worker_dir/docs-result.txt"
+        echo "PASS" > "$worker_dir/results/docs-result.txt"
     fi
 
     log "Documentation update completed with result: $DOCS_RESULT"
@@ -287,7 +288,7 @@ _extract_docs_result() {
 # Returns: 0 if PASS, 1 if FAIL, 2 if SKIP/UNKNOWN
 check_docs_result() {
     local worker_dir="$1"
-    local result_file="$worker_dir/docs-result.txt"
+    local result_file="$worker_dir/results/docs-result.txt"
 
     if [ -f "$result_file" ]; then
         local result

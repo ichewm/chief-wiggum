@@ -12,6 +12,7 @@ set -euo pipefail
 #   - workspace : Directory containing the git repository with conflicts
 # OUTPUT_FILES:
 #   - resolution-summary.md : Documentation of conflict resolutions applied
+#   - resolve-result.txt    : Contains PASS, FAIL, or SKIP
 # =============================================================================
 
 # Source base library and initialize metadata
@@ -25,7 +26,8 @@ agent_required_paths() {
 
 # Output files that must exist (non-empty) after agent completes
 agent_output_files() {
-    echo "resolution-summary.md"
+    echo "reports/resolution-summary.md"
+    echo "results/resolve-result.txt"
 }
 
 # Source dependencies using base library helpers
@@ -57,7 +59,7 @@ agent_run() {
     agent_create_directories "$worker_dir"
 
     # Clean up old resolution files before re-running
-    rm -f "$worker_dir/resolution-summary.md"
+    rm -f "$worker_dir/reports/resolution-summary.md"
     rm -f "$worker_dir/logs/resolve-"*.log
     rm -f "$worker_dir/summaries/resolve-"*.txt
 
@@ -68,13 +70,15 @@ agent_run() {
     if [ -z "$conflicted_files" ]; then
         log "No merge conflicts detected in workspace"
         # Create summary indicating no conflicts
-        cat > "$worker_dir/resolution-summary.md" << 'EOF'
+        mkdir -p "$worker_dir/reports" "$worker_dir/results"
+        cat > "$worker_dir/reports/resolution-summary.md" << 'EOF'
 # Conflict Resolution Summary
 
 **Status:** No conflicts detected
 
 No merge conflicts were found in the workspace. The repository is in a clean state.
 EOF
+        echo "SKIP" > "$worker_dir/results/resolve-result.txt"
         return 0
     fi
 
@@ -99,10 +103,15 @@ EOF
     # Extract and save resolution summary
     _extract_resolution_summary "$worker_dir"
 
-    if [ $agent_exit -eq 0 ]; then
+    # Determine gate result based on remaining conflicts
+    local remaining
+    remaining=$(git -C "$workspace" diff --name-only --diff-filter=U 2>/dev/null | wc -l)
+    if [ "$remaining" -eq 0 ]; then
+        echo "PASS" > "$worker_dir/results/resolve-result.txt"
         log "Conflict resolution completed successfully"
     else
-        log_warn "Conflict resolution had issues (exit: $agent_exit)"
+        echo "FAIL" > "$worker_dir/results/resolve-result.txt"
+        log_warn "Conflict resolution incomplete ($remaining file(s) unresolved)"
     fi
 
     return $agent_exit
@@ -232,11 +241,11 @@ Resolve all merge conflicts in this workspace.
 
 </summary>
 
-<result>RESOLVED</result>
+<result>PASS</result>
 OR
-<result>UNRESOLVED</result>
+<result>FAIL</result>
 
-The <result> tag MUST be exactly: RESOLVED or UNRESOLVED.
+The <result> tag MUST be exactly: PASS or FAIL.
 EOF
 }
 
@@ -248,7 +257,7 @@ _extract_resolution_summary() {
     local log_file
     log_file=$(find "$worker_dir/logs" -maxdepth 1 -name "resolve-*.log" ! -name "*summary*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
 
-    local summary_path="$worker_dir/resolution-summary.md"
+    local summary_path="$worker_dir/reports/resolution-summary.md"
 
     if [ -n "$log_file" ] && [ -f "$log_file" ]; then
         # Extract summary content between <summary> tags

@@ -42,6 +42,9 @@ _AGENT_REGISTRY_WORKER_DIR=""
 load_agent() {
     local agent_type="$1"
     local agent_file="$WIGGUM_HOME/lib/agents/${agent_type}.sh"
+    if [ ! -f "$agent_file" ]; then
+        agent_file="$WIGGUM_HOME/lib/agents/pipeline/${agent_type}.sh"
+    fi
 
     if [ ! -f "$agent_file" ]; then
         log_error "Unknown agent type: $agent_type"
@@ -433,6 +436,11 @@ list_agents() {
     fi
 
     for f in "$agents_dir"/*.sh; do
+        if [ -f "$f" ]; then
+            basename "$f" .sh
+        fi
+    done
+    for f in "$agents_dir"/pipeline/*.sh; do
         if [ -f "$f" ]; then
             basename "$f" .sh
         fi

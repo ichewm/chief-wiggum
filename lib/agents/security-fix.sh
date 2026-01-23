@@ -9,11 +9,11 @@ set -euo pipefail
 #   Reads findings from security-report.md, makes code changes, and tracks
 #   progress in fix-status.md. Prioritizes CRITICAL > HIGH > MEDIUM fixes.
 # REQUIRED_PATHS:
-#   - security-report.md : Security audit report containing findings to fix
-#   - workspace          : Directory containing the code to modify
+#   - reports/security-report.md : Security audit report containing findings to fix
+#   - workspace                  : Directory containing the code to modify
 # OUTPUT_FILES:
-#   - fix-status.md      : Status tracking file for addressed findings
-#   - fix-result.txt     : Contains FIXED, PARTIAL, or FAILED
+#   - reports/fix-status.md      : Status tracking file for addressed findings
+#   - results/fix-result.txt     : Contains PASS, FIX, or FAIL
 # =============================================================================
 
 # Source base library and initialize metadata
@@ -22,13 +22,13 @@ agent_init_metadata "security-fix" "Security fix agent that addresses vulnerabil
 
 # Required paths before agent can run
 agent_required_paths() {
-    echo "security-report.md"
+    echo "reports/security-report.md"
     echo "workspace"
 }
 
 # Output files that must exist (non-empty) after agent completes
 agent_output_files() {
-    echo "fix-result.txt"
+    echo "results/fix-result.txt"
 }
 
 # Source dependencies using base library helpers
@@ -47,14 +47,14 @@ agent_run() {
     local max_turns="${WIGGUM_SECURITY_FIX_MAX_TURNS:-${AGENT_CONFIG_MAX_TURNS:-50}}"
 
     local workspace="$worker_dir/workspace"
-    local report_file="$worker_dir/security-report.md"
-    local status_file="$worker_dir/fix-status.md"
+    local report_file="$worker_dir/reports/security-report.md"
+    local status_file="$worker_dir/reports/fix-status.md"
 
     # Verify workspace exists
     if [ ! -d "$workspace" ]; then
         log_error "Workspace not found: $workspace"
-        FIX_RESULT="FAILED"
-        echo "$FIX_RESULT" > "$worker_dir/fix-result.txt"
+        FIX_RESULT="FAIL"
+        echo "$FIX_RESULT" > "$worker_dir/results/fix-result.txt"
         return 1
     fi
 
@@ -62,16 +62,16 @@ agent_run() {
     if [ ! -f "$report_file" ]; then
         log_error "Security report not found: $report_file"
         log_error "Run security-audit agent first"
-        FIX_RESULT="FAILED"
-        echo "$FIX_RESULT" > "$worker_dir/fix-result.txt"
+        FIX_RESULT="FAIL"
+        echo "$FIX_RESULT" > "$worker_dir/results/fix-result.txt"
         return 1
     fi
 
     # Check if there are any findings to fix
     if ! grep -qE '^### (CRITICAL|HIGH|MEDIUM)' "$report_file" 2>/dev/null; then
         log "No CRITICAL/HIGH/MEDIUM findings in security report - nothing to fix"
-        FIX_RESULT="FIXED"
-        echo "$FIX_RESULT" > "$worker_dir/fix-result.txt"
+        FIX_RESULT="PASS"
+        echo "$FIX_RESULT" > "$worker_dir/results/fix-result.txt"
         echo "# Security Fix Status
 
 **Status:** No fixes needed
@@ -110,9 +110,9 @@ No CRITICAL, HIGH, or MEDIUM security findings were present in the report.
     # Determine final result
     _determine_fix_result "$status_file" "$worker_dir"
 
-    if [ "$FIX_RESULT" = "FIXED" ]; then
+    if [ "$FIX_RESULT" = "PASS" ]; then
         log "All security issues fixed successfully"
-    elif [ "$FIX_RESULT" = "PARTIAL" ]; then
+    elif [ "$FIX_RESULT" = "FIX" ]; then
         log_warn "Some security issues could not be fixed"
     else
         log_error "Security fix failed"
@@ -283,13 +283,13 @@ When all fixes are complete, provide:
 - [ ] MEDIUM issues addressed or documented
 </summary>
 
-<result>FIXED</result>
+<result>PASS</result>
 OR
-<result>PARTIAL</result>
+<result>FIX</result>
 OR
-<result>FAILED</result>
+<result>FAIL</result>
 
-The <result> tag MUST be exactly: FIXED, PARTIAL, or FAILED.
+The <result> tag MUST be exactly: PASS, FIX, or FAIL.
 EOF
 
     # Add context from previous iterations if available
@@ -402,8 +402,8 @@ _determine_fix_result() {
     FIX_RESULT="UNKNOWN"
 
     if [ ! -f "$status_file" ]; then
-        FIX_RESULT="FAILED"
-        echo "$FIX_RESULT" > "$worker_dir/fix-result.txt"
+        FIX_RESULT="FAIL"
+        echo "$FIX_RESULT" > "$worker_dir/results/fix-result.txt"
         return
     fi
 
@@ -413,38 +413,38 @@ _determine_fix_result() {
     unfixable_count=$(grep -c '^\- \[\*\]' "$status_file" 2>/dev/null || echo "0")
 
     if [ "$pending_count" -eq 0 ] && [ "$unfixable_count" -eq 0 ]; then
-        FIX_RESULT="FIXED"
+        FIX_RESULT="PASS"
     elif [ "$pending_count" -eq 0 ] && [ "$unfixable_count" -gt 0 ]; then
         # All attempted, but some couldn't be fixed
-        FIX_RESULT="PARTIAL"
+        FIX_RESULT="FIX"
     elif [ "$fixed_count" -gt 0 ]; then
         # Some fixed, some still pending
-        FIX_RESULT="PARTIAL"
+        FIX_RESULT="FIX"
     else
-        FIX_RESULT="FAILED"
+        FIX_RESULT="FAIL"
     fi
 
-    echo "$FIX_RESULT" > "$worker_dir/fix-result.txt"
+    echo "$FIX_RESULT" > "$worker_dir/results/fix-result.txt"
     log "Fix result: $FIX_RESULT (fixed: $fixed_count, unfixable: $unfixable_count, pending: $pending_count)"
 }
 
 # Check fix result from a worker directory (utility for callers)
-# Returns: 0 if FIXED, 1 if PARTIAL, 2 if FAILED/UNKNOWN
+# Returns: 0 if PASS, 1 if FIX, 2 if FAIL/UNKNOWN
 check_fix_result() {
     local worker_dir="$1"
-    local result_file="$worker_dir/fix-result.txt"
+    local result_file="$worker_dir/results/fix-result.txt"
 
     if [ -f "$result_file" ]; then
         local result
         result=$(cat "$result_file")
         case "$result" in
-            FIXED)
+            PASS)
                 return 0
                 ;;
-            PARTIAL)
+            FIX)
                 return 1
                 ;;
-            FAILED|UNKNOWN|*)
+            FAIL|UNKNOWN|*)
                 return 2
                 ;;
         esac

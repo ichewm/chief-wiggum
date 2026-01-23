@@ -26,7 +26,7 @@ agent_required_paths() {
 
 # Output files that must exist (non-empty) after agent completes
 agent_output_files() {
-    echo "test-result.txt"
+    echo "results/test-result.txt"
 }
 
 # Source dependencies using base library helpers
@@ -56,7 +56,7 @@ agent_run() {
     agent_create_directories "$worker_dir"
 
     # Clean up old test files before re-running
-    rm -f "$worker_dir/test-result.txt" "$worker_dir/test-report.md"
+    rm -f "$worker_dir/results/test-result.txt" "$worker_dir/reports/test-report.md"
     rm -f "$worker_dir/logs/test-"*.log
     rm -f "$worker_dir/summaries/test-"*.txt
 
@@ -330,7 +330,7 @@ _extract_test_result() {
 # Returns: 0 if PASS, 1 if FAIL, 2 if SKIP/UNKNOWN
 check_test_result() {
     local worker_dir="$1"
-    local result_file="$worker_dir/test-result.txt"
+    local result_file="$worker_dir/results/test-result.txt"
 
     if [ -f "$result_file" ]; then
         local result

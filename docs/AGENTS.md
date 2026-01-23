@@ -4,7 +4,15 @@ This document describes how to create and configure agents in Chief Wiggum.
 
 ## Overview
 
-Agents are self-contained Bash scripts in `lib/agents/` that implement specific workflows. Each agent uses the ralph loop pattern for iterative task execution with Claude Code CLI.
+Agents are self-contained Bash scripts that implement specific workflows.
+There are two agent patterns, each in its own directory:
+
+- **Orchestrator agents** (`lib/agents/pipeline/`) — `task-worker`, `task-worker-plan-mode` —
+  manage the full task pipeline, spawn sub-agents, use supervised ralph loops, and handle
+  commits/PRs.
+- **Leaf agents** (`lib/agents/`) — all others — perform a single focused task (audit,
+  review, test, etc.), invoked as sub-agents by orchestrators, using unsupervised ralph
+  loops or single-run execution.
 
 ## Agent Lifecycle
 
@@ -45,7 +53,13 @@ Agents are self-contained Bash scripts in `lib/agents/` that implement specific 
 
 ### Step 1: Create Agent File
 
-Create a new file in `lib/agents/` with the naming convention `{agent-name}.sh`:
+Create a new file with the naming convention `{agent-name}.sh`:
+- Leaf agents → `lib/agents/`
+- Orchestrator agents → `lib/agents/pipeline/`
+
+#### Leaf Agent Template (most common)
+
+For agents invoked as sub-agents by the orchestrator (audit, review, test, etc.):
 
 ```bash
 #!/usr/bin/env bash
@@ -55,12 +69,10 @@ set -euo pipefail
 # =============================================================================
 # AGENT_TYPE: my-agent
 # AGENT_DESCRIPTION: Brief description of what the agent does.
-#   Can span multiple lines with indentation.
 # REQUIRED_PATHS:
-#   - prd.md      : Description of why this file is needed
-#   - workspace   : Description of the workspace requirement
+#   - workspace : Directory containing the code to operate on
 # OUTPUT_FILES:
-#   - result.txt  : Description of output file
+#   - my-result.txt : Contains PASS, FAIL, or SKIP
 # =============================================================================
 
 # Source base library and initialize metadata
@@ -69,32 +81,118 @@ agent_init_metadata "my-agent" "Brief description"
 
 # Required paths before agent can run
 agent_required_paths() {
-    echo "prd.md"
     echo "workspace"
 }
 
-# Output files that must exist after successful run
+# Output files that must exist (non-empty) after agent completes
 agent_output_files() {
-    echo "result.txt"
+    echo "my-result.txt"
 }
+
+# Source dependencies using base library helpers
+agent_source_core
+agent_source_ralph
 
 # Main agent execution
 agent_run() {
     local worker_dir="$1"
     local project_dir="$2"
+    local max_turns="${WIGGUM_MY_AGENT_MAX_TURNS:-${AGENT_CONFIG_MAX_TURNS:-50}}"
+    local max_iterations="${WIGGUM_MY_AGENT_MAX_ITERATIONS:-${AGENT_CONFIG_MAX_ITERATIONS:-5}}"
 
-    # Your agent logic here
+    local workspace="$worker_dir/workspace"
 
-    # Use ralph loop for iterative execution
-    source "$WIGGUM_HOME/lib/claude/run-claude-ralph-loop.sh"
-    run_ralph_loop \
-        --worker-dir "$worker_dir" \
-        --workspace "$worker_dir/workspace" \
-        --system-prompt "$system_prompt" \
-        --user-prompt-fn "my_prompt_fn" \
-        --max-iterations "$max_iterations"
+    # Create standard directories
+    agent_create_directories "$worker_dir"
+
+    # Set up callback context (3-arg form for leaf agents)
+    agent_setup_context "$worker_dir" "$workspace" "$project_dir"
+
+    # Run unsupervised ralph loop
+    run_ralph_loop "$workspace" \
+        "$(_get_system_prompt "$workspace")" \
+        "_my_user_prompt" \
+        "_my_completion_check" \
+        "$max_iterations" "$max_turns" "$worker_dir" "my-prefix"
 
     return $?
+}
+```
+
+#### Orchestrator Agent Template
+
+For pipeline agents that manage sub-agents (like `task-worker`):
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+# =============================================================================
+# AGENT METADATA
+# =============================================================================
+# AGENT_TYPE: my-orchestrator
+# AGENT_DESCRIPTION: Orchestrator that manages the full task lifecycle.
+# REQUIRED_PATHS:
+#   - prd.md : Product Requirements Document
+# OUTPUT_FILES:
+#   - worker.log : Main worker log
+# =============================================================================
+
+# Source base library and initialize metadata
+source "$WIGGUM_HOME/lib/core/agent-base.sh"
+agent_init_metadata "my-orchestrator" "Orchestrator description"
+
+agent_required_paths() {
+    echo "prd.md"
+}
+
+agent_output_files() {
+    echo "worker.log"
+}
+
+# Source dependencies
+agent_source_core
+agent_source_ralph_supervised
+agent_source_tasks
+agent_source_git
+
+source "$WIGGUM_HOME/lib/core/exit-codes.sh"
+
+# Main agent execution
+agent_run() {
+    local worker_dir="$1"
+    local project_dir="$2"
+    local max_iterations="${3:-${AGENT_CONFIG_MAX_ITERATIONS:-20}}"
+    local max_turns="${4:-${AGENT_CONFIG_MAX_TURNS:-50}}"
+    local start_from_step="${5:-execution}"
+    local resume_instructions="${6:-}"
+
+    # Lifecycle logging
+    local start_time
+    start_time=$(date +%s)
+    agent_log_start "$worker_dir" "$task_id"
+
+    # Set up context (4-arg form with task_id)
+    agent_setup_context "$worker_dir" "$workspace" "$project_dir" "$task_id"
+
+    # Supervised ralph loop for main execution
+    local supervisor_interval="${WIGGUM_SUPERVISOR_INTERVAL:-2}"
+    run_ralph_loop_supervised "$workspace" \
+        "$system_prompt" \
+        "my_user_prompt_fn" \
+        "my_completion_check_fn" \
+        "$max_iterations" "$max_turns" "$worker_dir" "iteration" \
+        "$supervisor_interval"
+
+    local loop_result=$?
+
+    # Spawn sub-agents for quality gates
+    run_sub_agent "security-audit" "$worker_dir" "$project_dir"
+
+    # Write structured result
+    agent_write_result "$worker_dir" "$result_status" "$loop_result" "$outputs_json"
+    agent_log_complete "$worker_dir" "$loop_result" "$start_time"
+
+    return $loop_result
 }
 ```
 
@@ -170,32 +268,173 @@ agent_get_desc       # Returns description
 ### Context Setup
 
 ```bash
-# Set up callback context with worker/project directories
-agent_setup_context "$worker_dir" "$project_dir"
+# Orchestrator agents: full 4-arg call with task ID
+agent_setup_context "$worker_dir" "$workspace" "$project_dir" "$task_id"
+
+# Leaf/sub-agents: 3-arg call (task_id is optional, defaults to "")
+agent_setup_context "$worker_dir" "$workspace" "$project_dir"
 
 # Access context variables
 echo "$AGENT_WORKER_DIR"
+echo "$AGENT_WORKSPACE"
 echo "$AGENT_PROJECT_DIR"
+echo "$AGENT_TASK_ID"        # Empty string for leaf agents
 ```
 
 ### Dependency Sourcing
 
 ```bash
 # Source common dependencies
-agent_source_core     # logger, defaults, exit-codes
-agent_source_ralph    # ralph loop primitives
-agent_source_git      # git operations
-agent_source_tasks    # task parser
+agent_source_core              # logger, defaults, exit-codes
+agent_source_ralph             # unsupervised ralph loop (for leaf agents)
+agent_source_ralph_supervised  # supervised ralph loop (for orchestrator agents)
+agent_source_once              # single-run agent execution (run_agent_once)
+agent_source_resume            # session resume support
+agent_source_violations        # workspace violation monitoring
+agent_source_tasks             # task/PRD parser
+agent_source_git               # git operations (worktree, commit, PR)
+agent_source_lock              # file locking primitives
+agent_source_metrics           # metrics collection and export
+agent_source_registry          # agent registry lookups
+```
+
+### Lifecycle Logging
+
+Used by orchestrator agents and top-level agents (e.g., `plan-mode`, `pr-comment-fix`)
+for timing and structured results. Leaf sub-agents can skip these since the parent
+orchestrator tracks phase timing via `_phase_start`/`_phase_end`.
+
+```bash
+# Record agent start (creates start timestamp in worker dir)
+agent_log_start "$worker_dir" "$task_id"
+
+# Record agent completion (calculates duration from start)
+agent_log_complete "$worker_dir" "$loop_result" "$start_time"
+
+# Create standard subdirectories (logs/, summaries/)
+agent_create_directories "$worker_dir"
 ```
 
 ### Result Management
 
 ```bash
 # Write structured result to agent-result.json
-agent_write_result "$worker_dir" "VALIDATION_result" "PASS"
+# Args: worker_dir, status ("success"|"failure"|"partial"), exit_code, outputs_json
+agent_write_result "$worker_dir" "$result_status" "$result_exit_code" "$outputs_json"
 
 # Read result from sub-agent
-result=$(agent_read_subagent_result "$worker_dir" "VALIDATION_result" "fallback.txt")
+# Args: worker_dir, result_key (e.g. "SECURITY_result"), fallback_file
+result=$(agent_read_subagent_result "$worker_dir" "SECURITY_result" "security-result.txt")
+
+# Read validation result specifically
+validation=$(agent_read_validation "$worker_dir")
+```
+
+## Execution Patterns
+
+### Unsupervised Ralph Loop
+
+Used by leaf agents for iterative execution without a supervisor.
+Sources: `agent_source_ralph`.
+
+```bash
+run_ralph_loop "$workspace" \
+    "$system_prompt" \
+    "user_prompt_callback_fn" \
+    "completion_check_fn" \
+    "$max_iterations" "$max_turns" "$worker_dir" "audit"
+```
+
+| # | Arg | Description |
+|---|-----|-------------|
+| 1 | workspace | Working directory for Claude sessions |
+| 2 | system_prompt | System prompt string |
+| 3 | user_prompt_fn | Name of callback function for user prompt |
+| 4 | completion_check_fn | Name of callback that returns 0 when done |
+| 5 | max_iterations | Max ralph loop iterations |
+| 6 | max_turns | Max turns per Claude session |
+| 7 | worker_dir | Worker directory for logs/output |
+| 8 | log_prefix | Prefix for log filenames (e.g. "audit", "test") |
+
+**User prompt callback** (2 args — no supervisor context):
+
+```bash
+my_user_prompt_fn() {
+    local iteration="$1"   # Current iteration number (0-based)
+    local output_dir="$2"  # Worker directory
+    # Echo/cat the prompt content to stdout
+}
+```
+
+### Single-Run Agent
+
+Used by agents that need only one Claude session (no iteration loop).
+Sources: `agent_source_once`.
+
+```bash
+run_agent_once "$workspace" "$system_prompt" "$user_prompt" "$log_file" "$max_turns"
+```
+
+| # | Arg | Description |
+|---|-----|-------------|
+| 1 | workspace | Working directory for Claude session |
+| 2 | system_prompt | System prompt string |
+| 3 | user_prompt | Full user prompt string (not a callback) |
+| 4 | log_file | Path to write the JSON stream log |
+| 5 | max_turns | Max turns for the session |
+
+Used by: `documentation-writer`, `resume-decide`.
+
+### Supervised Ralph Loop
+
+Used by orchestrator agents for iterative execution with a supervisor agent
+that provides guidance between iterations.
+Sources: `agent_source_ralph_supervised`.
+
+### Positional Arguments
+
+```bash
+run_ralph_loop_supervised "$workspace" \
+    "$system_prompt" \
+    "user_prompt_callback_fn" \
+    "completion_check_fn" \
+    "$max_iterations" "$max_turns" "$worker_dir" "iteration" \
+    "$supervisor_interval"
+```
+
+| # | Arg | Description |
+|---|-----|-------------|
+| 1 | workspace | Working directory for Claude sessions |
+| 2 | system_prompt | System prompt string |
+| 3 | user_prompt_fn | Name of callback function for user prompt |
+| 4 | completion_check_fn | Name of callback that returns 0 when done |
+| 5 | max_iterations | Max ralph loop iterations |
+| 6 | max_turns | Max turns per Claude session |
+| 7 | worker_dir | Worker directory for logs/output |
+| 8 | log_prefix | Prefix for log filenames (e.g. "iteration") |
+| 9 | supervisor_interval | Run supervisor every N iterations |
+
+### Callback Signatures
+
+**User prompt callback** — called each iteration to build the user prompt:
+
+```bash
+my_user_prompt_fn() {
+    local iteration="$1"           # Current iteration number (0-based)
+    local output_dir="$2"          # Worker directory
+    local supervisor_dir="$3"      # Supervisor output directory
+    local supervisor_feedback="$4" # Feedback from supervisor (empty on first run)
+    # Echo/cat the prompt content to stdout
+}
+```
+
+**Completion check callback** — returns 0 if work is complete, non-zero to continue:
+
+```bash
+my_completion_check_fn() {
+    # Return 0 when all work is done
+    ! has_incomplete_tasks "$PRD_FILE"
+}
 ```
 
 ## Invocation Modes
@@ -226,9 +465,10 @@ Excludes lifecycle management - just executes `agent_run()`.
 
 ## Configuration
 
-### Parameters
+### Orchestrator Parameters
 
-`max_iterations` and `max_turns` are passed as function arguments to `agent_run()`:
+Orchestrator agents (`task-worker`, `task-worker-plan-mode`) receive positional
+arguments for configuration and resume support:
 
 ```bash
 agent_run() {
@@ -236,13 +476,41 @@ agent_run() {
     local project_dir="$2"
     local max_iterations="${3:-${AGENT_CONFIG_MAX_ITERATIONS:-20}}"
     local max_turns="${4:-${AGENT_CONFIG_MAX_TURNS:-50}}"
+    local start_from_step="${5:-execution}"       # Pipeline phase to resume from
+    local resume_instructions="${6:-}"            # Path to resume context file
     ...
 }
 ```
 
-These values originate from CLI flags (`--max-iters`, `--max-turns`) passed to
-`wiggum start`, `wiggum run`, or `wiggum resume`, and flow through `run_agent()`
-in agent-registry.sh.
+- `max_iterations` / `max_turns`: Originate from CLI flags (`--max-iters`, `--max-turns`)
+  passed to `wiggum start`, `wiggum run`, or `wiggum resume`, and flow through
+  `run_agent()` in agent-registry.sh.
+- `start_from_step`: Which pipeline phase to begin from (used for resuming
+  interrupted workers). Valid values match the `TASK_PIPELINE` array:
+  `execution`, `audit`, `test`, `docs`, `validation`, `finalization`.
+- `resume_instructions`: Path to a file containing context from a previous
+  interrupted session, passed to the user prompt on iteration 0.
+
+### Leaf Agent Parameters
+
+Leaf agents are invoked via `run_sub_agent` which only passes `worker_dir` and
+`project_dir`. They read iteration/turn limits from environment variables set by
+`load_agent_config` in agent-registry, with optional per-agent env var overrides:
+
+```bash
+agent_run() {
+    local worker_dir="$1"
+    local project_dir="$2"
+    # Read from agent-specific env var, falling back to config, then default
+    local max_turns="${WIGGUM_SECURITY_AUDIT_MAX_TURNS:-${AGENT_CONFIG_MAX_TURNS:-60}}"
+    local max_iterations="${WIGGUM_SECURITY_AUDIT_MAX_ITERATIONS:-${AGENT_CONFIG_MAX_ITERATIONS:-8}}"
+    ...
+}
+```
+
+Naming convention for env var overrides: `WIGGUM_{AGENT_NAME}_MAX_TURNS` where
+`AGENT_NAME` is the uppercased, underscore-separated agent name (e.g.,
+`WIGGUM_TEST_COVERAGE_MAX_TURNS`, `WIGGUM_CONFLICT_RESOLVER_MAX_TURNS`).
 
 Worker and task IDs are derived from the worker directory name:
 
@@ -274,19 +542,27 @@ Agents read configuration from `config/agents.json`:
 
 ## Built-in Agents
 
+### Orchestrator Agents
+
 | Agent | Purpose |
 |-------|---------|
 | `task-worker` | Main task execution from PRD |
 | `task-worker-plan-mode` | Task execution with planning phase |
-| `plan-mode` | Read-only codebase exploration and planning |
-| `validation-review` | Code review against PRD requirements |
-| `pr-comment-fix` | Address PR review comments |
-| `security-audit` | Security vulnerability scanning |
-| `security-fix` | Fix security vulnerabilities |
-| `git-conflict-resolver` | Resolve merge conflicts |
-| `code-review` | Code quality review |
-| `test-coverage` | Generate tests for changes |
-| `documentation-writer` | Update documentation |
+
+### Leaf Agents
+
+| Agent | Execution | Purpose |
+|-------|-----------|---------|
+| `plan-mode` | `run_ralph_loop` | Read-only codebase exploration and planning |
+| `validation-review` | `run_ralph_loop` | Code review against PRD requirements |
+| `security-audit` | `run_ralph_loop` | Security vulnerability scanning |
+| `security-fix` | `run_ralph_loop` | Fix security vulnerabilities |
+| `test-coverage` | `run_ralph_loop` | Generate tests for changes |
+| `code-review` | `run_ralph_loop` | Code quality review |
+| `git-conflict-resolver` | `run_ralph_loop` | Resolve merge conflicts |
+| `pr-comment-fix` | `run_ralph_loop` | Address PR review comments |
+| `documentation-writer` | `run_agent_once` | Update documentation |
+| `resume-decide` | `run_agent_once` | Analyze logs to decide resume step |
 
 ## Testing Agents
 

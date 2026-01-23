@@ -12,7 +12,8 @@ set -euo pipefail
 #   - task-comments.md : File containing PR review comments to address
 #   - workspace        : Directory containing the code to modify
 # OUTPUT_FILES:
-#   - comment-status.md : Status tracking file for addressed comments
+#   - comment-status.md       : Status tracking file for addressed comments
+#   - comment-fix-result.txt  : Contains PASS, FIX, FAIL, or SKIP
 # =============================================================================
 
 # Source base library and initialize metadata
@@ -27,7 +28,8 @@ agent_required_paths() {
 
 # Output files that must exist (non-empty) after agent completes
 agent_output_files() {
-    echo "comment-status.md"
+    echo "reports/comment-status.md"
+    echo "results/comment-fix-result.txt"
 }
 
 # Source dependencies using base library helpers
@@ -47,7 +49,7 @@ agent_run() {
 
     local workspace="$worker_dir/workspace"
     local comments_file="$worker_dir/task-comments.md"
-    local status_file="$worker_dir/comment-status.md"
+    local status_file="$worker_dir/reports/comment-status.md"
 
     # Record start time and log agent start
     local start_time
@@ -76,6 +78,7 @@ agent_run() {
     comment_count=$(grep -c '^### ' "$comments_file" 2>/dev/null || echo "0")
     if [ "$comment_count" -eq 0 ]; then
         log "No comments found in $comments_file - nothing to fix"
+        echo "SKIP" > "$worker_dir/results/comment-fix-result.txt"
         agent_log_complete "$worker_dir" 0 "$start_time"
         agent_write_result "$worker_dir" "success" 0 '{"comments_fixed":0,"comments_pending":0,"comments_skipped":0}'
         rm -f "$worker_dir/.needs-fix"
@@ -133,8 +136,12 @@ agent_run() {
     local result_status="failure"
     if [ "$loop_result" -eq 0 ] && [ "$comments_pending" -eq 0 ]; then
         result_status="success"
+        echo "PASS" > "$worker_dir/results/comment-fix-result.txt"
     elif [ "$comments_fixed" -gt 0 ]; then
         result_status="partial"
+        echo "FIX" > "$worker_dir/results/comment-fix-result.txt"
+    else
+        echo "FAIL" > "$worker_dir/results/comment-fix-result.txt"
     fi
 
     # Log completion and write structured result

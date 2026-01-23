@@ -7,12 +7,12 @@ set -euo pipefail
 # AGENT_DESCRIPTION: Code review agent that reviews code changes for bugs,
 #   code smells, and best practices. Uses ralph loop pattern with summaries.
 #   Reviews staged changes, specific commits, or branch differences based on
-#   REVIEW_SCOPE env var. Returns APPROVE/REQUEST_CHANGES/COMMENT result.
+#   REVIEW_SCOPE env var. Returns PASS/FAIL/FIX result.
 # REQUIRED_PATHS:
 #   - workspace : Directory containing the code to review
 # OUTPUT_FILES:
 #   - review-report.md  : Detailed code review findings
-#   - review-result.txt : Contains APPROVE, REQUEST_CHANGES, or COMMENT
+#   - review-result.txt : Contains PASS, FAIL, or FIX
 # =============================================================================
 
 # Source base library and initialize metadata
@@ -26,7 +26,7 @@ agent_required_paths() {
 
 # Output files that must exist (non-empty) after agent completes
 agent_output_files() {
-    echo "review-result.txt"
+    echo "results/review-result.txt"
 }
 
 # Source dependencies using base library helpers
@@ -56,7 +56,7 @@ agent_run() {
     agent_create_directories "$worker_dir"
 
     # Clean up old review files before re-running
-    rm -f "$worker_dir/review-result.txt" "$worker_dir/review-report.md"
+    rm -f "$worker_dir/results/review-result.txt" "$worker_dir/reports/review-report.md"
     rm -f "$worker_dir/logs/review-"*.log
     rm -f "$worker_dir/summaries/review-"*.txt
 
@@ -113,7 +113,7 @@ Please continue your review:
 2. If you found issues that need deeper investigation, investigate them now
 3. When your review is complete, provide the final <review> and <result> tags
 
-Remember: The <result> tag must contain exactly APPROVE, REQUEST_CHANGES, or COMMENT.
+Remember: The <result> tag must contain exactly PASS, FAIL, or FIX.
 CONTINUE_EOF
     fi
 }
@@ -127,7 +127,7 @@ _review_completion_check() {
     latest_log=$(find "$worker_dir/logs" -maxdepth 1 -name "review-*.log" ! -name "*summary*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
 
     if [ -n "$latest_log" ] && [ -f "$latest_log" ]; then
-        if grep -qP '<result>(APPROVE|REQUEST_CHANGES|COMMENT)</result>' "$latest_log" 2>/dev/null; then
+        if grep -qP '<result>(PASS|FAIL|FIX)</result>' "$latest_log" 2>/dev/null; then
             return 0  # Complete
         fi
     fi
@@ -249,9 +249,9 @@ perfectly fine if the code is good.
 
 ## Decision Criteria
 
-* REQUEST_CHANGES: Any BLOCKER or CRITICAL issues
-* APPROVE: No blockers (may have MAJOR/MINOR notes)
-* COMMENT: Only suggestions, no real issues
+* FAIL: Any BLOCKER or CRITICAL issues
+* FIX: MAJOR issues worth addressing but not blocking
+* PASS: No blockers, no major issues (may have MINOR notes)
 
 ## Response Format
 
@@ -286,13 +286,13 @@ Files: N | Lines: +X/-Y | Issues: N blocker, N critical, N major, N minor
 
 </review>
 
-<result>APPROVE</result>
+<result>PASS</result>
 OR
-<result>REQUEST_CHANGES</result>
+<result>FAIL</result>
 OR
-<result>COMMENT</result>
+<result>FIX</result>
 
-The <result> tag is parsed programmatically. It MUST be exactly one of: APPROVE, REQUEST_CHANGES, COMMENT.
+The <result> tag is parsed programmatically. It MUST be exactly one of: PASS, FAIL, FIX.
 EOF
 }
 
@@ -308,33 +308,33 @@ _extract_review_result() {
 
     if [ -n "$log_file" ] && [ -f "$log_file" ]; then
         # Extract review content between <review> tags
-        local review_path="$worker_dir/review-report.md"
+        local review_path="$worker_dir/reports/review-report.md"
         if grep -q '<review>' "$log_file"; then
             sed -n '/<review>/,/<\/review>/p' "$log_file" | sed '1d;$d' > "$review_path"
             log "Code review report saved to review-report.md"
         fi
 
-        # Extract result tag (APPROVE, REQUEST_CHANGES, or COMMENT)
-        REVIEW_RESULT=$(grep -oP '(?<=<result>)(APPROVE|REQUEST_CHANGES|COMMENT)(?=</result>)' "$log_file" | head -1)
+        # Extract result tag (PASS, FAIL, or FIX)
+        REVIEW_RESULT=$(grep -oP '(?<=<result>)(PASS|FAIL|FIX)(?=</result>)' "$log_file" | head -1)
         if [ -z "$REVIEW_RESULT" ]; then
             REVIEW_RESULT="UNKNOWN"
         fi
     fi
 
     # Store result in standard location
-    echo "$REVIEW_RESULT" > "$worker_dir/review-result.txt"
+    echo "$REVIEW_RESULT" > "$worker_dir/results/review-result.txt"
 }
 
 # Check review result from a worker directory (utility for callers)
-# Returns: 0 if APPROVE, 1 if REQUEST_CHANGES/COMMENT/UNKNOWN
+# Returns: 0 if PASS, 1 if FAIL/FIX/UNKNOWN
 check_review_result() {
     local worker_dir="$1"
-    local result_file="$worker_dir/review-result.txt"
+    local result_file="$worker_dir/results/review-result.txt"
 
     if [ -f "$result_file" ]; then
         local result
         result=$(cat "$result_file")
-        if [ "$result" = "APPROVE" ]; then
+        if [ "$result" = "PASS" ]; then
             return 0
         fi
     fi

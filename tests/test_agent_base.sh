@@ -449,7 +449,7 @@ test_agent_registry_sh_syntax() {
 }
 
 test_task_worker_sh_syntax() {
-    if bash -n "$WIGGUM_HOME/lib/agents/task-worker.sh" 2>/dev/null; then
+    if bash -n "$WIGGUM_HOME/lib/agents/pipeline/task-worker.sh" 2>/dev/null; then
         assert_success "true" "task-worker.sh should have valid bash syntax"
     else
         assert_failure "true" "task-worker.sh should have valid bash syntax"
