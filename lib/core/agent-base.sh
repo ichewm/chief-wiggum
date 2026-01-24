@@ -396,7 +396,7 @@ validate_result_schema() {
     gate_result=$(jq -r '.outputs.gate_result // empty' "$result_file" 2>/dev/null)
     if [ -n "$gate_result" ]; then
         case "$gate_result" in
-            PASS|FAIL|FIX|STOP) ;;
+            PASS|FAIL|FIX|SKIP) ;;
             *)
                 log_error "Result schema: 'outputs.gate_result' is invalid ('$gate_result') in $(basename "$result_file") - expected PASS|FAIL|FIX|STOP"
                 errors=1

@@ -55,9 +55,9 @@ git_safety_checkpoint() {
         if ! git diff --staged --quiet; then
             # Set git identity for checkpoint commit
             export GIT_AUTHOR_NAME="Ralph Wiggum"
-            export GIT_AUTHOR_EMAIL="ralph@wiggum.local"
+            export GIT_AUTHOR_EMAIL="ralph@wiggum.cc"
             export GIT_COMMITTER_NAME="Ralph Wiggum"
-            export GIT_COMMITTER_EMAIL="ralph@wiggum.local"
+            export GIT_COMMITTER_EMAIL="ralph@wiggum.cc"
 
             # Create checkpoint commit
             if git commit --no-gpg-sign -m "chore: checkpoint before read-only agent" >/dev/null 2>&1; then
@@ -184,15 +184,13 @@ git_create_commit() {
 
 Worker: $worker_id
 Priority: ${task_priority}
-Completed by Ralph Wiggum autonomous worker.
-
-Co-Authored-By: Ralph Wiggum <ralph@wiggum.local>"
+Completed by Ralph Wiggum autonomous worker."
 
         # Set git author/committer identity for this commit
         export GIT_AUTHOR_NAME="Ralph Wiggum"
-        export GIT_AUTHOR_EMAIL="ralph@wiggum.local"
+        export GIT_AUTHOR_EMAIL="ralph@wiggum.cc"
         export GIT_COMMITTER_NAME="Ralph Wiggum"
-        export GIT_COMMITTER_EMAIL="ralph@wiggum.local"
+        export GIT_COMMITTER_EMAIL="ralph@wiggum.cc"
 
         if ! git commit --no-gpg-sign -m "$commit_msg" 2>&1; then
             log_error "Failed to create commit"

@@ -331,15 +331,13 @@ _commit_and_push_fixes() {
     local commit_msg="fix: Address PR review comments
 
 Automated fixes for PR review feedback.
-See comment-status.md for details on addressed items.
-
-Co-Authored-By: Ralph Wiggum <ralph@wiggum.local>"
+See comment-status.md for details on addressed items."
 
     # Set git author/committer identity
     export GIT_AUTHOR_NAME="Ralph Wiggum"
-    export GIT_AUTHOR_EMAIL="ralph@wiggum.local"
+    export GIT_AUTHOR_EMAIL="ralph@wiggum.cc"
     export GIT_COMMITTER_NAME="Ralph Wiggum"
-    export GIT_COMMITTER_EMAIL="ralph@wiggum.local"
+    export GIT_COMMITTER_EMAIL="ralph@wiggum.cc"
 
     if ! git commit --no-gpg-sign -m "$commit_msg" 2>&1; then
         log_error "Failed to create commit"
