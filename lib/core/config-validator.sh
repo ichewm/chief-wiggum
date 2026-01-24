@@ -172,8 +172,8 @@ validate_agents_config() {
         [ -z "$agent_name" ] && continue
 
         # Validate agent name format
-        if ! [[ "$agent_name" =~ ^[a-z][a-z0-9-]*$ ]]; then
-            log_error "Invalid agent name: '$agent_name' (must be lowercase with hyphens)"
+        if ! [[ "$agent_name" =~ ^[a-z][a-z0-9.-]*$ ]]; then
+            log_error "Invalid agent name: '$agent_name' (must be lowercase with hyphens and dots)"
             ((++errors))
             continue
         fi

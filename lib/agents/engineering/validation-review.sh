@@ -17,7 +17,7 @@ set -euo pipefail
 
 # Source base library and initialize metadata
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
-agent_init_metadata "validation-review" "Code review and validation agent that reviews completed work against PRD requirements"
+agent_init_metadata "engineering.validation-review" "Code review and validation agent that reviews completed work against PRD requirements"
 
 # Required paths before agent can run
 agent_required_paths() {

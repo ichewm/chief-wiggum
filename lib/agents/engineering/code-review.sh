@@ -17,7 +17,7 @@ set -euo pipefail
 
 # Source base library and initialize metadata
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
-agent_init_metadata "code-review" "Code review agent that reviews changes for bugs, code smells, and best practices"
+agent_init_metadata "engineering.code-review" "Code review agent that reviews changes for bugs, code smells, and best practices"
 
 # Required paths before agent can run
 agent_required_paths() {
@@ -84,6 +84,7 @@ agent_run() {
 # User prompt callback for ralph loop
 _review_user_prompt() {
     local iteration="$1"
+    # shellcheck disable=SC2034  # output_dir available for future use
     local output_dir="$2"
 
     # Always include the initial prompt to ensure full context after summarization

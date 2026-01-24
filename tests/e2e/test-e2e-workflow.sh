@@ -73,7 +73,7 @@ JSON
         cat > .ralph/agents.json << 'JSON'
 {
     "agents": {
-        "task-executor": {
+        "system.task-executor": {
             "max_iterations": 2,
             "max_turns": 5,
             "timeout_seconds": 120
@@ -258,7 +258,7 @@ test_activity_log_events() {
 
     activity_init "$project_dir"
 
-    activity_log "worker.spawned" "worker-1" "TASK-001" "agent=task-executor"
+    activity_log "worker.spawned" "worker-1" "TASK-001" "agent=system.task-executor"
     activity_log "step.started" "worker-1" "TASK-001" "step_id=planning"
     activity_log "agent.completed" "worker-1" "TASK-001" "exit_code=0"
 

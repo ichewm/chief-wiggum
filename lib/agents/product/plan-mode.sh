@@ -18,7 +18,7 @@ set -euo pipefail
 
 # Source base library and initialize metadata
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
-agent_init_metadata "plan-mode" "Creates implementation plans stored in .ralph/plans/TASK-xxx.md"
+agent_init_metadata "product.plan-mode" "Creates implementation plans stored in .ralph/plans/TASK-xxx.md"
 
 # Required paths before agent can run
 agent_required_paths() {

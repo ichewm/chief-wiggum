@@ -6,12 +6,12 @@
       "timeout_seconds": 3600,
       "plan_mode": false
     },
-    "pr-comment-fix": {
+    "engineering.pr-comment-fix": {
       "max_iterations": 10,
       "max_turns": 30,
       "auto_commit": true
     },
-    "validation-review": {
+    "engineering.validation-review": {
       "max_iterations": 5,
       "max_turns": 50
     }

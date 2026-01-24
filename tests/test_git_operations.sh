@@ -192,27 +192,27 @@ test_branch_naming_includes_timestamp() {
 
 test_git_is_readonly_agent() {
     # These should be read-only
-    git_is_readonly_agent "security-audit"
-    assert_equals "0" "$?" "security-audit should be read-only"
+    git_is_readonly_agent "engineering.security-audit"
+    assert_equals "0" "$?" "engineering.security-audit should be read-only"
 
-    git_is_readonly_agent "validation-review"
-    assert_equals "0" "$?" "validation-review should be read-only"
+    git_is_readonly_agent "engineering.validation-review"
+    assert_equals "0" "$?" "engineering.validation-review should be read-only"
 
-    git_is_readonly_agent "plan-mode"
-    assert_equals "0" "$?" "plan-mode should be read-only"
+    git_is_readonly_agent "product.plan-mode"
+    assert_equals "0" "$?" "product.plan-mode should be read-only"
 
-    git_is_readonly_agent "code-review"
-    assert_equals "0" "$?" "code-review should be read-only"
+    git_is_readonly_agent "engineering.code-review"
+    assert_equals "0" "$?" "engineering.code-review should be read-only"
 
     # These should NOT be read-only
     git_is_readonly_agent "system.task-worker"
     assert_equals "1" "$?" "system.task-worker should NOT be read-only"
 
-    git_is_readonly_agent "security-fix"
-    assert_equals "1" "$?" "security-fix should NOT be read-only"
+    git_is_readonly_agent "engineering.security-fix"
+    assert_equals "1" "$?" "engineering.security-fix should NOT be read-only"
 
-    git_is_readonly_agent "test-coverage"
-    assert_equals "1" "$?" "test-coverage should NOT be read-only"
+    git_is_readonly_agent "engineering.test-coverage"
+    assert_equals "1" "$?" "engineering.test-coverage should NOT be read-only"
 }
 
 # =============================================================================

@@ -19,7 +19,7 @@ set -euo pipefail
 
 # Source base library and initialize metadata
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
-agent_init_metadata "resume-decide" "Analyzes logs to decide resume step"
+agent_init_metadata "system.resume-decide" "Analyzes logs to decide resume step"
 
 # Required paths before agent can run
 agent_required_paths() {

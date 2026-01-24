@@ -17,7 +17,7 @@ set -euo pipefail
 
 # Source base library and initialize metadata
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
-agent_init_metadata "git-conflict-resolver" "Git merge conflict resolver that detects and resolves conflicts in the workspace"
+agent_init_metadata "engineering.git-conflict-resolver" "Git merge conflict resolver that detects and resolves conflicts in the workspace"
 
 # Required paths before agent can run
 agent_required_paths() {
@@ -111,6 +111,7 @@ No merge conflicts were found in the workspace. The repository is in a clean sta
 # User prompt callback for ralph loop
 _conflict_user_prompt() {
     local iteration="$1"
+    # shellcheck disable=SC2034  # output_dir available for future use
     local output_dir="$2"
 
     # Always include the initial prompt to ensure full context after summarization

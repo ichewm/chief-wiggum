@@ -218,10 +218,10 @@ test_load_fix_config() {
     "steps": [
         {
             "id": "audit-step",
-            "agent": "security-audit",
+            "agent": "engineering.security-audit",
             "fix": {
                 "id": "audit-fix",
-                "agent": "security-fix",
+                "agent": "engineering.security-fix",
                 "max_attempts": 5,
                 "commit_after": true
             }
@@ -238,7 +238,7 @@ PIPE
     local rc=$?
 
     assert_equals "0" "$rc" "pipeline_load should succeed"
-    assert_equals "security-fix" "$(pipeline_get_fix 0 ".agent")" "First step fix agent should be security-fix"
+    assert_equals "engineering.security-fix" "$(pipeline_get_fix 0 ".agent")" "First step fix agent should be engineering.security-fix"
     assert_equals "5" "$(pipeline_get_fix 0 ".max_attempts" "2")" "First step fix max_attempts should be 5"
     assert_equals "true" "$(pipeline_get_fix 0 ".commit_after" "true")" "First step fix commit_after should be true"
     assert_equals "" "$(pipeline_get_fix 1 ".agent")" "Second step fix agent should be empty"

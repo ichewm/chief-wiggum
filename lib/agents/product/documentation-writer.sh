@@ -16,7 +16,7 @@ set -euo pipefail
 
 # Source base library and initialize metadata
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
-agent_init_metadata "documentation-writer" "Documentation update agent for code changes"
+agent_init_metadata "product.documentation-writer" "Documentation update agent for code changes"
 
 # Required paths before agent can run
 agent_required_paths() {

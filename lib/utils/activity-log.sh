@@ -41,7 +41,7 @@ activity_init() {
 #   worker_id - Worker identifier (can be empty)
 #   task_id   - Task identifier (can be empty)
 #   extra_json_fields... - Additional key=value pairs to include in the JSON
-#                          (e.g., "step_id=planning" "agent=plan-mode")
+#                          (e.g., "step_id=planning" "agent=product.plan-mode")
 #
 # Returns: 0 on success, 1 if not initialized
 activity_log() {

@@ -14,14 +14,14 @@ Chief Wiggum agents operate in isolated worker directories but need to share sta
 ├── workspace/                # Git worktree for isolated work
 ├── agent.pid                 # PID of running agent
 ├── results/
-│   ├── 1705312200-security-audit-result.json   # Gate decision + metadata
-│   ├── 1705312500-security-fix-result.json     # Gate decision + metadata
-│   ├── 1705312800-validation-review-result.json
+│   ├── 1705312200-engineering.security-audit-result.json   # Gate decision + metadata
+│   ├── 1705312500-engineering.security-fix-result.json     # Gate decision + metadata
+│   ├── 1705312800-engineering.validation-review-result.json
 │   └── 1705313100-system.task-worker-result.json
 ├── reports/
-│   ├── 1705312200-security-audit-report.md     # Analysis output
-│   ├── 1705312500-security-fix-report.md       # Status output
-│   └── 1705312800-validation-review-report.md
+│   ├── 1705312200-engineering.security-audit-report.md     # Analysis output
+│   ├── 1705312500-engineering.security-fix-report.md       # Status output
+│   └── 1705312800-engineering.validation-review-report.md
 ├── logs/
 │   ├── iteration-0.log       # Claude conversation log (iteration 0)
 │   ├── iteration-1.log       # Claude conversation log (iteration 1)
@@ -46,7 +46,7 @@ All agent results are written to epoch-named JSON files in `results/`:
 
 ```json
 {
-  "agent_type": "security-audit",
+  "agent_type": "engineering.security-audit",
   "status": "success",
   "exit_code": 0,
   "started_at": "2024-01-15T10:30:00Z",
@@ -83,13 +83,13 @@ agent_write_report "$worker_dir" "$report_content"
 
 ```bash
 # Read gate_result from a sub-agent (2-arg signature)
-result=$(agent_read_subagent_result "$worker_dir" "security-audit")
+result=$(agent_read_subagent_result "$worker_dir" "engineering.security-audit")
 
 # Find the latest result file for an agent type
-result_file=$(agent_find_latest_result "$worker_dir" "security-audit")
+result_file=$(agent_find_latest_result "$worker_dir" "engineering.security-audit")
 
 # Find the latest report file for an agent type
-report_file=$(agent_find_latest_report "$worker_dir" "security-audit")
+report_file=$(agent_find_latest_report "$worker_dir" "engineering.security-audit")
 ```
 
 ### Gate Result Values
@@ -98,16 +98,16 @@ All gate agents produce a `gate_result` field with standardized values:
 
 | Agent | gate_result Values |
 |-------|-------------------|
-| validation-review | PASS, FAIL |
-| security-audit | PASS, FIX, STOP |
-| code-review | PASS, FAIL, FIX |
-| test-coverage | PASS, FAIL, SKIP |
-| documentation-writer | PASS, SKIP |
-| security-fix | PASS, FIX, FAIL |
-| git-conflict-resolver | PASS, FAIL, SKIP |
-| pr-comment-fix | PASS, FIX, FAIL, SKIP |
-| plan-mode | PASS, FAIL |
-| resume-decide | PASS, STOP, FAIL |
+| engineering.validation-review | PASS, FAIL |
+| engineering.security-audit | PASS, FIX, STOP |
+| engineering.code-review | PASS, FAIL, FIX |
+| engineering.test-coverage | PASS, FAIL, SKIP |
+| product.documentation-writer | PASS, SKIP |
+| engineering.security-fix | PASS, FIX, FAIL |
+| engineering.git-conflict-resolver | PASS, FAIL, SKIP |
+| engineering.pr-comment-fix | PASS, FIX, FAIL, SKIP |
+| product.plan-mode | PASS, FAIL |
+| system.resume-decide | PASS, STOP, FAIL |
 
 ## Progress Communication
 
@@ -174,11 +174,11 @@ agent_run() {
     # ... main work ...
 
     # Invoke validation as sub-agent
-    run_sub_agent "validation-review" "$worker_dir" "$project_dir"
+    run_sub_agent "engineering.validation-review" "$worker_dir" "$project_dir"
 
     # Read sub-agent gate_result (2-arg signature)
     local result
-    result=$(agent_read_subagent_result "$worker_dir" "validation-review")
+    result=$(agent_read_subagent_result "$worker_dir" "engineering.validation-review")
 
     if [ "$result" = "PASS" ]; then
         # Proceed with commit/PR

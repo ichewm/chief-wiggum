@@ -17,7 +17,7 @@ source "$WIGGUM_HOME/lib/utils/calculate-cost.sh"
 # any changes the agent may have made (which it shouldn't have).
 
 # List of agent types that are read-only (should not modify workspace)
-_GIT_READONLY_AGENTS="security-audit validation-review plan-mode code-review"
+_GIT_READONLY_AGENTS="engineering.security-audit engineering.validation-review product.plan-mode engineering.code-review"
 
 # Check if an agent type is read-only
 # Args: <agent_type>

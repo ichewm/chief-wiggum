@@ -472,34 +472,34 @@ test_git_is_readonly_agent_types() {
     local result
 
     # Read-only agents should return 0 (true)
-    git_is_readonly_agent "security-audit"
+    git_is_readonly_agent "engineering.security-audit"
     result=$?
-    assert_equals "0" "$result" "security-audit should be read-only"
+    assert_equals "0" "$result" "engineering.security-audit should be read-only"
 
-    git_is_readonly_agent "validation-review"
+    git_is_readonly_agent "engineering.validation-review"
     result=$?
-    assert_equals "0" "$result" "validation-review should be read-only"
+    assert_equals "0" "$result" "engineering.validation-review should be read-only"
 
-    git_is_readonly_agent "plan-mode"
+    git_is_readonly_agent "product.plan-mode"
     result=$?
-    assert_equals "0" "$result" "plan-mode should be read-only"
+    assert_equals "0" "$result" "product.plan-mode should be read-only"
 
-    git_is_readonly_agent "code-review"
+    git_is_readonly_agent "engineering.code-review"
     result=$?
-    assert_equals "0" "$result" "code-review should be read-only"
+    assert_equals "0" "$result" "engineering.code-review should be read-only"
 
     # Non-read-only agents should return 1 (false)
-    git_is_readonly_agent "task-executor"
+    git_is_readonly_agent "system.task-executor"
     result=$?
-    assert_equals "1" "$result" "task-executor should NOT be read-only"
+    assert_equals "1" "$result" "system.task-executor should NOT be read-only"
 
-    git_is_readonly_agent "security-fix"
+    git_is_readonly_agent "engineering.security-fix"
     result=$?
-    assert_equals "1" "$result" "security-fix should NOT be read-only"
+    assert_equals "1" "$result" "engineering.security-fix should NOT be read-only"
 
-    git_is_readonly_agent "documentation-writer"
+    git_is_readonly_agent "product.documentation-writer"
     result=$?
-    assert_equals "1" "$result" "documentation-writer should NOT be read-only"
+    assert_equals "1" "$result" "product.documentation-writer should NOT be read-only"
 
     git_is_readonly_agent "nonexistent-agent"
     result=$?

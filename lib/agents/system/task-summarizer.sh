@@ -15,7 +15,7 @@ set -euo pipefail
 
 # Source base library and initialize metadata
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
-agent_init_metadata "task-summarizer" "Generates final task summary by resuming the executor session"
+agent_init_metadata "system.task-summarizer" "Generates final task summary by resuming the executor session"
 
 # Required paths before agent can run
 agent_required_paths() {
@@ -29,6 +29,7 @@ agent_source_resume
 # Main entry point
 agent_run() {
     local worker_dir="$1"
+    # shellcheck disable=SC2034  # project_dir is part of agent_run interface
     local project_dir="$2"
     local max_turns="${AGENT_CONFIG_MAX_TURNS:-3}"
 

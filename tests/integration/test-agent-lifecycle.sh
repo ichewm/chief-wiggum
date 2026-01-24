@@ -70,7 +70,7 @@ test_agent_context_setup() {
 # Test: Agent config loading from agents.json
 # =============================================================================
 test_agent_config_loading() {
-    load_agent_config "task-executor"
+    load_agent_config "system.task-executor"
 
     assert_not_equals "" "$AGENT_CONFIG_MAX_ITERATIONS" "max_iterations should be loaded"
     assert_not_equals "" "$AGENT_CONFIG_MAX_TURNS" "max_turns should be loaded"

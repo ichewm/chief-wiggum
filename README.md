@@ -223,8 +223,8 @@ agent_cleanup()           # [Optional] Cleanup after completion
 | Agent | Purpose |
 |-------|---------|
 | `system.task-worker` | Primary task execution - reads PRD, implements features |
-| `validation-review` | Code review against PRD requirements |
-| `pr-comment-fix` | Addresses PR review feedback iteratively |
+| `engineering.validation-review` | Code review against PRD requirements |
+| `engineering.pr-comment-fix` | Addresses PR review feedback iteratively |
 
 ### Kanban → Agent Linking
 
@@ -241,7 +241,7 @@ PRD generated from task specification
        ↓
 system.task-worker agent executes as entry point
        ↓
-Agent may invoke sub-agents (e.g., validation-review)
+Agent may invoke sub-agents (e.g., engineering.validation-review)
        ↓
 Kanban updated: [ ] → [=] → [x] or [*]
 ```
@@ -263,14 +263,14 @@ Agents can call other agents, creating a hierarchy. There are two invocation mod
 Example hierarchy:
 ```
 system.task-worker (top-level agent)
-  └── validation-review (sub-agent)
+  └── engineering.validation-review (sub-agent)
         └── [could call further sub-agents if needed]
 ```
 
 From `system/task-worker.sh`:
 ```bash
 # After main work completes, run validation as sub-agent
-run_sub_agent "validation-review" "$worker_dir" "$project_dir"
+run_sub_agent "engineering.validation-review" "$worker_dir" "$project_dir"
 ```
 
 ### Claude Invocation Patterns
@@ -343,10 +343,10 @@ Agents typically combine these patterns. Here's how `system.task-worker` uses al
    └── Resume last session to generate final summary
 
 3. SUB-AGENT CALL
-   └── validation-review agent (uses its own Ralph Loop internally)
+   └── engineering.validation-review agent (uses its own Ralph Loop internally)
 ```
 
-The `validation-review` sub-agent then runs its own Ralph Loop:
+The `engineering.validation-review` sub-agent then runs its own Ralph Loop:
 ```
 RALPH LOOP (validation)
 ├── Iteration 0: Read PRD + code, start review
@@ -376,7 +376,7 @@ RALPH LOOP (validation)
 │                              │                                   │
 │                              ▼                                   │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │              SUB-AGENT: validation-review                │    │
+│  │         SUB-AGENT: engineering.validation-review          │    │
 │  │  ┌──────────────────────────────────────┐               │    │
 │  │  │           RALPH LOOP                  │               │    │
 │  │  │  Iter 0 ──► Iter 1 ──► ... ──► Done   │               │    │

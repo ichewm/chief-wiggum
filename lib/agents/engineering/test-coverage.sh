@@ -17,7 +17,7 @@ set -euo pipefail
 
 # Source base library and initialize metadata
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
-agent_init_metadata "test-coverage" "Test generation agent for modified code using existing framework"
+agent_init_metadata "engineering.test-coverage" "Test generation agent for modified code using existing framework"
 
 # Required paths before agent can run
 agent_required_paths() {

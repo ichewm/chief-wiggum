@@ -18,7 +18,7 @@ set -euo pipefail
 
 # Source base library and initialize metadata
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
-agent_init_metadata "pr-comment-fix" "PR comment fix agent that addresses pull request review feedback"
+agent_init_metadata "engineering.pr-comment-fix" "PR comment fix agent that addresses pull request review feedback"
 
 # Required paths before agent can run
 agent_required_paths() {

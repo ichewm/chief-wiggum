@@ -17,7 +17,7 @@ set -euo pipefail
 
 # Source base library and initialize metadata
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
-agent_init_metadata "task-executor" "Executes task implementation via supervised ralph loop"
+agent_init_metadata "system.task-executor" "Executes task implementation via supervised ralph loop"
 
 # Required paths before agent can run
 agent_required_paths() {

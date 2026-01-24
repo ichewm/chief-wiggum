@@ -138,8 +138,8 @@ _pipeline_run_step() {
     # Write step config
     _write_step_config "$worker_dir" "$idx"
 
-    # Special handling for task-executor: write executor-config.json
-    if [ "$step_agent" = "task-executor" ]; then
+    # Special handling for system.task-executor: write executor-config.json
+    if [ "$step_agent" = "system.task-executor" ]; then
         _prepare_executor_config "$worker_dir" "$idx"
     fi
 
@@ -357,7 +357,7 @@ _write_step_config() {
     echo "$config_json" > "$worker_dir/step-config.json"
 }
 
-# Special case: prepare executor-config.json for task-executor
+# Special case: prepare executor-config.json for system.task-executor
 # Merges step config with PIPELINE_PLAN_FILE and PIPELINE_RESUME_INSTRUCTIONS
 #
 # Args:

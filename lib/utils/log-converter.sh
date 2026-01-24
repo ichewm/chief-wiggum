@@ -7,7 +7,7 @@
 #
 # In directory mode, processes all iteration and sub-agent logs in a worker
 # directory, producing readable markdown files in a conversations/ subdirectory.
-# Used by the resume-decide agent to understand what happened in a previous run.
+# Used by the system.resume-decide agent to understand what happened in a previous run.
 
 set -euo pipefail
 

@@ -6,47 +6,47 @@
       "timeout_seconds": 3600,
       "plan_mode": false
     },
-    "task-executor": {
+    "system.task-executor": {
       "max_iterations": 20,
       "max_turns": 50,
       "supervisor_interval": 2,
       "timeout_seconds": 3600
     },
-    "task-summarizer": {
+    "system.task-summarizer": {
       "max_iterations": 1,
       "max_turns": 3,
       "timeout_seconds": 120
     },
-    "plan-mode": {
+    "product.plan-mode": {
       "max_iterations": 5,
       "max_turns": 30,
       "timeout_seconds": 600
     },
-    "pr-comment-fix": {
+    "engineering.pr-comment-fix": {
       "max_iterations": 10,
       "max_turns": 30,
       "auto_commit": true
     },
-    "validation-review": {
+    "engineering.validation-review": {
       "max_iterations": 5,
       "max_turns": 50
     },
-    "git-conflict-resolver": {
+    "engineering.git-conflict-resolver": {
       "max_iterations": 10,
       "max_turns": 40,
       "timeout_seconds": 1800
     },
-    "security-audit": {
+    "engineering.security-audit": {
       "max_iterations": 8,
       "max_turns": 60,
       "timeout_seconds": 2400
     },
-    "security-fix": {
+    "engineering.security-fix": {
       "max_iterations": 15,
       "max_turns": 50,
       "timeout_seconds": 2400
     },
-    "code-review": {
+    "engineering.code-review": {
       "max_iterations": 6,
       "max_turns": 50,
       "timeout_seconds": 1800

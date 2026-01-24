@@ -17,7 +17,7 @@ set -euo pipefail
 
 # Source base library and initialize metadata
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
-agent_init_metadata "security-audit" "Security vulnerability scanner that audits codebase for security issues"
+agent_init_metadata "engineering.security-audit" "Security vulnerability scanner that audits codebase for security issues"
 
 # Required paths before agent can run
 agent_required_paths() {

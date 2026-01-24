@@ -158,6 +158,7 @@ agent_on_init() {
 # Returns: 0 to continue, non-zero to abort
 agent_on_ready() {
     local worker_dir="$1"
+    # shellcheck disable=SC2034  # project_dir is available for agent overrides
     local project_dir="$2"
     # Default: no-op
     return 0
@@ -185,6 +186,7 @@ agent_on_error() {
 # Args:
 #   signal - Signal name: "INT" or "TERM"
 agent_on_signal() {
+    # shellcheck disable=SC2034  # signal is available for agent overrides
     local signal="$1"
     # Default: no-op
     return 0
@@ -324,7 +326,7 @@ agent_log_complete() {
 #
 # Schema:
 # {
-#   "agent_type": "security-audit",
+#   "agent_type": "engineering.security-audit",
 #   "status": "success|failure|partial|unknown",
 #   "exit_code": 0,
 #   "started_at": "2024-01-15T10:30:00Z",
@@ -422,7 +424,7 @@ agent_get_result_path() {
 #
 # Args:
 #   worker_dir - Worker directory path
-#   agent_name - Agent type name (e.g., "security-audit")
+#   agent_name - Agent type name (e.g., "engineering.security-audit")
 #
 # Returns: Path to the latest result JSON file, or empty string
 agent_find_latest_result() {
@@ -436,7 +438,7 @@ agent_find_latest_result() {
 #
 # Args:
 #   worker_dir - Worker directory path
-#   agent_name - Agent type name (e.g., "security-audit")
+#   agent_name - Agent type name (e.g., "engineering.security-audit")
 #
 # Returns: Path to the latest report MD file, or empty string
 agent_find_latest_report() {
@@ -854,7 +856,7 @@ agent_extract_and_write_result() {
 #
 # Args:
 #   worker_dir  - Worker directory path
-#   agent_name  - Agent type name (e.g., "security-audit")
+#   agent_name  - Agent type name (e.g., "engineering.security-audit")
 #
 # Returns: gate_result value (PASS/FAIL/FIX/SKIP/STOP) or "UNKNOWN"
 agent_read_subagent_result() {

@@ -189,15 +189,15 @@ do_resume() {
     else
         echo "  No logs directory found — starting fresh"
         mkdir -p "$worker_dir/conversations"
-        # Create a minimal worker.log so resume-decide has something to read
+        # Create a minimal worker.log so system.resume-decide has something to read
         if [ ! -f "$worker_dir/worker.log" ]; then
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Worker was interrupted before producing logs" > "$worker_dir/worker.log"
         fi
     fi
 
-    # === STEP 2: Run resume-decide agent ===
+    # === STEP 2: Run system.resume-decide agent ===
     echo "Analyzing previous run to decide resume step..."
-    run_agent "resume-decide" "$worker_dir" "$PROJECT_DIR" 0 1 25
+    run_agent "system.resume-decide" "$worker_dir" "$PROJECT_DIR" 0 1 25
 
     # === STEP 3: Read decision ===
     local resume_step

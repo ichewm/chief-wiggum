@@ -144,6 +144,7 @@ _commit_subagent_changes() {
 agent_run() {
     local worker_dir="$1"
     local project_dir="$2"
+    # shellcheck disable=SC2034  # max_iterations reserved for future use
     local max_iterations="${3:-${AGENT_CONFIG_MAX_ITERATIONS:-20}}"
     local max_turns="${4:-${AGENT_CONFIG_MAX_TURNS:-50}}"
     local start_from_step="${5:-}"

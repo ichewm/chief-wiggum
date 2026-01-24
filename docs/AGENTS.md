@@ -174,16 +174,16 @@ agent_run() {
     _write_executor_config "$worker_dir" "$max_iterations" "$max_turns" ...
 
     # Delegate execution to leaf agents
-    run_sub_agent "task-executor" "$worker_dir" "$project_dir"
+    run_sub_agent "system.task-executor" "$worker_dir" "$project_dir"
     local loop_result=$?
 
     # Generate summary via sub-agent
     if [ $loop_result -eq 0 ]; then
-        run_sub_agent "task-summarizer" "$worker_dir" "$project_dir"
+        run_sub_agent "system.task-summarizer" "$worker_dir" "$project_dir"
     fi
 
     # Spawn sub-agents for quality gates
-    run_sub_agent "security-audit" "$worker_dir" "$project_dir"
+    run_sub_agent "engineering.security-audit" "$worker_dir" "$project_dir"
 
     # Write structured result
     agent_write_result "$worker_dir" "$result_status" "$loop_result" "$outputs_json"
@@ -297,7 +297,7 @@ agent_source_registry          # agent registry lookups
 
 ### Lifecycle Logging
 
-Used by orchestrator agents and top-level agents (e.g., `plan-mode`, `pr-comment-fix`)
+Used by orchestrator agents and top-level agents (e.g., `product.plan-mode`, `engineering.pr-comment-fix`)
 for timing and structured results. Leaf sub-agents can skip these since the parent
 orchestrator tracks phase timing via `_phase_start`/`_phase_end`.
 
@@ -325,11 +325,11 @@ report_path=$(agent_write_report "$worker_dir" "$markdown_content")
 
 # Read gate_result from a sub-agent's latest epoch-named result
 # Args: worker_dir, agent_name
-result=$(agent_read_subagent_result "$worker_dir" "security-audit")
+result=$(agent_read_subagent_result "$worker_dir" "engineering.security-audit")
 
 # Find the latest result/report file for an agent type
-result_file=$(agent_find_latest_result "$worker_dir" "security-audit")
-report_file=$(agent_find_latest_report "$worker_dir" "security-audit")
+result_file=$(agent_find_latest_result "$worker_dir" "engineering.security-audit")
+report_file=$(agent_find_latest_report "$worker_dir" "engineering.security-audit")
 
 # Get the result path for the current agent (uses _AGENT_START_EPOCH)
 my_result_path=$(agent_get_result_path "$worker_dir")
@@ -343,7 +343,7 @@ agent_extract_and_write_result "$worker_dir" "SECURITY" "audit" "report" "PASS|F
 
 ```json
 {
-  "agent_type": "security-audit",
+  "agent_type": "engineering.security-audit",
   "status": "success|failure|partial|unknown",
   "exit_code": 0,
   "started_at": "2024-01-15T10:30:00Z",
@@ -416,7 +416,7 @@ run_agent_once "$workspace" "$system_prompt" "$user_prompt" "$log_file" "$max_tu
 | 4 | log_file | Path to write the JSON stream log |
 | 5 | max_turns | Max turns for the session |
 
-Used by: `documentation-writer`, `resume-decide`.
+Used by: `product.documentation-writer`, `system.resume-decide`.
 
 ### Supervised Ralph Loop
 
@@ -491,7 +491,7 @@ Includes:
 Used when nesting agents within another agent:
 
 ```bash
-run_sub_agent "validation-review" "$worker_dir" "$project_dir"
+run_sub_agent "engineering.validation-review" "$worker_dir" "$project_dir"
 ```
 
 Excludes lifecycle management - just executes `agent_run()`.
@@ -585,18 +585,18 @@ Agents read configuration from `config/agents.json`:
 
 | Agent | Execution | Purpose |
 |-------|-----------|---------|
-| `task-executor` | `run_ralph_loop_supervised` | Main code-writing agent (supervised ralph loop) |
-| `task-summarizer` | `run_agent_resume` | Generate final summary by resuming executor session |
-| `plan-mode` | `run_ralph_loop` | Read-only codebase exploration and planning |
-| `validation-review` | `run_ralph_loop` | Code review against PRD requirements |
-| `security-audit` | `run_ralph_loop` | Security vulnerability scanning |
-| `security-fix` | `run_ralph_loop` | Fix security vulnerabilities |
-| `test-coverage` | `run_ralph_loop` | Generate tests for changes |
-| `code-review` | `run_ralph_loop` | Code quality review |
-| `git-conflict-resolver` | `run_ralph_loop` | Resolve merge conflicts |
-| `pr-comment-fix` | `run_ralph_loop` | Address PR review comments |
-| `documentation-writer` | `run_agent_once` | Update documentation |
-| `resume-decide` | `run_agent_once` | Analyze logs to decide resume step |
+| `system.task-executor` | `run_ralph_loop_supervised` | Main code-writing agent (supervised ralph loop) |
+| `system.task-summarizer` | `run_agent_resume` | Generate final summary by resuming executor session |
+| `system.resume-decide` | `run_agent_once` | Analyze logs to decide resume step |
+| `product.plan-mode` | `run_ralph_loop` | Read-only codebase exploration and planning |
+| `product.documentation-writer` | `run_agent_once` | Update documentation |
+| `engineering.validation-review` | `run_ralph_loop` | Code review against PRD requirements |
+| `engineering.security-audit` | `run_ralph_loop` | Security vulnerability scanning |
+| `engineering.security-fix` | `run_ralph_loop` | Fix security vulnerabilities |
+| `engineering.test-coverage` | `run_ralph_loop` | Generate tests for changes |
+| `engineering.code-review` | `run_ralph_loop` | Code quality review |
+| `engineering.git-conflict-resolver` | `run_ralph_loop` | Resolve merge conflicts |
+| `engineering.pr-comment-fix` | `run_ralph_loop` | Address PR review comments |
 
 ## Testing Agents
 

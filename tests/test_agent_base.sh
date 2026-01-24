@@ -115,11 +115,11 @@ test_config_loading_pr_comment_fix() {
     fixture_home=$(_setup_config_fixture)
     WIGGUM_HOME="$fixture_home" source "$fixture_home/lib/core/agent-base.sh"
 
-    WIGGUM_HOME="$fixture_home" load_agent_config "pr-comment-fix"
+    WIGGUM_HOME="$fixture_home" load_agent_config "engineering.pr-comment-fix"
 
-    assert_equals "10" "$AGENT_CONFIG_MAX_ITERATIONS" "pr-comment-fix max_iterations should be 10"
-    assert_equals "30" "$AGENT_CONFIG_MAX_TURNS" "pr-comment-fix max_turns should be 30"
-    assert_equals "true" "$AGENT_CONFIG_AUTO_COMMIT" "pr-comment-fix auto_commit should be true"
+    assert_equals "10" "$AGENT_CONFIG_MAX_ITERATIONS" "engineering.pr-comment-fix max_iterations should be 10"
+    assert_equals "30" "$AGENT_CONFIG_MAX_TURNS" "engineering.pr-comment-fix max_turns should be 30"
+    assert_equals "true" "$AGENT_CONFIG_AUTO_COMMIT" "engineering.pr-comment-fix auto_commit should be true"
     rm -rf "$fixture_home"
 }
 
@@ -128,10 +128,10 @@ test_config_loading_validation_review() {
     fixture_home=$(_setup_config_fixture)
     WIGGUM_HOME="$fixture_home" source "$fixture_home/lib/core/agent-base.sh"
 
-    WIGGUM_HOME="$fixture_home" load_agent_config "validation-review"
+    WIGGUM_HOME="$fixture_home" load_agent_config "engineering.validation-review"
 
-    assert_equals "5" "$AGENT_CONFIG_MAX_ITERATIONS" "validation-review max_iterations should be 5"
-    assert_equals "50" "$AGENT_CONFIG_MAX_TURNS" "validation-review max_turns should be 50"
+    assert_equals "5" "$AGENT_CONFIG_MAX_ITERATIONS" "engineering.validation-review max_iterations should be 5"
+    assert_equals "50" "$AGENT_CONFIG_MAX_TURNS" "engineering.validation-review max_turns should be 50"
     rm -rf "$fixture_home"
 }
 
@@ -322,14 +322,14 @@ test_agent_find_latest_result() {
     mkdir -p "$tmpdir/results"
 
     # Create two result files with different epochs
-    echo '{"status":"old"}' > "$tmpdir/results/1000-security-audit-result.json"
+    echo '{"status":"old"}' > "$tmpdir/results/1000-engineering.security-audit-result.json"
     sleep 0.1
-    echo '{"status":"new"}' > "$tmpdir/results/2000-security-audit-result.json"
+    echo '{"status":"new"}' > "$tmpdir/results/2000-engineering.security-audit-result.json"
 
     local found
-    found=$(agent_find_latest_result "$tmpdir" "security-audit")
+    found=$(agent_find_latest_result "$tmpdir" "engineering.security-audit")
 
-    assert_equals "$tmpdir/results/2000-security-audit-result.json" "$found" \
+    assert_equals "$tmpdir/results/2000-engineering.security-audit-result.json" "$found" \
         "Should find the latest (most recent) result file"
 
     rm -rf "$tmpdir"
@@ -357,14 +357,14 @@ test_agent_find_latest_report() {
     tmpdir=$(mktemp -d)
     mkdir -p "$tmpdir/reports"
 
-    echo "old report" > "$tmpdir/reports/1000-security-audit-report.md"
+    echo "old report" > "$tmpdir/reports/1000-engineering.security-audit-report.md"
     sleep 0.1
-    echo "new report" > "$tmpdir/reports/2000-security-audit-report.md"
+    echo "new report" > "$tmpdir/reports/2000-engineering.security-audit-report.md"
 
     local found
-    found=$(agent_find_latest_report "$tmpdir" "security-audit")
+    found=$(agent_find_latest_report "$tmpdir" "engineering.security-audit")
 
-    assert_equals "$tmpdir/reports/2000-security-audit-report.md" "$found" \
+    assert_equals "$tmpdir/reports/2000-engineering.security-audit-report.md" "$found" \
         "Should find the latest report file"
 
     rm -rf "$tmpdir"
@@ -405,11 +405,11 @@ test_agent_read_subagent_result() {
     tmpdir=$(mktemp -d)
     mkdir -p "$tmpdir/results"
 
-    # Create a result file for security-audit with gate_result
-    echo '{"outputs":{"gate_result":"PASS"}}' > "$tmpdir/results/1234-security-audit-result.json"
+    # Create a result file for engineering.security-audit with gate_result
+    echo '{"outputs":{"gate_result":"PASS"}}' > "$tmpdir/results/1234-engineering.security-audit-result.json"
 
     local result
-    result=$(agent_read_subagent_result "$tmpdir" "security-audit")
+    result=$(agent_read_subagent_result "$tmpdir" "engineering.security-audit")
 
     assert_equals "PASS" "$result" "Should read gate_result from sub-agent result"
 
@@ -498,8 +498,8 @@ test_agents_json_has_required_agents() {
     agents=$(jq -r '.agents | keys[]' "$WIGGUM_HOME/config/agents.json" 2>/dev/null | sort | tr '\n' ',')
 
     assert_output_contains "$agents" "system.task-worker" "agents.json should have system.task-worker"
-    assert_output_contains "$agents" "pr-comment-fix" "agents.json should have pr-comment-fix"
-    assert_output_contains "$agents" "validation-review" "agents.json should have validation-review"
+    assert_output_contains "$agents" "engineering.pr-comment-fix" "agents.json should have engineering.pr-comment-fix"
+    assert_output_contains "$agents" "engineering.validation-review" "agents.json should have engineering.validation-review"
 }
 
 test_agents_json_has_defaults() {
@@ -546,34 +546,34 @@ test_task_worker_sh_syntax() {
 }
 
 test_pr_comment_fix_sh_syntax() {
-    if bash -n "$WIGGUM_HOME/lib/agents/pr-comment-fix.sh" 2>/dev/null; then
-        assert_success "pr-comment-fix.sh should have valid bash syntax" true
+    if bash -n "$WIGGUM_HOME/lib/agents/engineering/pr-comment-fix.sh" 2>/dev/null; then
+        assert_success "engineering/pr-comment-fix.sh should have valid bash syntax" true
     else
-        assert_failure "pr-comment-fix.sh should have valid bash syntax" true
+        assert_failure "engineering/pr-comment-fix.sh should have valid bash syntax" true
     fi
 }
 
 test_validation_review_sh_syntax() {
-    if bash -n "$WIGGUM_HOME/lib/agents/validation-review.sh" 2>/dev/null; then
-        assert_success "validation-review.sh should have valid bash syntax" true
+    if bash -n "$WIGGUM_HOME/lib/agents/engineering/validation-review.sh" 2>/dev/null; then
+        assert_success "engineering/validation-review.sh should have valid bash syntax" true
     else
-        assert_failure "validation-review.sh should have valid bash syntax" true
+        assert_failure "engineering/validation-review.sh should have valid bash syntax" true
     fi
 }
 
 test_task_executor_sh_syntax() {
-    if bash -n "$WIGGUM_HOME/lib/agents/task-executor.sh" 2>/dev/null; then
-        assert_success "task-executor.sh should have valid bash syntax" true
+    if bash -n "$WIGGUM_HOME/lib/agents/system/task-executor.sh" 2>/dev/null; then
+        assert_success "system/task-executor.sh should have valid bash syntax" true
     else
-        assert_failure "task-executor.sh should have valid bash syntax" true
+        assert_failure "system/task-executor.sh should have valid bash syntax" true
     fi
 }
 
 test_task_summarizer_sh_syntax() {
-    if bash -n "$WIGGUM_HOME/lib/agents/task-summarizer.sh" 2>/dev/null; then
-        assert_success "task-summarizer.sh should have valid bash syntax" true
+    if bash -n "$WIGGUM_HOME/lib/agents/system/task-summarizer.sh" 2>/dev/null; then
+        assert_success "system/task-summarizer.sh should have valid bash syntax" true
     else
-        assert_failure "task-summarizer.sh should have valid bash syntax" true
+        assert_failure "system/task-summarizer.sh should have valid bash syntax" true
     fi
 }
 
@@ -581,8 +581,8 @@ test_agents_json_has_new_agents() {
     local agents
     agents=$(jq -r '.agents | keys[]' "$WIGGUM_HOME/config/agents.json" 2>/dev/null | sort | tr '\n' ',')
 
-    assert_output_contains "$agents" "task-executor" "agents.json should have task-executor"
-    assert_output_contains "$agents" "task-summarizer" "agents.json should have task-summarizer"
+    assert_output_contains "$agents" "system.task-executor" "agents.json should have system.task-executor"
+    assert_output_contains "$agents" "system.task-summarizer" "agents.json should have system.task-summarizer"
 }
 
 # =============================================================================
