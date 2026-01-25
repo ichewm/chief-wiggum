@@ -162,6 +162,18 @@ _run_inline_agent() {
     # Increment inline visit counter
     _PIPELINE_INLINE_VISITS[$visit_key]=$((current_visits + 1))
 
+    # Log inline agent header
+    local _worker_id
+    _worker_id=$(basename "$worker_dir" 2>/dev/null || echo "")
+
+    log_subsection "INLINE AGENT: $handler_id"
+    log_kv "Agent" "$handler_agent"
+    log_kv "Parent Step" "$parent_id"
+    log_kv "Worker ID" "$_worker_id"
+    log_kv "Task ID" "${WIGGUM_TASK_ID:-}"
+    log_kv "Readonly" "$handler_readonly"
+    log_kv "Visit #" "${_PIPELINE_INLINE_VISITS[$visit_key]}"
+
     # Run the inline agent
     export WIGGUM_STEP_ID="$handler_id"
     export WIGGUM_STEP_READONLY="$handler_readonly"
@@ -173,7 +185,6 @@ _run_inline_agent() {
         return
     }
 
-    log "Running inline agent: $handler_id (agent=$handler_agent, parent=$parent_id)"
     run_sub_agent "$handler_agent" "$worker_dir" "$project_dir"
 
     unset WIGGUM_STEP_READONLY
@@ -186,7 +197,9 @@ _run_inline_agent() {
     # Read inline agent result
     local inline_result
     inline_result=$(agent_read_step_result "$worker_dir" "$handler_id")
-    log "Inline agent '$handler_id' result: $inline_result"
+
+    log ""
+    log_kv "Inline Result" "$inline_result"
 
     # Check inline handler's own on_result
     local inline_on_result
@@ -340,12 +353,19 @@ _pipeline_run_step() {
     step_readonly=$(pipeline_get "$idx" ".readonly" "false")
     commit_after=$(pipeline_get "$idx" ".commit_after" "false")
 
-    log "Running pipeline step: $step_id (agent=$step_agent, readonly=$step_readonly)"
-
     # Emit activity log event
     local _worker_id
     _worker_id=$(basename "$worker_dir" 2>/dev/null || echo "")
     activity_log "step.started" "$_worker_id" "${WIGGUM_TASK_ID:-}" "step_id=$step_id" "agent=$step_agent"
+
+    # Log step header with full context
+    log_section "PIPELINE STEP: $step_id"
+    log_kv "Agent" "$step_agent"
+    log_kv "Worker ID" "$_worker_id"
+    log_kv "Task ID" "${WIGGUM_TASK_ID:-}"
+    log_kv "Readonly" "$step_readonly"
+    log_kv "Commit After" "$commit_after"
+    log_kv "Visit #" "${_PIPELINE_VISITS[$step_id]:-1}"
 
     # Track phase timing
     _phase_start "$step_id"
@@ -391,6 +411,12 @@ _pipeline_run_step() {
     _phase_end "$step_id"
     local gate_result
     gate_result=$(agent_read_step_result "$worker_dir" "$step_id")
+
+    # Log step completion
+    log_subsection "STEP COMPLETED: $step_id"
+    log_kv "Result" "${gate_result:-UNKNOWN}"
+    log_kv "Finished" "$(date -Iseconds)"
+
     activity_log "step.completed" "$_worker_id" "${WIGGUM_TASK_ID:-}" "step_id=$step_id" "agent=$step_agent" "result=${gate_result:-UNKNOWN}"
     unset WIGGUM_STEP_ID
 }

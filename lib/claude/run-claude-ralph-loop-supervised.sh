@@ -239,7 +239,7 @@ run_ralph_loop_supervised() {
         log_debug "Iteration $iteration: Session $session_id (max $max_turns turns)"
 
         # Log iteration start to worker.log
-        echo "[$(date -Iseconds)] ITERATION_START iteration=$iteration session_id=$session_id max_turns=$max_turns restart_count=$restart_count" >> "$output_dir/worker.log" 2>/dev/null || true
+        echo "[$(date -Iseconds)] INFO: ITERATION_START iteration=$iteration session_id=$session_id max_turns=$max_turns restart_count=$restart_count" >> "$output_dir/worker.log" 2>/dev/null || true
 
         # Generate timestamp for log filename uniqueness
         local log_timestamp
@@ -281,7 +281,7 @@ run_ralph_loop_supervised() {
         log "Work phase completed (exit code: $exit_code, session: $session_id)"
 
         # Log work phase completion
-        echo "[$(date -Iseconds)] WORK_PHASE_COMPLETE iteration=$iteration exit_code=$exit_code" >> "$output_dir/worker.log" 2>/dev/null || true
+        echo "[$(date -Iseconds)] INFO: WORK_PHASE_COMPLETE iteration=$iteration exit_code=$exit_code" >> "$output_dir/worker.log" 2>/dev/null || true
 
         # Create checkpoint after work phase (deterministic: status from exit code, files from log parsing)
         local checkpoint_status="in_progress"
@@ -411,7 +411,7 @@ Please provide your summary based on the conversation so far, following this str
             local supervisor_system_prompt="You are a supervisor overseeing an iterative work process. Your bias is toward CONTINUE - only intervene with STOP or RESTART when you have high confidence something is fundamentally wrong. Let workers work."
 
             log "Running supervisor session $supervisor_session_id"
-            echo "[$(date -Iseconds)] SUPERVISOR_START iteration=$iteration session_id=$supervisor_session_id" >> "$output_dir/worker.log" 2>/dev/null || true
+            echo "[$(date -Iseconds)] INFO: SUPERVISOR_START iteration=$iteration session_id=$supervisor_session_id" >> "$output_dir/worker.log" 2>/dev/null || true
 
             # Log supervisor prompt
             {
@@ -458,7 +458,7 @@ Please provide your summary based on the conversation so far, following this str
             fi
 
             log "Supervisor decision: $decision"
-            echo "[$(date -Iseconds)] SUPERVISOR_COMPLETE iteration=$iteration decision=$decision" >> "$output_dir/worker.log" 2>/dev/null || true
+            echo "[$(date -Iseconds)] INFO: SUPERVISOR_COMPLETE iteration=$iteration decision=$decision" >> "$output_dir/worker.log" 2>/dev/null || true
 
             # Update checkpoint with supervisor decision (deterministic: decision extracted via regex from log)
             # iteration was already incremented, so the reviewed work is at iteration-1
@@ -474,7 +474,7 @@ Please provide your summary based on the conversation so far, following this str
 
                 STOP)
                     log "Supervisor: STOP - halting loop"
-                    echo "[$(date -Iseconds)] SUPERVISOR_STOP iteration=$iteration reason=supervisor_decision" >> "$output_dir/worker.log" 2>/dev/null || true
+                    echo "[$(date -Iseconds)] INFO: SUPERVISOR_STOP iteration=$iteration reason=supervisor_decision" >> "$output_dir/worker.log" 2>/dev/null || true
 
                     # Record end time and exit
                     local end_time
@@ -482,7 +482,7 @@ Please provide your summary based on the conversation so far, following this str
                     local duration=$((end_time - start_time))
 
                     log "Supervised loop stopped by supervisor after $iteration iterations (duration: ${duration}s)"
-                    echo "[$(date -Iseconds)] LOOP_STOPPED_BY_SUPERVISOR end_time=$end_time duration_sec=$duration iterations=$iteration" >> "$output_dir/worker.log" 2>/dev/null || true
+                    echo "[$(date -Iseconds)] INFO: LOOP_STOPPED_BY_SUPERVISOR end_time=$end_time duration_sec=$duration iterations=$iteration" >> "$output_dir/worker.log" 2>/dev/null || true
 
                     export RALPH_LOOP_LAST_SESSION_ID="$last_session_id"
                     return 0
@@ -493,7 +493,7 @@ Please provide your summary based on the conversation so far, following this str
 
                     if [ $restart_count -gt "$max_restarts" ]; then
                         log_warn "Supervisor: RESTART requested but max_restarts ($max_restarts) exceeded - forcing STOP"
-                        echo "[$(date -Iseconds)] RESTART_LIMIT_EXCEEDED restart_count=$restart_count max_restarts=$max_restarts" >> "$output_dir/worker.log" 2>/dev/null || true
+                        echo "[$(date -Iseconds)] WARN: RESTART_LIMIT_EXCEEDED restart_count=$restart_count max_restarts=$max_restarts" >> "$output_dir/worker.log" 2>/dev/null || true
 
                         local end_time
                         end_time=$(date +%s)
@@ -505,7 +505,7 @@ Please provide your summary based on the conversation so far, following this str
                     fi
 
                     log "Supervisor: RESTART - archiving run $run_id and resetting to iteration 0"
-                    echo "[$(date -Iseconds)] SUPERVISOR_RESTART iteration=$iteration restart_count=$restart_count run_id=$run_id" >> "$output_dir/worker.log" 2>/dev/null || true
+                    echo "[$(date -Iseconds)] INFO: SUPERVISOR_RESTART iteration=$iteration restart_count=$restart_count run_id=$run_id" >> "$output_dir/worker.log" 2>/dev/null || true
 
                     # Archive current run's logs and summaries
                     local archive_dir="$output_dir/supervisors/run-$((restart_count - 1))"
@@ -538,11 +538,11 @@ Please provide your summary based on the conversation so far, following this str
 
     if [ $iteration -ge "$max_iterations" ]; then
         log_error "Supervised ralph loop reached max iterations ($max_iterations) without completing"
-        echo "[$(date -Iseconds)] LOOP_INCOMPLETE end_time=$end_time duration_sec=$duration iterations=$iteration restarts=$restart_count" >> "$output_dir/worker.log" 2>/dev/null || true
+        echo "[$(date -Iseconds)] WARN: LOOP_INCOMPLETE end_time=$end_time duration_sec=$duration iterations=$iteration restarts=$restart_count" >> "$output_dir/worker.log" 2>/dev/null || true
         return 1
     fi
 
-    echo "[$(date -Iseconds)] LOOP_COMPLETED end_time=$end_time duration_sec=$duration iterations=$iteration restarts=$restart_count" >> "$output_dir/worker.log" 2>/dev/null || true
+    echo "[$(date -Iseconds)] INFO: LOOP_COMPLETED end_time=$end_time duration_sec=$duration iterations=$iteration restarts=$restart_count" >> "$output_dir/worker.log" 2>/dev/null || true
     log "Supervised ralph loop finished after $iteration iterations, $restart_count restarts (duration: ${duration}s)"
 
     # Export last session ID for potential follow-up

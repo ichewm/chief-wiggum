@@ -108,3 +108,101 @@ log_command() {
         "$@" 2>&1
     fi
 }
+
+# =============================================================================
+# SECTION DIVIDERS AND HEADERS
+# =============================================================================
+
+# Log a major section divider (double line)
+# Usage: log_section "Section Name"
+log_section() {
+    local title="$1"
+    local width=70
+    local line
+    line=$(printf '=%.0s' $(seq 1 $width))
+
+    _log_output "INFO" "" 1
+    _log_output "INFO" "$line" 1
+    _log_output "INFO" "  $title" 1
+    _log_output "INFO" "$line" 1
+}
+
+# Log a minor section divider (single line)
+# Usage: log_subsection "Subsection Name"
+log_subsection() {
+    local title="$1"
+    local width=70
+    local line
+    line=$(printf -- '-%.0s' $(seq 1 $width))
+
+    _log_output "INFO" "" 1
+    _log_output "INFO" "$line" 1
+    _log_output "INFO" "  $title" 1
+    _log_output "INFO" "$line" 1
+}
+
+# Log a key-value pair (for config display)
+# Usage: log_kv "key" "value"
+log_kv() {
+    local key="$1"
+    local value="$2"
+    local padding=25
+
+    printf -v formatted "  %-${padding}s : %s" "$key" "$value"
+    _log_output "INFO" "$formatted" 1
+}
+
+# Log agent header with full context
+# Usage: log_agent_header "agent_type" "worker_id" "task_id"
+log_agent_header() {
+    local agent_type="$1"
+    local worker_id="${2:-}"
+    local task_id="${3:-}"
+    local step_id="${WIGGUM_STEP_ID:-}"
+
+    log_section "AGENT: $agent_type"
+    [ -n "$step_id" ] && log_kv "Step ID" "$step_id"
+    [ -n "$worker_id" ] && log_kv "Worker ID" "$worker_id"
+    [ -n "$task_id" ] && log_kv "Task ID" "$task_id"
+    log_kv "Started" "$(date -Iseconds)"
+}
+
+# Log agent completion with status
+# Usage: log_agent_complete "agent_type" "exit_code" "duration_secs"
+log_agent_complete() {
+    local agent_type="$1"
+    local exit_code="${2:-0}"
+    local duration="${3:-}"
+    local status="SUCCESS"
+
+    [ "$exit_code" -ne 0 ] && status="FAILED (exit=$exit_code)"
+
+    log_subsection "COMPLETED: $agent_type"
+    log_kv "Status" "$status"
+    [ -n "$duration" ] && log_kv "Duration" "${duration}s"
+    log_kv "Finished" "$(date -Iseconds)"
+    _log_output "INFO" "" 1
+}
+
+# Log configuration block
+# Usage: log_config_block "Config Name" <<< "key1=val1\nkey2=val2"
+# Or: log_config_block "Config Name" "key1" "val1" "key2" "val2"
+log_config_block() {
+    local title="$1"
+    shift
+
+    log_subsection "CONFIG: $title"
+
+    if [ $# -eq 0 ]; then
+        # Read from stdin
+        while IFS='=' read -r key value; do
+            [ -n "$key" ] && log_kv "$key" "$value"
+        done
+    else
+        # Read from args (key value pairs)
+        while [ $# -ge 2 ]; do
+            log_kv "$1" "$2"
+            shift 2
+        done
+    fi
+}

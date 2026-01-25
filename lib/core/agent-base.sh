@@ -130,6 +130,105 @@ agent_source_resume() {
 }
 
 # =============================================================================
+# AGENT LOGGING HELPERS
+# =============================================================================
+
+# Log agent startup with full context and configuration
+#
+# Args:
+#   worker_dir  - Worker directory path
+#   config_pairs... - Optional key=value pairs to log
+#
+# Uses: AGENT_TYPE, WIGGUM_STEP_ID, WIGGUM_TASK_ID, AGENT_CONFIG_* variables
+agent_log_startup() {
+    local worker_dir="${1:-}"
+    shift || true
+
+    local worker_id=""
+    [ -n "$worker_dir" ] && worker_id=$(basename "$worker_dir" 2>/dev/null || echo "")
+
+    log_agent_header "${AGENT_TYPE:-unknown}" "$worker_id" "${WIGGUM_TASK_ID:-}"
+
+    # Log standard agent config if available
+    local has_config=false
+    if [ -n "${AGENT_CONFIG_MAX_ITERATIONS:-}" ] || [ -n "${AGENT_CONFIG_MAX_TURNS:-}" ]; then
+        has_config=true
+        log_subsection "AGENT CONFIG"
+        [ -n "${AGENT_CONFIG_MAX_ITERATIONS:-}" ] && log_kv "max_iterations" "$AGENT_CONFIG_MAX_ITERATIONS"
+        [ -n "${AGENT_CONFIG_MAX_TURNS:-}" ] && log_kv "max_turns" "$AGENT_CONFIG_MAX_TURNS"
+        [ -n "${AGENT_CONFIG_SUPERVISOR_INTERVAL:-}" ] && log_kv "supervisor_interval" "$AGENT_CONFIG_SUPERVISOR_INTERVAL"
+        [ -n "${AGENT_CONFIG_MAX_RESTARTS:-}" ] && log_kv "max_restarts" "$AGENT_CONFIG_MAX_RESTARTS"
+    fi
+
+    # Log any extra config pairs passed as arguments
+    if [ $# -ge 2 ]; then
+        [ "$has_config" = false ] && log_subsection "AGENT CONFIG"
+        while [ $# -ge 2 ]; do
+            log_kv "$1" "$2"
+            shift 2
+        done
+    fi
+}
+
+# Log agent phase start (e.g., "Execution", "Audit", "Summary")
+#
+# Args:
+#   phase_name - Name of the phase
+#   details... - Optional detail strings to log
+agent_log_phase_start() {
+    local phase_name="$1"
+    shift || true
+
+    log_subsection "PHASE: $phase_name"
+
+    while [ $# -gt 0 ]; do
+        log "  $1"
+        shift
+    done
+}
+
+# Log agent phase completion
+#
+# Args:
+#   phase_name - Name of the phase
+#   result     - Result (PASS, FAIL, SKIP, etc.)
+#   details... - Optional detail strings
+agent_log_phase_complete() {
+    local phase_name="$1"
+    local result="${2:-}"
+    shift 2 || true
+
+    log ""
+    log "Phase '$phase_name' completed: ${result:-done}"
+
+    while [ $# -gt 0 ]; do
+        log "  $1"
+        shift
+    done
+}
+
+# Log agent completion with summary
+#
+# Args:
+#   exit_code - Exit code (0 = success)
+#   result    - Result value (PASS, FAIL, FIX, etc.)
+agent_log_completion() {
+    local exit_code="${1:-0}"
+    local result="${2:-}"
+
+    local duration=""
+    if [ -n "${_AGENT_START_EPOCH:-}" ]; then
+        duration=$(($(date +%s) - _AGENT_START_EPOCH))
+    fi
+
+    log_agent_complete "${AGENT_TYPE:-unknown}" "$exit_code" "$duration"
+
+    if [ -n "$result" ]; then
+        log_kv "Result" "$result"
+    fi
+}
+
+# =============================================================================
 # LIFECYCLE HOOKS (Default Implementations)
 # =============================================================================
 
@@ -297,7 +396,7 @@ agent_log_start() {
     local worker_id
     worker_id=$(basename "$worker_dir")
 
-    echo "[$(date -Iseconds)] AGENT_STARTED agent=$AGENT_TYPE worker_id=$worker_id task_id=$task_id start_time=$(date +%s)" >> "$worker_dir/worker.log"
+    echo "[$(date -Iseconds)] INFO: AGENT_STARTED agent=$AGENT_TYPE worker_id=$worker_id task_id=$task_id start_time=$(date +%s)" >> "$worker_dir/worker.log"
 }
 
 # Log agent completion event
@@ -315,7 +414,7 @@ agent_log_complete() {
     end_time=$(date +%s)
     duration=$((end_time - start_time))
 
-    echo "[$(date -Iseconds)] AGENT_COMPLETED agent=$AGENT_TYPE duration_sec=$duration exit_code=$exit_code" >> "$worker_dir/worker.log"
+    echo "[$(date -Iseconds)] INFO: AGENT_COMPLETED agent=$AGENT_TYPE duration_sec=$duration exit_code=$exit_code" >> "$worker_dir/worker.log"
 }
 
 # =============================================================================

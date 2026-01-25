@@ -141,7 +141,7 @@ run_ralph_loop() {
         log_debug "Iteration $iteration: Session $session_id (max $max_turns turns)"
 
         # Log iteration start to worker.log if it exists
-        echo "[$(date -Iseconds)] ITERATION_START iteration=$iteration session_id=$session_id max_turns=$max_turns" >> "$output_dir/worker.log" 2>/dev/null || true
+        echo "[$(date -Iseconds)] INFO: ITERATION_START iteration=$iteration session_id=$session_id max_turns=$max_turns" >> "$output_dir/worker.log" 2>/dev/null || true
 
         # Generate timestamp for log filename uniqueness
         local log_timestamp
@@ -181,7 +181,7 @@ run_ralph_loop() {
         log "Work phase completed (exit code: $exit_code, session: $session_id)"
 
         # Log work phase completion
-        echo "[$(date -Iseconds)] WORK_PHASE_COMPLETE iteration=$iteration exit_code=$exit_code" >> "$output_dir/worker.log" 2>/dev/null || true
+        echo "[$(date -Iseconds)] INFO: WORK_PHASE_COMPLETE iteration=$iteration exit_code=$exit_code" >> "$output_dir/worker.log" 2>/dev/null || true
 
         # Create checkpoint after work phase (deterministic: status from exit code, files from log parsing)
         local checkpoint_status="in_progress"
@@ -302,11 +302,11 @@ Please provide your summary based on the conversation so far, following this str
 
     if [ $iteration -ge "$max_iterations" ]; then
         log_error "Ralph loop reached max iterations ($max_iterations) without completing"
-        echo "[$(date -Iseconds)] LOOP_INCOMPLETE end_time=$end_time duration_sec=$duration iterations=$iteration max_iterations=$max_iterations" >> "$output_dir/worker.log" 2>/dev/null || true
+        echo "[$(date -Iseconds)] WARN: LOOP_INCOMPLETE end_time=$end_time duration_sec=$duration iterations=$iteration max_iterations=$max_iterations" >> "$output_dir/worker.log" 2>/dev/null || true
         return 1
     fi
 
-    echo "[$(date -Iseconds)] LOOP_COMPLETED end_time=$end_time duration_sec=$duration iterations=$iteration" >> "$output_dir/worker.log" 2>/dev/null || true
+    echo "[$(date -Iseconds)] INFO: LOOP_COMPLETED end_time=$end_time duration_sec=$duration iterations=$iteration" >> "$output_dir/worker.log" 2>/dev/null || true
     log "Ralph loop finished after $iteration iterations (duration: ${duration}s)"
 
     # Export last session ID for potential follow-up (e.g., final summary generation)
