@@ -135,16 +135,16 @@ Each worker operates in `.ralph/workers/worker-TASK-XXX-<timestamp>/` with:
 
 ### Task Prioritization
 
-Tasks are sorted by effective priority (lower number = higher priority):
+Tasks are sorted by effective priority using fixed-point arithmetic (10000 = 1.0000):
 - CRITICAL = 0 (highest)
-- HIGH = 1
-- MEDIUM = 2
-- LOW = 3 (lowest)
+- HIGH = 10000 (1.0)
+- MEDIUM = 20000 (2.0)
+- LOW = 30000 (3.0)
 
 **Modifiers**:
 - **Aging**: Tasks waiting multiple iterations get promoted (configurable via `AGING_FACTOR`, default 10 iterations per level)
 - **Dependency depth**: Tasks blocking more downstream tasks are prioritized as a tiebreaker
-- **Sibling WIP penalty**: When a task with the same prefix is actively being worked on (`[=]` in-progress, `[P]` pending approval, or `[*]` failed), other pending tasks with that prefix are penalized by +2 priority levels. This discourages parallel work on related features that might cause file conflicts. Example: if `FEAT-001` is `[=]`, then `FEAT-002` gets demoted from HIGH (1) to LOW-equivalent (3).
+- **Sibling WIP penalty**: When N tasks with the same prefix are active (`[=]` in-progress, `[P]` pending approval, or `[*]` failed), other pending tasks with that prefix are penalized by `sqrt(N) * 20000` (2.0 base penalty). This discourages parallel work on related features that might cause file conflicts. Example: if `FEAT-001` and `FEAT-002` are both `[=]`, then `FEAT-003` (HIGH=10000) gets penalty of sqrt(2)*20000≈28284, making effective priority ~38284 (worse than LOW).
 
 ## Testing Patterns
 

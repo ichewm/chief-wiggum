@@ -242,9 +242,13 @@ get_dependency_depth() {
     echo "$count"
 }
 
-# Compute effective priority with aging
-# Args: base_priority (HIGH|MEDIUM|LOW), iterations_waiting, aging_factor
-# Returns: numeric priority (lower = higher priority), floored at 0
+# Fixed-point scale: 10000 = 1.0000 (4 decimal places)
+PRIORITY_SCALE=10000
+
+# Compute effective priority with aging (fixed-point arithmetic)
+# Args: base_priority (CRITICAL|HIGH|MEDIUM|LOW), iterations_waiting, aging_factor
+# Returns: fixed-point priority (lower = higher priority), floored at 0
+# Scale: 10000 = 1.0000, so HIGH=10000, MEDIUM=20000, LOW=30000
 get_effective_priority() {
     local base_priority="$1"
     local iterations_waiting="${2:-0}"
@@ -253,15 +257,15 @@ get_effective_priority() {
     local numeric
     case "$base_priority" in
         CRITICAL) numeric=0 ;;
-        HIGH)     numeric=1 ;;
-        MEDIUM)   numeric=2 ;;
-        LOW)      numeric=3 ;;
-        *)        numeric=2 ;;
+        HIGH)     numeric=10000 ;;
+        MEDIUM)   numeric=20000 ;;
+        LOW)      numeric=30000 ;;
+        *)        numeric=20000 ;;
     esac
 
-    # Subtract aging bonus (integer division)
+    # Subtract aging bonus (1 priority level = 10000 per aging_factor iterations)
     if [ "$aging_factor" -gt 0 ] && [ "$iterations_waiting" -gt 0 ]; then
-        local aging_bonus=$(( iterations_waiting / aging_factor ))
+        local aging_bonus=$(( (iterations_waiting * PRIORITY_SCALE) / aging_factor ))
         numeric=$(( numeric - aging_bonus ))
     fi
 
@@ -281,44 +285,53 @@ get_task_prefix() {
     echo "$task_id" | sed 's/-[0-9]*$//'
 }
 
-# Check if any task with the same prefix is actively being worked on
+# Calculate sibling penalty based on number of active siblings (fixed-point)
 # (in-progress, pending approval, or failed - anything except pending/complete/not-planned)
-# Args: kanban_file task_id all_metadata
-# Returns: 0 if sibling is active, 1 otherwise
-has_sibling_in_progress() {
+# Penalty scales with sqrt(N) where N is the count of active siblings
+# Args: kanban_file task_id all_metadata base_penalty_fp (fixed-point, 10000=1.0)
+# Returns: calculated penalty in fixed-point (0 if no active siblings)
+get_sibling_penalty() {
     local task_id="$2"
     local all_metadata="$3"
+    local base_penalty="${4:-20000}"  # Default 2.0 in fixed-point
 
     local prefix
     prefix=$(get_task_prefix "$task_id")
 
-    # Check if any task with same prefix has an active status:
+    # Count tasks with same prefix that have an active status and calculate sqrt penalty
     # "=" (in-progress), "P" (pending approval), "*" (failed)
     # Excludes: " " (pending), "x" (complete), "N" (not planned)
-    local found
-    found=$(echo "$all_metadata" | awk -F'|' -v prefix="$prefix" -v self="$task_id" '
+    echo "$all_metadata" | awk -F'|' -v prefix="$prefix" -v self="$task_id" -v base="$base_penalty" '
+        BEGIN { count = 0 }
         $1 != self && ($2 == "=" || $2 == "P" || $2 == "*") {
             # Extract prefix from this task ID (remove trailing -NNN)
             task_prefix = $1
             sub(/-[0-9]+$/, "", task_prefix)
             if (task_prefix == prefix) {
-                print "1"
-                exit
+                count++
             }
         }
-    ')
-
-    [ "$found" = "1" ]
+        END {
+            if (count > 0) {
+                # Penalty = floor(sqrt(N) * base_penalty)
+                # Result is in fixed-point (base is already fixed-point)
+                print int(sqrt(count) * base)
+            } else {
+                print 0
+            }
+        }
+    '
 }
 
 # Get tasks that are ready to run (pending, with satisfied dependencies)
 # Sorted by priority: CRITICAL > HIGH > MEDIUM > LOW
-# Optional args: ready_since_file aging_factor sibling_wip_penalty
+# Uses fixed-point arithmetic (10000 = 1.0000)
+# Optional args: ready_since_file aging_factor sibling_wip_penalty_fp
 get_ready_tasks() {
     local kanban="$1"
     local ready_since_file="${2:-}"
     local aging_factor="${3:-10}"
-    local sibling_wip_penalty="${4:-2}"  # Priority penalty when sibling task is WIP
+    local sibling_wip_penalty="${4:-20000}"  # 2.0 in fixed-point (penalty when sibling is WIP)
 
     local all_metadata
     all_metadata=$(get_all_tasks_with_metadata "$kanban")
@@ -341,22 +354,23 @@ get_ready_tasks() {
                 iters_waiting=${iters_waiting:-0}
                 effective_pri=$(get_effective_priority "$priority" "$iters_waiting" "$aging_factor")
             else
-                # No aging - use static priority
+                # No aging - use static priority (fixed-point: 10000 = 1.0)
                 case "$priority" in
                     CRITICAL) effective_pri=0 ;;
-                    HIGH)     effective_pri=1 ;;
-                    MEDIUM)   effective_pri=2 ;;
-                    LOW)      effective_pri=3 ;;
-                    *)        effective_pri=2 ;;
+                    HIGH)     effective_pri=10000 ;;
+                    MEDIUM)   effective_pri=20000 ;;
+                    LOW)      effective_pri=30000 ;;
+                    *)        effective_pri=20000 ;;
                 esac
             fi
 
-            # Apply penalty if a sibling task (same prefix) is in-progress
+            # Apply penalty if sibling tasks (same prefix) are active
+            # Penalty scales with sqrt(N) where N is count of active siblings
             # This discourages parallel work on related features that might conflict
             if [ "$sibling_wip_penalty" -gt 0 ]; then
-                if has_sibling_in_progress "$kanban" "$task_id" "$all_metadata"; then
-                    effective_pri=$(( effective_pri + sibling_wip_penalty ))
-                fi
+                local penalty
+                penalty=$(get_sibling_penalty "$kanban" "$task_id" "$all_metadata" "$sibling_wip_penalty")
+                effective_pri=$(( effective_pri + penalty ))
             fi
 
             # Compute dependency depth for tiebreaking (higher depth = higher priority)
