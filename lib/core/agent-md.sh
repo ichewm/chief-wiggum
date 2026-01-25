@@ -826,14 +826,28 @@ _md_define_required_paths() {
     }
 }
 
+# Global to store the md_file path for the agent_run function
+# (bash doesn't support closures - variables are resolved at call time, not definition time)
+declare -g _MD_AGENT_FILE=""
+
 # Generate agent_run function for loaded markdown agent
 _md_define_agent_run() {
     local md_file="$1"
 
+    # Store in global so agent_run can access it at call time
+    _MD_AGENT_FILE="$md_file"
+
     agent_run() {
         local worker_dir="$1"
         local project_dir="$2"
-        md_agent_run "$md_file" "$worker_dir" "$project_dir"
+
+        if [ -z "$_MD_AGENT_FILE" ]; then
+            log_error "agent_run: _MD_AGENT_FILE not set (md_agent_init not called?)"
+            return 1
+        fi
+
+        log_debug "agent_run wrapper: calling md_agent_run with file=$_MD_AGENT_FILE"
+        md_agent_run "$_MD_AGENT_FILE" "$worker_dir" "$project_dir"
     }
 }
 
