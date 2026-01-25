@@ -220,7 +220,8 @@ class ConversationPanel(Widget):
             worker_dir = self.ralph_dir / "workers" / worker.id
             logs_dir = worker_dir / "logs"
             if logs_dir.is_dir():
-                log_files = list(logs_dir.glob("*.log"))
+                # Use **/*.log to find logs in nested subdirectories
+                log_files = list(logs_dir.glob("**/*.log"))
                 if log_files:
                     # Get the earliest log creation time
                     min_mtime = min(f.stat().st_mtime for f in log_files)

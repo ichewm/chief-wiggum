@@ -87,7 +87,8 @@ def aggregate_worker_metrics(ralph_dir: Path) -> AggregateMetrics:
         )
 
         if logs_dir.is_dir():
-            for log_file in logs_dir.glob("*.log"):
+            # Use **/*.log to find logs in nested subdirectories
+            for log_file in logs_dir.glob("**/*.log"):
                 for result in parse_log_metrics(log_file):
                     worker_metrics.num_turns += result.get("num_turns", 0)
                     worker_metrics.total_cost_usd += result.get("total_cost_usd", 0.0)

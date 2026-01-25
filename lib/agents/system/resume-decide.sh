@@ -105,10 +105,10 @@ _generate_steps_table() {
     local i=0
     local step_num=1
     while [ "$i" -lt "$step_count" ]; do
-        local step_id agent readonly enabled_by special=""
+        local step_id agent is_readonly enabled_by special=""
         step_id=$(pipeline_get "$i" ".id")
         agent=$(pipeline_get "$i" ".agent")
-        readonly=$(pipeline_get "$i" ".readonly" "false")
+        is_readonly=$(pipeline_get "$i" ".readonly" "false")
         enabled_by=$(pipeline_get "$i" ".enabled_by" "")
 
         # Skip disabled-by-default steps in the table
@@ -121,7 +121,7 @@ _generate_steps_table() {
         # The entry point step (task-executor) cannot resume mid-step
         if [ "$step_id" = "$entry_step" ]; then
             special="Cannot resume mid-step"
-        elif [ "$readonly" = "true" ]; then
+        elif [ "$is_readonly" = "true" ]; then
             special="Read-only"
         fi
 

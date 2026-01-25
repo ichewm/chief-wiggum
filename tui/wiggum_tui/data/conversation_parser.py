@@ -32,7 +32,8 @@ def parse_iteration_logs(worker_dir: Path) -> Conversation:
     # Sort base logs by mtime, then insert -summary logs directly after their base.
     # A -summary file is only paired if a matching base log exists; otherwise it's
     # treated as a regular log and sorted by its own mtime.
-    all_logs = list(logs_dir.glob("*.log"))
+    # Use **/*.log to find logs in nested subdirectories (e.g., logs/execution-123/...)
+    all_logs = list(logs_dir.glob("**/*.log"))
     base_stems = {f.stem for f in all_logs if not f.stem.endswith("-summary")}
     summary_by_base: dict[str, Path] = {}
     non_summary: list[Path] = []
