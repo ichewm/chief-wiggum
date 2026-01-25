@@ -11,6 +11,26 @@ WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
 PROJECT_DIR="$(pwd)"
 RALPH_DIR="${RALPH_DIR:-$PROJECT_DIR/.ralph}"
 
+# Security: Validate WIGGUM_HOME contains expected structure before sourcing
+# This prevents sourcing malicious scripts from an attacker-controlled path
+_validate_wiggum_home() {
+    local home="$1"
+    local required_files=(
+        "lib/core/exit-codes.sh"
+        "lib/core/logger.sh"
+        "lib/core/file-lock.sh"
+        "lib/worker/agent-registry.sh"
+    )
+    for f in "${required_files[@]}"; do
+        if [ ! -f "$home/$f" ]; then
+            echo "Error: Invalid WIGGUM_HOME - missing $f" >&2
+            echo "WIGGUM_HOME='$home' does not appear to be a valid Chief Wiggum installation" >&2
+            exit 1
+        fi
+    done
+}
+_validate_wiggum_home "$WIGGUM_HOME"
+
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/file-lock.sh"
@@ -126,24 +146,34 @@ do_start() {
     # run_agent writes PID to agent.pid - orchestrator can poll for it
     # Use setsid to create a new session/process group for the worker
     # This prevents SIGINT from the orchestrator from killing workers
+    #
+    # Security: Pass variables via environment exports, not string interpolation.
+    # This prevents command injection if any variable contains shell metacharacters.
+    export _WORKER_WIGGUM_HOME="$WIGGUM_HOME"
+    export _WORKER_DIR="$worker_dir"
+    export _WORKER_AGENT_TYPE="$AGENT_TYPE"
+    export _WORKER_PROJECT_DIR="$PROJECT_DIR"
+    export _WORKER_MAX_ITERATIONS="$MAX_ITERATIONS"
+    export _WORKER_MAX_TURNS="$MAX_TURNS"
+
     # shellcheck disable=SC2016
     setsid bash -c '
         set -euo pipefail
         _log_ts() { echo "[$(date -Iseconds)] $*"; }
         _log_ts "INFO: Worker subprocess starting"
-        _log_ts "INFO: WIGGUM_HOME='"$WIGGUM_HOME"'"
-        _log_ts "INFO: worker_dir='"$worker_dir"'"
-        _log_ts "INFO: AGENT_TYPE='"$AGENT_TYPE"'"
+        _log_ts "INFO: WIGGUM_HOME=$_WORKER_WIGGUM_HOME"
+        _log_ts "INFO: worker_dir=$_WORKER_DIR"
+        _log_ts "INFO: AGENT_TYPE=$_WORKER_AGENT_TYPE"
 
-        export WIGGUM_HOME="'"$WIGGUM_HOME"'"
+        export WIGGUM_HOME="$_WORKER_WIGGUM_HOME"
 
         if ! source "$WIGGUM_HOME/lib/worker/agent-registry.sh" 2>&1; then
             _log_ts "ERROR: Failed to source agent-registry.sh"
             exit 1
         fi
 
-        _log_ts "INFO: Running agent '"$AGENT_TYPE"'"
-        if ! run_agent "'"$AGENT_TYPE"'" "'"$worker_dir"'" "'"$PROJECT_DIR"'" 30 "'"$MAX_ITERATIONS"'" "'"$MAX_TURNS"'"; then
+        _log_ts "INFO: Running agent $_WORKER_AGENT_TYPE"
+        if ! run_agent "$_WORKER_AGENT_TYPE" "$_WORKER_DIR" "$_WORKER_PROJECT_DIR" 30 "$_WORKER_MAX_ITERATIONS" "$_WORKER_MAX_TURNS"; then
             _log_ts "ERROR: run_agent failed with exit code $?"
             exit 1
         fi

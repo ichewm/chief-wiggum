@@ -96,22 +96,33 @@ checkpoint_write() {
     worker_id=$(basename "$worker_dir")
     task_id=$(echo "$worker_id" | sed -E 's/worker-([A-Za-z]{2,10}-[0-9]{1,4})-.*/\1/' 2>/dev/null || echo "unknown")
 
-    # Build checkpoint JSON
-    cat > "$checkpoint_file" << CHECKPOINT_JSON
-{
-  "version": "$CHECKPOINT_VERSION",
-  "iteration": $iteration,
-  "session_id": "$session_id",
-  "timestamp": "$timestamp",
-  "status": "$status",
-  "worker_id": "$worker_id",
-  "task_id": "$task_id",
-  "files_modified": $files_modified,
-  "completed_tasks": $completed_tasks,
-  "next_steps": $next_steps,
-  "prose_summary": $(jq -Rs . <<< "$prose_summary")
-}
-CHECKPOINT_JSON
+    # Build checkpoint JSON using jq for proper escaping of all string values
+    # Security: Avoid direct string interpolation to prevent JSON injection
+    jq -n \
+        --arg version "$CHECKPOINT_VERSION" \
+        --argjson iteration "$iteration" \
+        --arg session_id "$session_id" \
+        --arg timestamp "$timestamp" \
+        --arg status "$status" \
+        --arg worker_id "$worker_id" \
+        --arg task_id "$task_id" \
+        --argjson files_modified "$files_modified" \
+        --argjson completed_tasks "$completed_tasks" \
+        --argjson next_steps "$next_steps" \
+        --arg prose_summary "$prose_summary" \
+        '{
+            version: $version,
+            iteration: $iteration,
+            session_id: $session_id,
+            timestamp: $timestamp,
+            status: $status,
+            worker_id: $worker_id,
+            task_id: $task_id,
+            files_modified: $files_modified,
+            completed_tasks: $completed_tasks,
+            next_steps: $next_steps,
+            prose_summary: $prose_summary
+        }' > "$checkpoint_file"
 
     log_debug "Checkpoint written: $checkpoint_file"
     return 0

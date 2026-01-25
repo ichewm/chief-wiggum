@@ -93,19 +93,42 @@ log_debug() {
     _log_output "DEBUG" "$1" 2
 }
 
+# Redact sensitive patterns from log output
+# Masks API keys, tokens, and other credentials
+_redact_sensitive() {
+    local line="$1"
+    # Redact common credential patterns:
+    # - ANTHROPIC_AUTH_TOKEN, API_KEY, SECRET_KEY, etc.
+    # - Bearer tokens
+    # - sk- prefix keys (API keys)
+    # - Base64-encoded secrets (long alphanumeric strings after = or :)
+    line=$(printf '%s' "$line" | sed -E \
+        -e 's/(ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|API_KEY|SECRET_KEY|AUTH_TOKEN|ACCESS_TOKEN|PRIVATE_KEY)=([^[:space:]]+)/\1=[REDACTED]/gi' \
+        -e 's/(Bearer )[A-Za-z0-9_\-\.]+/\1[REDACTED]/g' \
+        -e 's/(sk-)[A-Za-z0-9\-]{20,}/\1[REDACTED]/g' \
+        -e 's/(password[=:]["'"'"']?)[^[:space:]"'"'"']+/\1[REDACTED]/gi')
+    printf '%s' "$line"
+}
+
 # Capture command output with logging
 # Usage: log_command "description" command args...
 # Output goes to stdout and LOG_FILE (if set)
+# Security: Redacts sensitive credentials from logged output
 log_command() {
     local description="$1"
     shift
     log_debug "Executing: $description"
     if [[ -n "${LOG_FILE:-}" ]]; then
         "$@" 2>&1 | while IFS= read -r line; do
-            echo "[$(date -Iseconds)] OUTPUT: $line" | tee -a "$LOG_FILE"
+            local redacted_line
+            redacted_line=$(_redact_sensitive "$line")
+            echo "[$(date -Iseconds)] OUTPUT: $redacted_line" | tee -a "$LOG_FILE"
         done
     else
-        "$@" 2>&1
+        "$@" 2>&1 | while IFS= read -r line; do
+            _redact_sensitive "$line"
+            echo
+        done
     fi
 }
 

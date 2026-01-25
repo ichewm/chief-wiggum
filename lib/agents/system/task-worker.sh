@@ -159,6 +159,13 @@ agent_run() {
     # Match any task prefix format: TASK-001, PIPELINE-001, etc.
     task_id=$(echo "$worker_id" | sed -E 's/worker-([A-Za-z]{2,10}-[0-9]{1,4})-.*/\1/')
 
+    # Security: Validate extracted task ID against expected pattern
+    # Prevents empty/malformed IDs from being used in file paths
+    if [[ ! "$task_id" =~ ^[A-Za-z]{2,10}-[0-9]{1,4}$ ]]; then
+        log_error "Invalid task ID extracted from worker directory: '$task_id' (from $worker_id)"
+        return "$EXIT_USAGE"
+    fi
+
     # Setup logging
     export LOG_FILE="$worker_dir/worker.log"
 

@@ -52,7 +52,7 @@ run_agent_resume() {
 
     if [ -n "$output_file" ]; then
         local exit_code=0
-        "$CLAUDE" --verbose \
+        "run_claude" --verbose \
             --resume "$session_id" \
             --output-format stream-json \
             --max-turns "$max_turns" \
@@ -64,7 +64,7 @@ run_agent_resume() {
     else
         # No WIGGUM_LOG_DIR set - output goes to stdout only (not recommended)
         local exit_code=0
-        "$CLAUDE" --resume "$session_id" \
+        "run_claude" --resume "$session_id" \
             --max-turns "$max_turns" \
             --dangerously-skip-permissions \
             -p "$prompt" 2>&1 || exit_code=$?

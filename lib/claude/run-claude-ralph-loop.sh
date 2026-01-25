@@ -352,7 +352,7 @@ run_ralph_loop() {
 
         # PHASE 1: Work session with turn limit
         local exit_code=0
-        "$CLAUDE" --verbose \
+        "run_claude" --verbose \
             --output-format stream-json \
             ${WIGGUM_HOME:+--plugin-dir "$WIGGUM_HOME/skills"} \
             --append-system-prompt "$system_prompt" \
@@ -424,7 +424,7 @@ Please provide your summary based on the conversation so far, following this str
         local summary_txt="$output_dir/summaries/$run_id/${session_prefix}-${iteration}-summary.txt"
 
         local summary_exit_code=0
-        "$CLAUDE" --verbose --resume "$session_id" --max-turns 2 \
+        "run_claude" --verbose --resume "$session_id" --max-turns 2 \
             --output-format stream-json \
             --dangerously-skip-permissions -p "$summary_prompt" \
             > "$summary_log" 2>&1 || summary_exit_code=$?
@@ -517,7 +517,7 @@ Please provide your summary based on the conversation so far, following this str
 
             # Run supervisor
             local supervisor_exit_code=0
-            "$CLAUDE" --verbose \
+            "run_claude" --verbose \
                 --output-format stream-json \
                 ${WIGGUM_HOME:+--plugin-dir "$WIGGUM_HOME/skills"} \
                 --append-system-prompt "$supervisor_system_prompt" \

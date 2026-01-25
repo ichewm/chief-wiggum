@@ -44,6 +44,7 @@ activity_init() {
 #                          (e.g., "step_id=planning" "agent=product.plan-mode")
 #
 # Returns: 0 on success, 1 if not initialized
+# Security: Validates task_id format before logging to prevent log injection
 activity_log() {
     local event="$1"
     local worker_id="${2:-}"
@@ -53,6 +54,12 @@ activity_log() {
     # Skip if not initialized
     if [ -z "$_ACTIVITY_LOG_FILE" ]; then
         return 0
+    fi
+
+    # Security: Validate task_id format if provided (prevents malformed data in logs)
+    if [ -n "$task_id" ] && [[ ! "$task_id" =~ ^[A-Za-z]{2,10}-[0-9]{1,4}$ ]]; then
+        # Log with sanitized task_id to avoid log injection
+        task_id="INVALID_TASK_ID"
     fi
 
     local ts

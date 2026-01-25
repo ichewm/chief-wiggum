@@ -247,6 +247,7 @@ scan_active_workers() {
 # Atomically write a PID file
 # Args: <pid_file> <pid>
 # Uses file locking to prevent race conditions
+# Security: Creates PID file with restricted permissions (owner read/write only)
 write_pid_file() {
     local pid_file="$1"
     local pid="$2"
@@ -261,10 +262,14 @@ write_pid_file() {
     (
         flock -w 5 200 || {
             log_warn "write_pid_file: Failed to acquire lock"
+            # Security: Use umask to restrict PID file permissions
+            umask 077
             echo "$pid" > "$pid_file"
             exit 0
         }
 
+        # Security: Use umask to restrict PID file permissions (owner only)
+        umask 077
         echo "$pid" > "$pid_file"
 
     ) 200>"$lock_file"

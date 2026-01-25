@@ -19,12 +19,17 @@ get_system_user_info() {
 }
 
 # Initialize audit log with header if it doesn't exist
+# Security: Creates audit log with restricted permissions (owner read/write only)
 init_audit_log() {
     local log_dir
     log_dir=$(dirname "$AUDIT_LOG")
     mkdir -p "$log_dir"
+    # Security: Restrict directory permissions
+    chmod 700 "$log_dir" 2>/dev/null || true
 
     if [ ! -f "$AUDIT_LOG" ]; then
+        # Security: Create log file with restricted permissions before writing
+        umask 077
         cat > "$AUDIT_LOG" << 'EOF'
 # Chief Wiggum Audit Log
 # Format: [TIMESTAMP] EVENT_TYPE | KEY=VALUE pairs
@@ -57,6 +62,7 @@ EOF
 
 # Log a generic audit event
 # Usage: audit_log "EVENT_TYPE" "key1=value1" "key2=value2" ...
+# Security: Uses flock for safe concurrent writes from multiple workers
 audit_log() {
     local event_type="$1"
     shift
@@ -73,7 +79,11 @@ audit_log() {
         log_entry="$log_entry | $kvp"
     done
 
-    echo "$log_entry" >> "$AUDIT_LOG"
+    # Atomic append with flock (same pattern as activity-log.sh)
+    (
+        flock -w 2 200 || return 0
+        echo "$log_entry" >> "$AUDIT_LOG"
+    ) 200>"${AUDIT_LOG}.lock"
 }
 
 # Log task assignment

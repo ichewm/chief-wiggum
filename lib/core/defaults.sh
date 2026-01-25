@@ -17,11 +17,25 @@ CLAUDE="${CLAUDE:-claude}"
 # These allow custom API endpoints, authentication, and model selection
 # Use ${VAR:-} syntax to handle set -u (nounset) mode
 [ -n "${ANTHROPIC_BASE_URL:-}" ] && export ANTHROPIC_BASE_URL
-[ -n "${ANTHROPIC_AUTH_TOKEN:-}" ] && export ANTHROPIC_AUTH_TOKEN
 [ -n "${API_TIMEOUT_MS:-}" ] && export API_TIMEOUT_MS
 [ -n "${ANTHROPIC_DEFAULT_OPUS_MODEL:-}" ] && export ANTHROPIC_DEFAULT_OPUS_MODEL
 [ -n "${ANTHROPIC_DEFAULT_SONNET_MODEL:-}" ] && export ANTHROPIC_DEFAULT_SONNET_MODEL
 [ -n "${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}" ] && export ANTHROPIC_DEFAULT_HAIKU_MODEL
+
+# Security: Store auth token in non-exported variable to limit exposure
+# Use run_claude() helper to pass token only to Claude CLI
+_WIGGUM_AUTH_TOKEN="${ANTHROPIC_AUTH_TOKEN:-}"
+
+# Helper to run Claude CLI with auth token scoped only to that process
+# Usage: run_claude [claude args...]
+# This prevents the token from being exposed to all child processes
+run_claude() {
+    if [ -n "$_WIGGUM_AUTH_TOKEN" ]; then
+        ANTHROPIC_AUTH_TOKEN="$_WIGGUM_AUTH_TOKEN" "$CLAUDE" "$@"
+    else
+        "$CLAUDE" "$@"
+    fi
+}
 
 # Logging configuration
 # Map WIGGUM_LOG_LEVEL to LOG_LEVEL for logger.sh

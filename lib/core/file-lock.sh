@@ -49,13 +49,19 @@ update_kanban_status() {
     local task_id="$2"
     local new_status="$3"
 
-    # Escape sed special characters in task_id
+    # Escape all sed special characters in task_id
+    # Includes: ] \ [ ^ $ . * & /
+    # The order matters: ] and \ must be escaped first in the character class
     local escaped_task_id
-    escaped_task_id=$(printf '%s' "$task_id" | sed 's/[&/\]/\\&/g')
+    escaped_task_id=$(printf '%s' "$task_id" | sed 's/[]\[^$.*&/\\]/\\&/g')
 
     # Match any status and replace with new status
+    # Security: Use umask 077 to ensure sed -i temp files have restricted permissions
+    # Pass variables via environment to avoid shell injection through quotes
+    _SED_ESCAPED_TASK_ID="$escaped_task_id" \
+    _SED_NEW_STATUS="$new_status" \
     with_file_lock "$kanban_file" 5 \
-        sed -i "s/- \[[^\]]*\] \*\*\[$escaped_task_id\]\*\*/- [$new_status] **[$escaped_task_id]**/" "$kanban_file"
+        bash -c 'umask 077; sed -i "s/- \[[^\]]*\] \*\*\[$_SED_ESCAPED_TASK_ID\]\*\*/- [$_SED_NEW_STATUS] **[$_SED_ESCAPED_TASK_ID]**/" "$1"' _ "$kanban_file"
 }
 
 # Update kanban.md to mark complete with locking (convenience function)

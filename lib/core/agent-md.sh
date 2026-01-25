@@ -137,12 +137,21 @@ _yaml_get_value() {
 #   frontmatter - The frontmatter content
 #   key         - The key to extract
 #   array_name  - Name of the array variable to populate
+#
+# Security: Validates array_name against strict pattern before using eval
 _yaml_get_array() {
     local frontmatter="$1"
     local key="$2"
     local array_name="$3"
 
-    # Clear the array
+    # Security: Validate array name contains only safe characters (alphanumeric and underscore)
+    # This prevents code injection through malicious array names
+    if [[ ! "$array_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        log_error "_yaml_get_array: Invalid array name: $array_name"
+        return 1
+    fi
+
+    # Clear the array (safe after validation)
     eval "$array_name=()"
 
     local line
@@ -166,6 +175,8 @@ _yaml_get_array() {
             item="${item%\'}"
 
             if [ -n "$item" ]; then
+                # Safe after array_name validation above
+                # Use \$item to defer expansion until eval time for proper quoting
                 eval "${array_name}[$i]=\"\$item\""
                 ((++i)) || true
             fi
