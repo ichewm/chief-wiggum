@@ -282,6 +282,12 @@ check_and_spawn_fixes() {
 detect_orphan_workers() {
     [ -d "$RALPH_DIR/workers" ] || return 0
 
+    scan_output=$(scan_active_workers "$RALPH_DIR") || {
+        scan_rc=$?
+        if [ "$scan_rc" -eq 2 ]; then
+            log_warn "Worker scan encountered lock contention, results may be incomplete"
+        fi
+    }
     while read -r worker_pid task_id _worker_id; do
         [ -n "$worker_pid" ] || continue
         # Check if this PID is already tracked
@@ -289,7 +295,7 @@ detect_orphan_workers() {
             log "WARNING: Detected orphan worker for $task_id (PID: $worker_pid) - re-tracking"
             active_workers[$worker_pid]="$task_id"
         fi
-    done < <(scan_active_workers "$RALPH_DIR")
+    done <<< "$scan_output"
 }
 
 main() {
@@ -540,12 +546,18 @@ main() {
     # Restore active workers from existing worker directories (using shared library)
     if [ -d "$RALPH_DIR/workers" ]; then
         log "Scanning for active workers from previous runs..."
+        scan_output=$(scan_active_workers "$RALPH_DIR") || {
+            scan_rc=$?
+            if [ "$scan_rc" -eq 2 ]; then
+                log_warn "Worker scan encountered lock contention, results may be incomplete"
+            fi
+        }
         while read -r worker_pid task_id _worker_id; do
             [ -n "$worker_pid" ] || continue
             active_workers[$worker_pid]="$task_id"
             all_pids+=("$worker_pid")
             log "Restored tracking for $task_id (PID: $worker_pid)"
-        done < <(scan_active_workers "$RALPH_DIR")
+        done <<< "$scan_output"
     fi
 
     local iteration=0

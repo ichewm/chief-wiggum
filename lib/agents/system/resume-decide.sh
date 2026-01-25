@@ -258,7 +258,7 @@ agent_run() {
         log_error "resume-decide failed to produce resume-step.txt"
         echo "ABORT" > "$worker_dir/resume-step.txt"
         echo "Resume-decide agent failed to produce a decision." > "$worker_dir/reports/resume-instructions.md"
-        agent_write_result "$worker_dir" "failure" 1 '{"gate_result":"FAIL"}'
+        agent_write_result "$worker_dir" "FAIL"
         return 1
     fi
 
@@ -269,9 +269,9 @@ agent_run() {
     # Archive artifacts from the resume point onward (not earlier phases)
     if [ "$step" != "ABORT" ]; then
         archive_from_step "$worker_dir" "$step"
-        agent_write_result "$worker_dir" "success" 0 "$(printf '{"gate_result":"PASS","resume_step":"%s"}' "$step")"
+        agent_write_result "$worker_dir" "PASS" "$(printf '{"resume_step":"%s"}' "$step")"
     else
-        agent_write_result "$worker_dir" "success" 0 '{"gate_result":"STOP","resume_step":"ABORT"}'
+        agent_write_result "$worker_dir" "STOP" '{"resume_step":"ABORT"}'
     fi
 
     return 0

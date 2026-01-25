@@ -66,12 +66,18 @@ for worker_dir in "$RALPH_DIR/workers"/worker-*; do
 done
 
 # Get running workers using shared library
+scan_output=$(scan_active_workers "$RALPH_DIR") || {
+    scan_rc=$?
+    if [ "$scan_rc" -eq 2 ]; then
+        log_warn "Worker scan encountered lock contention, results may be incomplete"
+    fi
+}
 while read -r pid _task_id worker_id; do
     [ -n "$pid" ] || continue
     ((++running_count))
     worker_pids+=("$pid")
     worker_names+=("$worker_id")
-done < <(scan_active_workers "$RALPH_DIR")
+done <<< "$scan_output"
 
 # Check if any workers are running
 if [ $running_count -eq 0 ]; then

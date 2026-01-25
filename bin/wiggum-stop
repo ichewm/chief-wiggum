@@ -86,10 +86,16 @@ stop_all_workers() {
 
     # Collect active workers using shared library
     declare -A worker_pids_map=()  # pid -> worker_id (initialize empty)
+    scan_output=$(scan_active_workers "$RALPH_DIR") || {
+        scan_rc=$?
+        if [ "$scan_rc" -eq 2 ]; then
+            echo "Warning: Worker scan encountered lock contention, results may be incomplete" >&2
+        fi
+    }
     while read -r pid _task_id worker_id; do
         [ -n "$pid" ] || continue
         worker_pids_map[$pid]="$worker_id"
-    done < <(scan_active_workers "$RALPH_DIR")
+    done <<< "$scan_output"
 
     # Check if any workers are running
     if [ "${#worker_pids_map[@]}" -eq 0 ]; then

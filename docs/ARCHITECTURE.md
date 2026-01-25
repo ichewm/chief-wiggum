@@ -6,13 +6,23 @@ This document describes the internal architecture of Chief Wiggum for developers
 
 ```
 chief-wiggum/
-├── bin/                    # CLI entry points
-│   ├── wiggum              # Main orchestrator
-│   ├── wiggum-start        # Worker spawner
-│   ├── wiggum-monitor      # Log viewer
-│   ├── wiggum-review       # PR management
-│   ├── wiggum-validate     # Kanban validator
-│   └── wiggum-clean        # Cleanup utility
+├── bin/                    # CLI entry points (16 commands)
+│   ├── wiggum              # Main dispatcher
+│   ├── wiggum-clean        # Cleanup utility
+│   ├── wiggum-doctor       # Pre-flight health checks
+│   ├── wiggum-init         # Project initialization
+│   ├── wiggum-inspect      # Worker/pipeline inspection
+│   ├── wiggum-kill         # Force kill workers (SIGKILL)
+│   ├── wiggum-monitor      # Real-time log viewer / TUI
+│   ├── wiggum-plan         # Read-only implementation planning
+│   ├── wiggum-resume       # Resume stopped workers
+│   ├── wiggum-review       # PR/task review management
+│   ├── wiggum-run          # Orchestrator (continuous loop)
+│   ├── wiggum-start        # Single worker spawner
+│   ├── wiggum-status       # Worker status display
+│   ├── wiggum-stop         # Graceful worker stop (SIGTERM)
+│   ├── wiggum-util         # Utility subcommands
+│   └── wiggum-validate     # Kanban validator
 ├── lib/
 │   ├── agents/             # Agent implementations
 │   │   ├── system/         # Core system agents
@@ -265,6 +275,51 @@ Override per-project in `.ralph/pipeline.json` or per-task in `.ralph/pipelines/
   "system.task-executor": "lib/agents/system/task-executor.sh",
   "engineering.security-audit": "lib/agents/engineering/security-audit.sh"
 }
+```
+
+### Configuration Precedence
+
+Configuration follows a precedence hierarchy (later overrides earlier):
+
+1. **Defaults** (`config/pipeline.json`, `config/agents.json`)
+2. **Project overrides** (`.ralph/config.json`, `.ralph/pipeline.json`)
+3. **Task-specific overrides** (`.ralph/pipelines/<TASK-ID>.json`)
+4. **Environment variables** (`WIGGUM_*` prefix)
+
+Environment variable naming convention for agent config:
+```bash
+WIGGUM_{AGENT_NAME}_MAX_ITERATIONS   # e.g., WIGGUM_SECURITY_AUDIT_MAX_ITERATIONS
+WIGGUM_{AGENT_NAME}_MAX_TURNS        # e.g., WIGGUM_TEST_COVERAGE_MAX_TURNS
+```
+
+### Markdown Agent Discovery
+
+Agents can be defined in two formats with automatic discovery:
+
+1. **Markdown agents** (`lib/agents/<category>/<name>.md`) - Declarative definition
+2. **Shell agents** (`lib/agents/<category>/<name>.sh`) - Imperative implementation
+
+Discovery order for `system.task-executor`:
+1. Check for `lib/agents/system/task-executor.md`
+2. Check for `lib/agents/system/task-executor.sh`
+3. If both exist: shell script is loaded, markdown provides base behavior
+
+Markdown agents use a structured format:
+```markdown
+# Agent: system.task-executor
+
+## Purpose
+Main implementation agent
+
+## System Prompt
+<system-prompt>
+You are a senior software engineer...
+</system-prompt>
+
+## User Prompt Template
+<user-prompt>
+Work on the task: {{task_id}}
+</user-prompt>
 ```
 
 ## Key Libraries

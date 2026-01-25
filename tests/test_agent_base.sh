@@ -189,7 +189,7 @@ test_agent_write_result_creates_epoch_file() {
     agent_init_metadata "test-agent" "Test"
     agent_setup_context "$tmpdir" "$tmpdir/workspace" "/tmp/project" "TEST-001"
 
-    agent_write_result "$tmpdir" "success" 0 '{}' '[]' '{}'
+    agent_write_result "$tmpdir" "PASS"
 
     # Should create epoch-named file in results/
     local result_file
@@ -213,7 +213,7 @@ test_agent_write_result_valid_json() {
     agent_init_metadata "test-agent" "Test"
     agent_setup_context "$tmpdir" "$tmpdir/workspace" "/tmp/project" "TEST-001"
 
-    agent_write_result "$tmpdir" "success" 0 '{}' '[]' '{}'
+    agent_write_result "$tmpdir" "PASS"
 
     local result_file
     result_file=$(agent_find_latest_result "$tmpdir" "test-agent")
@@ -237,7 +237,7 @@ test_agent_read_result_status() {
     agent_init_metadata "test-agent" "Test"
     agent_setup_context "$tmpdir" "$tmpdir/workspace" "/tmp/project" "TEST-001"
 
-    agent_write_result "$tmpdir" "success" 0 '{}' '[]' '{}'
+    agent_write_result "$tmpdir" "PASS"
 
     local status
     status=$(agent_read_result "$tmpdir" ".status")
@@ -257,7 +257,7 @@ test_agent_result_is_success() {
     agent_init_metadata "test-agent" "Test"
     agent_setup_context "$tmpdir" "$tmpdir/workspace" "/tmp/project" "TEST-001"
 
-    agent_write_result "$tmpdir" "success" 0 '{}' '[]' '{}'
+    agent_write_result "$tmpdir" "PASS"
 
     if agent_result_is_success "$tmpdir"; then
         assert_success "agent_result_is_success should return true for success" true
@@ -278,7 +278,7 @@ test_agent_result_is_success_failure() {
     agent_init_metadata "test-agent" "Test"
     agent_setup_context "$tmpdir" "$tmpdir/workspace" "/tmp/project" "TEST-001"
 
-    agent_write_result "$tmpdir" "failure" 1 '{}' '[]' '{}'
+    agent_write_result "$tmpdir" "FAIL"
 
     if agent_result_is_success "$tmpdir"; then
         assert_failure "agent_result_is_success should return false for failure" true
@@ -300,7 +300,7 @@ test_agent_get_output() {
     agent_setup_context "$tmpdir" "$tmpdir/workspace" "/tmp/project" "TEST-001"
 
     local outputs='{"pr_url":"https://github.com/test/pr/123","branch":"feature/test"}'
-    agent_write_result "$tmpdir" "success" 0 "$outputs" '[]' '{}'
+    agent_write_result "$tmpdir" "PASS" "$outputs"
 
     local pr_url
     pr_url=$(agent_get_output "$tmpdir" "pr_url")

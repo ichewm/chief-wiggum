@@ -298,13 +298,12 @@ agent_run() {
     # Record completion
     agent_log_complete "$worker_dir" "$loop_result" "$start_time"
 
-    # Write structured agent result
-    local result_status="failure"
-    local result_exit_code="$loop_result"
+    # Determine gate_result from final status
+    local gate_result="FAIL"
     if [ "$final_status" = "COMPLETE" ] && [ "$loop_result" -eq 0 ]; then
-        result_status="success"
+        gate_result="PASS"
     elif [ "$final_status" = "COMPLETE" ]; then
-        result_status="partial"
+        gate_result="FIX"
     fi
 
     # Read violation details if present
@@ -339,7 +338,7 @@ agent_run() {
             phases: $phases
         }')
 
-    agent_write_result "$worker_dir" "$result_status" "$result_exit_code" "$outputs_json"
+    agent_write_result "$worker_dir" "$gate_result" "$outputs_json"
 
     log "Task worker finished: $worker_id"
     return $loop_result

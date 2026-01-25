@@ -70,7 +70,7 @@ agent_run() {
 **Status:** No conflicts detected
 
 No merge conflicts were found in the workspace. The repository is in a clean state."
-        agent_write_result "$worker_dir" "success" 0 '{"gate_result":"SKIP"}'
+        agent_write_result "$worker_dir" "SKIP"
         return 0
     fi
 
@@ -102,10 +102,10 @@ No merge conflicts were found in the workspace. The repository is in a clean sta
     local remaining
     remaining=$(git -C "$workspace" diff --name-only --diff-filter=U 2>/dev/null | wc -l)
     if [ "$remaining" -eq 0 ]; then
-        agent_write_result "$worker_dir" "success" 0 '{"gate_result":"PASS"}'
+        agent_write_result "$worker_dir" "PASS"
         log "Conflict resolution completed successfully"
     else
-        agent_write_result "$worker_dir" "failure" 1 "$(printf '{"gate_result":"FAIL","unresolved_files":%d}' "$remaining")"
+        agent_write_result "$worker_dir" "FAIL" "$(printf '{"unresolved_files":%d}' "$remaining")"
         log_warn "Conflict resolution incomplete ($remaining file(s) unresolved)"
     fi
 

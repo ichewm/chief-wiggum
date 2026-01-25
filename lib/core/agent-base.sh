@@ -132,6 +132,35 @@ agent_source_resume() {
 }
 
 # =============================================================================
+# SECURE TEMP FILE HANDLING
+# =============================================================================
+
+# Create a secure temp file, preferring worker-local tmp directory
+#
+# This prevents race conditions with /tmp and ensures temp files
+# are cleaned up with the worker directory.
+#
+# Args:
+#   base_dir - Optional base directory (typically worker_dir)
+#              If provided and valid, creates tmp/ subdirectory there
+#              Otherwise falls back to TMPDIR or /tmp
+#
+# Returns: Path to newly created temp file
+agent_mktemp() {
+    local base_dir="${1:-}"
+    local tmp_dir
+
+    if [ -n "$base_dir" ] && [ -d "$base_dir" ]; then
+        tmp_dir="$base_dir/tmp"
+        mkdir -p "$tmp_dir"
+    else
+        tmp_dir="${TMPDIR:-/tmp}"
+    fi
+
+    mktemp -p "$tmp_dir"
+}
+
+# =============================================================================
 # AGENT LOGGING HELPERS
 # =============================================================================
 
@@ -326,39 +355,33 @@ load_agent_config() {
         # Load agent-specific config, falling back to defaults
         local agent_config default_config
 
-        # Get defaults section
+        # Get defaults section (single jq call for all values)
         default_config=$(jq -r '.defaults // {}' "$config_file" 2>/dev/null)
         if [ -n "$default_config" ] && [ "$default_config" != "null" ]; then
-            AGENT_CONFIG_MAX_ITERATIONS=$(echo "$default_config" | jq -r '.max_iterations // 10')
-            AGENT_CONFIG_MAX_TURNS=$(echo "$default_config" | jq -r '.max_turns // 30')
-            AGENT_CONFIG_TIMEOUT_SECONDS=$(echo "$default_config" | jq -r '.timeout_seconds // 3600')
-            AGENT_CONFIG_AUTO_COMMIT=$(echo "$default_config" | jq -r '.auto_commit // false')
-            AGENT_CONFIG_SUPERVISOR_INTERVAL=$(echo "$default_config" | jq -r '.supervisor_interval // 2')
-            AGENT_CONFIG_MAX_RESTARTS=$(echo "$default_config" | jq -r '.max_restarts // 2')
+            read -r AGENT_CONFIG_MAX_ITERATIONS AGENT_CONFIG_MAX_TURNS AGENT_CONFIG_TIMEOUT_SECONDS \
+                    AGENT_CONFIG_AUTO_COMMIT AGENT_CONFIG_SUPERVISOR_INTERVAL AGENT_CONFIG_MAX_RESTARTS \
+                < <(echo "$default_config" | jq -r '[
+                    .max_iterations // 10,
+                    .max_turns // 30,
+                    .timeout_seconds // 3600,
+                    .auto_commit // false,
+                    .supervisor_interval // 2,
+                    .max_restarts // 2
+                ] | @tsv')
         fi
 
         # Override with agent-specific config
+        # Note: We read each field individually to avoid TSV parsing issues where
+        # bash's read collapses consecutive delimiters (empty fields)
         agent_config=$(jq -r ".agents.\"$agent_type\" // {}" "$config_file" 2>/dev/null)
         if [ -n "$agent_config" ] && [ "$agent_config" != "null" ] && [ "$agent_config" != "{}" ]; then
-            local val
-
-            val=$(echo "$agent_config" | jq -r '.max_iterations // empty')
-            [ -n "$val" ] && AGENT_CONFIG_MAX_ITERATIONS="$val"
-
-            val=$(echo "$agent_config" | jq -r '.max_turns // empty')
-            [ -n "$val" ] && AGENT_CONFIG_MAX_TURNS="$val"
-
-            val=$(echo "$agent_config" | jq -r '.timeout_seconds // empty')
-            [ -n "$val" ] && AGENT_CONFIG_TIMEOUT_SECONDS="$val"
-
-            val=$(echo "$agent_config" | jq -r '.auto_commit // empty')
-            [ -n "$val" ] && AGENT_CONFIG_AUTO_COMMIT="$val"
-
-            val=$(echo "$agent_config" | jq -r '.supervisor_interval // empty')
-            [ -n "$val" ] && AGENT_CONFIG_SUPERVISOR_INTERVAL="$val"
-
-            val=$(echo "$agent_config" | jq -r '.max_restarts // empty')
-            [ -n "$val" ] && AGENT_CONFIG_MAX_RESTARTS="$val"
+            local v
+            v=$(echo "$agent_config" | jq -r '.max_iterations // empty') && [ -n "$v" ] && AGENT_CONFIG_MAX_ITERATIONS="$v"
+            v=$(echo "$agent_config" | jq -r '.max_turns // empty') && [ -n "$v" ] && AGENT_CONFIG_MAX_TURNS="$v"
+            v=$(echo "$agent_config" | jq -r '.timeout_seconds // empty') && [ -n "$v" ] && AGENT_CONFIG_TIMEOUT_SECONDS="$v"
+            v=$(echo "$agent_config" | jq -r '.auto_commit // empty') && [ -n "$v" ] && AGENT_CONFIG_AUTO_COMMIT="$v"
+            v=$(echo "$agent_config" | jq -r '.supervisor_interval // empty') && [ -n "$v" ] && AGENT_CONFIG_SUPERVISOR_INTERVAL="$v"
+            v=$(echo "$agent_config" | jq -r '.max_restarts // empty') && [ -n "$v" ] && AGENT_CONFIG_MAX_RESTARTS="$v"
         fi
     fi
 
@@ -529,7 +552,9 @@ agent_find_latest_result() {
     local worker_dir="$1"
     local agent_name="$2"
 
-    ls -t "$worker_dir/results/"*"-${agent_name}-result.json" 2>/dev/null | head -1
+    # Use find with -printf for reliable mtime sorting (handles filenames with spaces)
+    find "$worker_dir/results" -maxdepth 1 -name "*-${agent_name}-result.json" \
+        -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-
 }
 
 # Find the latest report file for a given agent type
@@ -543,7 +568,9 @@ agent_find_latest_report() {
     local worker_dir="$1"
     local agent_name="$2"
 
-    ls -t "$worker_dir/reports/"*"-${agent_name}-report.md" 2>/dev/null | head -1
+    # Use find with -printf for reliable mtime sorting (handles filenames with spaces)
+    find "$worker_dir/reports" -maxdepth 1 -name "*-${agent_name}-report.md" \
+        -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-
 }
 
 # Write a report file with epoch naming
@@ -568,24 +595,44 @@ agent_write_report() {
 # Write agent result to epoch-named JSON file
 #
 # Args:
-#   worker_dir - Worker directory path
-#   status     - Result status: success, failure, partial, unknown
-#   exit_code  - Numeric exit code
-#   outputs    - JSON object string of output values (optional)
-#   errors     - JSON array string of error messages (optional)
-#   metadata   - JSON object string of additional metadata (optional)
+#   worker_dir    - Worker directory path
+#   gate_result   - Gate result: PASS, FAIL, FIX, SKIP, STOP
+#   extra_outputs - JSON object string of additional output values (optional)
+#   errors        - JSON array string of error messages (optional)
+#
+# The function automatically derives status and exit_code from gate_result:
+#   PASS/SKIP/STOP -> status=success, exit_code=0
+#   FAIL           -> status=failure, exit_code=10
+#   FIX            -> status=partial, exit_code=0
+#   other          -> status=unknown, exit_code=1
 agent_write_result() {
     local worker_dir="$1"
-    local result_status="$2"
-    local exit_code="$3"
-    local outputs="${4-}"
-    local errors="${5-}"
-    local metadata="${6-}"
+    local gate_result="$2"
+    local extra_outputs="${3:-'{}'}"
+    local errors="${4:-'[]'}"
 
-    # Set defaults for optional JSON params (avoid shell expansion issues)
-    [ -z "$outputs" ] && outputs='{}'
-    [ -z "$errors" ] && errors='[]'
-    [ -z "$metadata" ] && metadata='{}'
+    # Set defaults for optional JSON params
+    [ -z "$extra_outputs" ] || [ "$extra_outputs" = "'{}'" ] && extra_outputs='{}'
+    [ -z "$errors" ] || [ "$errors" = "'[]'" ] && errors='[]'
+
+    # Derive status and exit_code from gate_result
+    local result_status exit_code
+    case "$gate_result" in
+        PASS|SKIP|STOP) result_status="success"; exit_code=0 ;;
+        FAIL)           result_status="failure"; exit_code=10 ;;
+        FIX)            result_status="partial"; exit_code=0 ;;
+        *)              result_status="unknown"; exit_code=1 ;;
+    esac
+
+    # Merge gate_result into outputs
+    local outputs
+    if [ "$extra_outputs" != "{}" ] && [ -n "$extra_outputs" ]; then
+        outputs=$(echo "$extra_outputs" | jq -c --arg gr "$gate_result" '. + {gate_result: $gr}')
+    else
+        outputs="{\"gate_result\":\"$gate_result\"}"
+    fi
+
+    local metadata='{}'
 
     mkdir -p "$worker_dir/results"
     local result_file
@@ -722,7 +769,7 @@ agent_set_output() {
 
     if [ -n "$result_file" ] && [ -f "$result_file" ]; then
         local tmp_file
-        tmp_file=$(mktemp)
+        tmp_file=$(agent_mktemp "$worker_dir")
         jq --arg key "$key" --arg value "$value" '.outputs[$key] = $value' "$result_file" > "$tmp_file"
         mv "$tmp_file" "$result_file"
     fi
@@ -743,7 +790,7 @@ agent_add_error() {
 
     if [ -n "$result_file" ] && [ -f "$result_file" ]; then
         local tmp_file
-        tmp_file=$(mktemp)
+        tmp_file=$(agent_mktemp "$worker_dir")
         jq --arg err "$error_msg" '.errors += [$err]' "$result_file" > "$tmp_file"
         mv "$tmp_file" "$result_file"
     fi
@@ -937,13 +984,8 @@ agent_extract_and_write_result() {
         fi
     fi
 
-    # Write epoch-named result JSON with gate_result in outputs
-    local gate_outputs
-    gate_outputs=$(printf '{"gate_result":"%s"}' "$result")
-    agent_write_result "$worker_dir" \
-        "$([ "$result" = "PASS" ] && echo "success" || echo "failure")" \
-        "$([ "$result" = "PASS" ] && echo "0" || echo "1")" \
-        "$gate_outputs"
+    # Write epoch-named result JSON with gate_result
+    agent_write_result "$worker_dir" "$result"
 
     # Set global variable for the calling agent
     printf -v "${agent_name}_RESULT" '%s' "$result"

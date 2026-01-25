@@ -40,6 +40,32 @@ _AGENT_REGISTRY_PROJECT_DIR=""
 _AGENT_REGISTRY_WORKER_DIR=""
 _AGENT_REGISTRY_COMPLETED_NORMALLY=false
 
+# Chain trap handlers to preserve existing traps
+#
+# Args:
+#   signal   - Signal name (e.g., INT, TERM, EXIT)
+#   new_cmd  - New command to add to the trap chain
+#
+# This ensures existing trap handlers are called after the new one
+_chain_trap() {
+    local signal="$1"
+    local new_cmd="$2"
+
+    # Get existing trap for this signal (returns "trap -- 'command' SIGNAL")
+    local existing
+    existing=$(trap -p "$signal" 2>/dev/null | sed "s/trap -- '\\(.*\\)' $signal/\\1/")
+
+    if [ -n "$existing" ] && [ "$existing" != "$new_cmd" ]; then
+        # Chain: run new command, then existing
+        # shellcheck disable=SC2064  # Intentional: expand vars at trap setup time
+        trap "${new_cmd}; ${existing}" "$signal"
+    else
+        # No existing trap or same command - just set
+        # shellcheck disable=SC2064  # Intentional: expand vars at trap setup time
+        trap "$new_cmd" "$signal"
+    fi
+}
+
 # Load an agent by type
 #
 # Supports two agent formats in the same directory with inheritance:
@@ -310,10 +336,10 @@ run_agent() {
         return "$EXIT_AGENT_INIT_FAILED"
     fi
 
-    # Setup cleanup on exit with signal handling
-    trap '_agent_registry_handle_signal INT' INT
-    trap '_agent_registry_handle_signal TERM' TERM
-    trap '_agent_registry_cleanup' EXIT
+    # Setup cleanup on exit with signal handling (chained to preserve existing)
+    _chain_trap INT '_agent_registry_handle_signal INT'
+    _chain_trap TERM '_agent_registry_handle_signal TERM'
+    _chain_trap EXIT '_agent_registry_cleanup'
 
     # Validate prerequisites
     if ! validate_agent_prerequisites "$worker_dir"; then

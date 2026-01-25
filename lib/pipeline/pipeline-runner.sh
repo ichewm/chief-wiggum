@@ -182,17 +182,29 @@ _dispatch_on_result() {
 
     if [ -z "$handler" ]; then
         # No explicit handler - apply default behaviors per spec:
-        # PASS -> next, FAIL -> abort, FIX -> prev, SKIP -> next
+        # PASS -> next, FAIL -> abort, FIX -> prev, SKIP -> next, COMPLETE -> next
+        # Unknown results (not in defaults and not in on_result) trigger abort
         case "$gate_result" in
+            PASS)
+                _PIPELINE_NEXT_IDX=$((idx + 1))
+                ;;
             FAIL)
                 _resolve_jump_target "abort" "$idx"
                 ;;
             FIX)
                 _resolve_jump_target "prev" "$idx"
                 ;;
-            *)
-                # PASS, SKIP, and unknown results continue to next
+            SKIP)
                 _PIPELINE_NEXT_IDX=$((idx + 1))
+                ;;
+            *)
+                # Unknown result - abort to prevent silent continuation on unexpected values
+                local step_id
+                step_id=$(pipeline_get "$idx" ".id")
+                log_error "Step '$step_id' returned unknown result '$gate_result' (not in on_result handlers or default results)"
+                log_error "Valid default results are: PASS, FAIL, FIX, SKIP"
+                log_error "Define an on_result handler for '$gate_result' in the pipeline config, or fix the agent"
+                _resolve_jump_target "abort" "$idx"
                 ;;
         esac
         return
@@ -344,6 +356,9 @@ pipeline_run_all() {
 
     # Write pipeline-config.json once at pipeline start
     _write_pipeline_config "$worker_dir"
+
+    # Reset all pipeline state (defensive, ensures clean slate for each run)
+    _PIPELINE_NEXT_IDX=0
 
     # Initialize visit counters (global for entire workflow)
     # Use declare -gA to ensure associative array type is set (required for set -u compatibility)

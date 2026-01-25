@@ -10,6 +10,19 @@ source "$WIGGUM_HOME/lib/core/logger.sh"
 # Checkpoint schema version
 CHECKPOINT_VERSION="1.0"
 
+# Create secure temp file in worker-local directory
+#
+# Args:
+#   worker_dir - Worker directory path (creates tmp/ subdirectory)
+#
+# Returns: Path to newly created temp file
+_checkpoint_mktemp() {
+    local worker_dir="$1"
+    local tmp_dir="$worker_dir/tmp"
+    mkdir -p "$tmp_dir"
+    mktemp -p "$tmp_dir"
+}
+
 # Get checkpoint directory for a worker (namespaced by run ID)
 #
 # Args:
@@ -259,7 +272,7 @@ checkpoint_update_status() {
     fi
 
     local tmp_file
-    tmp_file=$(mktemp)
+    tmp_file=$(_checkpoint_mktemp "$worker_dir")
 
     jq --arg status "$new_status" '.status = $status' "$checkpoint_file" > "$tmp_file"
     mv "$tmp_file" "$checkpoint_file"
@@ -295,7 +308,7 @@ checkpoint_update_summary() {
     fi
 
     local tmp_file
-    tmp_file=$(mktemp)
+    tmp_file=$(_checkpoint_mktemp "$worker_dir")
 
     jq --arg summary "$prose_summary" '.prose_summary = $summary' "$checkpoint_file" > "$tmp_file"
     mv "$tmp_file" "$checkpoint_file"

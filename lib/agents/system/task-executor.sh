@@ -96,25 +96,23 @@ agent_run() {
 
     log "Task executor completed with exit code: $loop_result"
 
-    # Write structured agent result
-    local result_status="failure"
+    # Determine gate_result from loop exit code
+    local gate_result="FAIL"
     if [ $loop_result -eq 0 ]; then
-        result_status="success"
+        gate_result="PASS"
     fi
 
     local session_id="${RALPH_LOOP_LAST_SESSION_ID:-}"
     local outputs_json
     outputs_json=$(jq -n \
-        --arg gate_result "$([ $loop_result -eq 0 ] && echo "PASS" || echo "FAIL")" \
         --arg session_id "$session_id" \
         --argjson loop_exit_code "$loop_result" \
         '{
-            gate_result: $gate_result,
             session_id: $session_id,
             loop_exit_code: $loop_exit_code
         }')
 
-    agent_write_result "$worker_dir" "$result_status" "$loop_result" "$outputs_json"
+    agent_write_result "$worker_dir" "$gate_result" "$outputs_json"
 
     return $loop_result
 }

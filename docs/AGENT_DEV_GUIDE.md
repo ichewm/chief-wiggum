@@ -530,8 +530,10 @@ agent_run() {
     # Spawn sub-agents for quality gates
     run_sub_agent "engineering.security-audit" "$worker_dir" "$project_dir"
 
-    # Write structured result
-    agent_write_result "$worker_dir" "$result_status" "$loop_result" "$outputs_json"
+    # Write structured result (gate_result derives status/exit_code automatically)
+    local gate_result="FAIL"
+    [ $loop_result -eq 0 ] && gate_result="PASS"
+    agent_write_result "$worker_dir" "$gate_result" "$outputs_json"
     agent_log_complete "$worker_dir" "$loop_result" "$start_time"
 
     return $loop_result
@@ -661,8 +663,10 @@ agent_create_directories "$worker_dir"
 
 ```bash
 # Write epoch-named result to results/<epoch>-<agent-type>-result.json
-# Args: worker_dir, status ("success"|"failure"|"partial"), exit_code, outputs_json
-agent_write_result "$worker_dir" "success" 0 '{"gate_result":"PASS"}'
+# Args: worker_dir, gate_result (PASS|FAIL|FIX|SKIP|STOP), extra_outputs, errors
+# Status and exit_code are derived automatically from gate_result
+agent_write_result "$worker_dir" "PASS"                      # Basic usage
+agent_write_result "$worker_dir" "PASS" '{"pr_url":"..."}'   # With extra outputs
 
 # Write epoch-named report to reports/<epoch>-<agent-type>-report.md
 # Returns: path to the written report file

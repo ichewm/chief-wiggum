@@ -146,8 +146,8 @@ test_agent_result_writing() {
     _AGENT_TASK_ID="TASK-001"
     _AGENT_START_EPOCH=$(date +%s)
 
-    agent_write_result "$worker_dir" "success" 0 \
-        '{"pr_url":"https://github.com/test/pr/42"}' '[]' '{}'
+    agent_write_result "$worker_dir" "PASS" \
+        '{"pr_url":"https://github.com/test/pr/42"}'
 
     local result_file
     result_file=$(agent_get_result_path "$worker_dir")
@@ -173,8 +173,8 @@ test_agent_result_reading() {
     _AGENT_TASK_ID="TASK-002"
     _AGENT_START_EPOCH=$(date +%s)
 
-    agent_write_result "$worker_dir" "failure" 1 \
-        '{"error":"timeout"}' '["Resource exhausted"]' '{}'
+    agent_write_result "$worker_dir" "FAIL" \
+        '{"error":"timeout"}' '["Resource exhausted"]'
 
     local status
     status=$(agent_read_result "$worker_dir" ".status")
@@ -182,7 +182,7 @@ test_agent_result_reading() {
 
     local exit_code
     exit_code=$(agent_read_result "$worker_dir" ".exit_code")
-    assert_equals "1" "$exit_code" "Should read exit code 1"
+    assert_equals "10" "$exit_code" "Should read exit code 10 for FAIL"
 }
 
 # =============================================================================
@@ -196,13 +196,13 @@ test_result_is_success() {
     _AGENT_START_EPOCH=$(date +%s)
 
     # Write success result
-    agent_write_result "$worker_dir" "success" 0 '{}' '[]' '{}'
+    agent_write_result "$worker_dir" "PASS"
     assert_success "Should return true for success result" \
         agent_result_is_success "$worker_dir"
 
     # Overwrite with failure result (use new epoch so it's the "latest")
     _AGENT_START_EPOCH=$(( $(date +%s) + 1 ))
-    agent_write_result "$worker_dir" "failure" 1 '{}' '[]' '{}'
+    agent_write_result "$worker_dir" "FAIL"
     assert_failure "Should return false for failure result" \
         agent_result_is_success "$worker_dir"
 }
@@ -217,7 +217,7 @@ test_agent_output_set_get() {
     _AGENT_TASK_ID="TASK-004"
     _AGENT_START_EPOCH=$(date +%s)
 
-    agent_write_result "$worker_dir" "success" 0 '{}' '[]' '{}'
+    agent_write_result "$worker_dir" "PASS"
     agent_set_output "$worker_dir" "pr_url" "https://github.com/pr/99"
 
     local value
@@ -235,7 +235,7 @@ test_agent_error_accumulation() {
     _AGENT_TASK_ID="TASK-005"
     _AGENT_START_EPOCH=$(date +%s)
 
-    agent_write_result "$worker_dir" "failure" 1 '{}' '[]' '{}'
+    agent_write_result "$worker_dir" "FAIL"
     agent_add_error "$worker_dir" "First error"
     agent_add_error "$worker_dir" "Second error"
 
@@ -261,7 +261,7 @@ test_communication_paths() {
     _AGENT_START_EPOCH=$(date +%s)
 
     # Create a result file so agent_find_latest_result can find it
-    agent_write_result "$worker_dir" "success" 0 '{}' '[]' '{}'
+    agent_write_result "$worker_dir" "PASS"
 
     local result_path
     result_path=$(agent_comm_path "$worker_dir" "result")
@@ -328,7 +328,7 @@ test_full_lifecycle_sequence() {
     AGENT_TYPE="test-lifecycle"
     _AGENT_TASK_ID="TASK-FULL"
     _AGENT_START_EPOCH=$(date +%s)
-    agent_write_result "$worker_dir" "success" 0 '{}' '[]' '{}'
+    agent_write_result "$worker_dir" "PASS"
     echo "4-result" >> "$sequence_file"
 
     # Verify full sequence happened

@@ -95,7 +95,7 @@ resolve_worker_id() {
 # Exit: 0 if valid and running, 1 otherwise
 get_valid_worker_pid() {
     local pid_file="$1"
-    local process_pattern="${2:-bash}"
+    local process_pattern="${2:-wiggum}"
 
     if [ ! -f "$pid_file" ]; then
         return 1
@@ -114,9 +114,13 @@ get_valid_worker_pid() {
         return 1
     fi
 
-    # Verify it's the expected process type (bash for agent subshells)
+    # Verify it's a wiggum-related process
+    # Check process args for wiggum patterns or bash (for agent subshells)
     if [ -n "$process_pattern" ]; then
-        if ! ps -p "$pid" -o args= 2>/dev/null | grep -qF -- "$process_pattern"; then
+        local cmdline
+        cmdline=$(ps -p "$pid" -o args= 2>/dev/null)
+        # Accept wiggum commands, bash subshells, or explicit pattern
+        if ! echo "$cmdline" | grep -qE "(wiggum|$process_pattern|/bin/bash|\.ralph/)"; then
             return 1
         fi
     fi
@@ -215,9 +219,9 @@ scan_active_workers() {
 
     # Use flock for atomic PID operations
     (
-        flock -w 5 200 || {
-            log_warn "scan_active_workers: Failed to acquire lock, proceeding without lock"
-            exit 0
+        flock -w 10 200 || {
+            log_warn "scan_active_workers: Failed to acquire lock after 10s"
+            exit 2  # Distinguishable exit code for lock failure
         }
 
         for worker_dir in "$ralph_dir/workers"/worker-*; do

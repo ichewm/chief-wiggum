@@ -2,7 +2,7 @@
 type: product.plan-mode
 description: Creates implementation plans stored in .ralph/plans/TASK-xxx.md
 required_paths: [prd.md]
-valid_results: [COMPLETE]
+valid_results: [PASS]
 mode: ralph_loop
 readonly: true
 output_path: {{ralph_dir}}/plans/{{task_id}}.md
@@ -99,9 +99,9 @@ The "### Critical Files" section is REQUIRED - list 3-5 files most critical for 
 
 When your plan is complete with all sections filled, you MUST output this tag:
 
-<result>COMPLETE</result>
+<result>PASS</result>
 
-This signals that planning is done. The tag MUST be exactly: COMPLETE
+This signals that planning is done. The tag MUST be exactly: PASS
 
 REMEMBER: You can ONLY explore and plan. Do NOT write, edit, or modify any files except {{ralph_dir}}/plans/{{task_id}}.md.
 </WIGGUM_USER_PROMPT>
@@ -117,5 +117,5 @@ Check if {{ralph_dir}}/plans/{{task_id}}.md exists and is complete:
 If incomplete, continue exploration and update the plan.
 
 If complete, output the completion signal:
-<result>COMPLETE</result>
+<result>PASS</result>
 </WIGGUM_CONTINUATION_PROMPT>

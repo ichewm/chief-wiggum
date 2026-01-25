@@ -54,7 +54,7 @@ agent_run() {
     if [ ! -d "$workspace" ]; then
         log_error "Workspace not found: $workspace"
         agent_log_complete "$worker_dir" 1 "$start_time"
-        agent_write_result "$worker_dir" "failure" 1 '{}' '["Workspace not found"]'
+        agent_write_result "$worker_dir" "FAIL" '{}' '["Workspace not found"]'
         return 1
     fi
 
@@ -63,7 +63,7 @@ agent_run() {
         log_error "Comments file not found: $comments_file"
         log_error "Run 'wiggum review task <pattern> sync' first"
         agent_log_complete "$worker_dir" 1 "$start_time"
-        agent_write_result "$worker_dir" "failure" 1 '{}' '["Comments file not found"]'
+        agent_write_result "$worker_dir" "FAIL" '{}' '["Comments file not found"]'
         return 1
     fi
 
@@ -74,7 +74,7 @@ agent_run() {
         log "No comments found in $comments_file - nothing to fix"
         agent_setup_context "$worker_dir" "$workspace" "$project_dir"
         agent_log_complete "$worker_dir" 0 "$start_time"
-        agent_write_result "$worker_dir" "success" 0 '{"gate_result":"SKIP","comments_fixed":0,"comments_pending":0,"comments_skipped":0}'
+        agent_write_result "$worker_dir" "SKIP" '{"comments_fixed":0,"comments_pending":0,"comments_skipped":0}'
         rm -f "$worker_dir/.needs-fix"
         return 0
     fi
@@ -129,14 +129,11 @@ agent_run() {
         comments_skipped=$(grep -c '^\- \[\*\]' "$status_file" 2>/dev/null || echo "0")
     fi
 
-    # Determine result status and gate_result
-    local result_status="failure"
+    # Determine gate_result
     local gate_result="FAIL"
     if [ "$loop_result" -eq 0 ] && [ "$comments_pending" -eq 0 ]; then
-        result_status="success"
         gate_result="PASS"
     elif [ "$comments_fixed" -gt 0 ]; then
-        result_status="partial"
         gate_result="FIX"
     fi
 
@@ -144,13 +141,13 @@ agent_run() {
     agent_log_complete "$worker_dir" "$loop_result" "$start_time"
 
     local outputs_json
-    outputs_json=$(printf '{"gate_result":"%s","commit_sha":"%s","push_succeeded":%s,"comments_fixed":%d,"comments_pending":%d,"comments_skipped":%d}' \
-        "$gate_result" "$commit_sha" "$push_succeeded" "$comments_fixed" "$comments_pending" "$comments_skipped")
+    outputs_json=$(printf '{"commit_sha":"%s","push_succeeded":%s,"comments_fixed":%d,"comments_pending":%d,"comments_skipped":%d}' \
+        "$commit_sha" "$push_succeeded" "$comments_fixed" "$comments_pending" "$comments_skipped")
 
-    agent_write_result "$worker_dir" "$result_status" "$loop_result" "$outputs_json"
+    agent_write_result "$worker_dir" "$gate_result" "$outputs_json"
 
     # Remove .needs-fix marker on success
-    if [ "$result_status" = "success" ]; then
+    if [ "$gate_result" = "PASS" ]; then
         rm -f "$worker_dir/.needs-fix"
     fi
 

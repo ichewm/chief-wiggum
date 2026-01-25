@@ -69,6 +69,13 @@ do_plan() {
         exit $EXIT_WORKER_MISSING_TASK_ID
     fi
 
+    # Validate task ID format (alphanumeric and hyphens only)
+    if ! [[ "$input_id" =~ ^[A-Za-z0-9-]+$ ]]; then
+        echo "Error: Invalid task ID format: $input_id"
+        echo "Task IDs may only contain letters, numbers, and hyphens"
+        exit $EXIT_USAGE
+    fi
+
     # Check .ralph directory exists
     if [ ! -d "$RALPH_DIR" ]; then
         echo "Error: No .ralph directory found. Run 'wiggum init' first."
@@ -137,7 +144,7 @@ main() {
     if [ $# -eq 0 ]; then
         echo "Error: Task ID required"
         echo "Usage: wiggum plan <TASK-ID>"
-        exit $EXIT_USAGE
+        exit $EXIT_WORKER_MISSING_TASK_ID
     fi
 
     do_plan "$1"

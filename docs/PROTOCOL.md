@@ -101,12 +101,15 @@ The `outputs.gate_result` field contains the standardized gate decision (PASS/FA
 ### Writing Results
 
 ```bash
-# Write result with gate_result in outputs
-agent_write_result "$worker_dir" "success" 0 '{"gate_result":"PASS"}'
+# Write result with gate_result (status/exit_code are derived automatically)
+agent_write_result "$worker_dir" "PASS"  # success, exit_code=0
+agent_write_result "$worker_dir" "FAIL"  # failure, exit_code=10
+agent_write_result "$worker_dir" "FIX"   # partial, exit_code=0
+agent_write_result "$worker_dir" "SKIP"  # success, exit_code=0
 
 # Write result with additional output fields
-local outputs_json='{"gate_result":"PASS","pr_url":"https://github.com/..."}'
-agent_write_result "$worker_dir" "success" 0 "$outputs_json"
+local extra_outputs='{"pr_url":"https://github.com/..."}'
+agent_write_result "$worker_dir" "PASS" "$extra_outputs"
 
 # Write a report (analysis/status markdown)
 agent_write_report "$worker_dir" "$report_content"
