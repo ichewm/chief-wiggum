@@ -468,9 +468,24 @@ cmd_task_fix() {
     # Launch agent in background via setsid (new session, won't receive parent signals)
     # shellcheck disable=SC2016
     setsid bash -c '
+        set -euo pipefail
+        _log_ts() { echo "[$(date -Iseconds)] $*"; }
+        _log_ts "INFO: Fix agent subprocess starting"
+        _log_ts "INFO: WIGGUM_HOME='"$WIGGUM_HOME"'"
+        _log_ts "INFO: worker_dir='"$worker_dir"'"
+
         export WIGGUM_HOME="'"$WIGGUM_HOME"'"
-        source "$WIGGUM_HOME/lib/worker/agent-registry.sh"
-        run_agent "pr-comment-fix" "'"$worker_dir"'" "'"$PROJECT_DIR"'"
+
+        if ! source "$WIGGUM_HOME/lib/worker/agent-registry.sh" 2>&1; then
+            _log_ts "ERROR: Failed to source agent-registry.sh"
+            exit 1
+        fi
+
+        _log_ts "INFO: Running agent engineering.pr-comment-fix"
+        if ! run_agent "engineering.pr-comment-fix" "'"$worker_dir"'" "'"$PROJECT_DIR"'"; then
+            _log_ts "ERROR: run_agent failed with exit code $?"
+            exit 1
+        fi
     ' >> "$RALPH_DIR/logs/fix-workers.log" 2>&1 &
 
     # Poll for agent.pid creation (10 × 0.1s)
@@ -485,7 +500,13 @@ cmd_task_fix() {
         agent_pid=$(cat "$worker_dir/agent.pid")
         log "Fix agent running (PID: $agent_pid)"
     else
-        log "Fix agent started (PID file pending)"
+        # Brief wait then check if agent failed
+        sleep 0.3
+        if tail -5 "$RALPH_DIR/logs/fix-workers.log" 2>/dev/null | grep -q "ERROR:"; then
+            error "Fix agent failed to start. Check $RALPH_DIR/logs/fix-workers.log"
+        else
+            log "Fix agent started (PID file pending)"
+        fi
     fi
 }
 
@@ -552,7 +573,7 @@ cmd_task_resolve() {
     log "Progress: $worker_dir/logs/resolve-*.log"
 
     # Run agent (conversation logs go to logs/resolve-*.log)
-    run_agent "git-conflict-resolver" "$worker_dir" "$(pwd)" 0 \
+    run_agent "engineering.git-conflict-resolver" "$worker_dir" "$(pwd)" 0 \
         > /dev/null 2>&1
 
     local exit_code=$?

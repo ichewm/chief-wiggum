@@ -96,7 +96,7 @@ do_plan() {
     echo "Worker: $worker_id"
 
     # Run plan-mode agent in foreground (blocking)
-    run_agent "plan-mode" "$worker_dir" "$PROJECT_DIR"
+    run_agent "product.plan-mode" "$worker_dir" "$PROJECT_DIR"
     local result=$?
 
     # Report result

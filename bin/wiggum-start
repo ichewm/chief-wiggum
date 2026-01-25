@@ -122,9 +122,25 @@ do_start() {
     # This prevents SIGINT from the orchestrator from killing workers
     # shellcheck disable=SC2016
     setsid bash -c '
+        set -euo pipefail
+        _log_ts() { echo "[$(date -Iseconds)] $*"; }
+        _log_ts "INFO: Worker subprocess starting"
+        _log_ts "INFO: WIGGUM_HOME='"$WIGGUM_HOME"'"
+        _log_ts "INFO: worker_dir='"$worker_dir"'"
+        _log_ts "INFO: AGENT_TYPE='"$AGENT_TYPE"'"
+
         export WIGGUM_HOME="'"$WIGGUM_HOME"'"
-        source "$WIGGUM_HOME/lib/worker/agent-registry.sh"
-        run_agent "'"$AGENT_TYPE"'" "'"$worker_dir"'" "'"$PROJECT_DIR"'" 30 "'"$MAX_ITERATIONS"'" "'"$MAX_TURNS"'"
+
+        if ! source "$WIGGUM_HOME/lib/worker/agent-registry.sh" 2>&1; then
+            _log_ts "ERROR: Failed to source agent-registry.sh"
+            exit 1
+        fi
+
+        _log_ts "INFO: Running agent '"$AGENT_TYPE"'"
+        if ! run_agent "'"$AGENT_TYPE"'" "'"$worker_dir"'" "'"$PROJECT_DIR"'" 30 "'"$MAX_ITERATIONS"'" "'"$MAX_TURNS"'"; then
+            _log_ts "ERROR: run_agent failed with exit code $?"
+            exit 1
+        fi
     ' >> "$RALPH_DIR/logs/workers.log" 2>&1 &
 
     # Wait briefly for agent.pid to be created
@@ -139,7 +155,13 @@ do_start() {
         worker_pid=$(cat "$worker_dir/agent.pid")
         echo "Worker running (PID: $worker_pid)"
     else
-        echo "Worker started (PID file pending)"
+        # Brief wait then check if agent failed
+        sleep 0.3
+        if tail -5 "$RALPH_DIR/logs/workers.log" 2>/dev/null | grep -q "ERROR:"; then
+            echo "ERROR: Worker failed to start. Check .ralph/logs/workers.log" >&2
+        else
+            echo "Worker started (PID file pending)"
+        fi
     fi
     echo "Use 'wiggum monitor' to follow progress"
 }
