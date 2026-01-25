@@ -253,14 +253,14 @@ test_get_ready_tasks_sorted_by_priority() {
     ready=$(get_ready_tasks "$FIXTURES_DIR/kanban-priorities.md")
 
     # Convert to array and check order
-    local first_task
-    first_task=$(echo "$ready" | head -1)
+    local second_task
+    second_task=$(echo "$ready" | sed -n '2p')
 
-    # HIGH priority tasks should come first (TASK-002 or TASK-004)
-    if [[ "$first_task" == "TASK-002" || "$first_task" == "TASK-004" ]]; then
-        echo -e "  ${GREEN}✓${NC} High priority task returned first"
+    # HIGH priority tasks should come after CRITICAL (TASK-002 or TASK-004)
+    if [[ "$second_task" == "TASK-002" || "$second_task" == "TASK-004" ]]; then
+        echo -e "  ${GREEN}✓${NC} High priority task returned after CRITICAL"
     else
-        echo -e "  ${RED}X${NC} Expected HIGH priority task first, got $first_task"
+        echo -e "  ${RED}X${NC} Expected HIGH priority task second, got $second_task"
         FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
     fi
     ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
@@ -269,6 +269,39 @@ test_get_ready_tasks_sorted_by_priority() {
     local last_task
     last_task=$(echo "$ready" | tail -1)
     assert_equals "TASK-001" "$last_task" "LOW priority task should be last"
+}
+
+test_get_ready_tasks_critical_priority_first() {
+    local ready
+    ready=$(get_ready_tasks "$FIXTURES_DIR/kanban-priorities.md")
+
+    # CRITICAL priority task should come first
+    local first_task
+    first_task=$(echo "$ready" | head -1)
+    assert_equals "TASK-005" "$first_task" "CRITICAL priority task should be first"
+}
+
+test_get_ready_tasks_sibling_wip_penalty() {
+    local ready
+    ready=$(get_ready_tasks "$FIXTURES_DIR/kanban-sibling-wip.md")
+
+    # OTHER-001 (HIGH, no penalty) should come first
+    local first_task
+    first_task=$(echo "$ready" | head -1)
+    assert_equals "OTHER-001" "$first_task" "Unpenalized HIGH task should be first"
+
+    # OTHER-002 (MEDIUM, no penalty) should come second
+    local second_task
+    second_task=$(echo "$ready" | sed -n '2p')
+    assert_equals "OTHER-002" "$second_task" "Unpenalized MEDIUM task should be second"
+
+    # All penalized tasks (FEAT-002, BUG-002, REFAC-002) should come last
+    # They are HIGH priority but penalized by +2, making them LOW-equivalent (3)
+    local last_three
+    last_three=$(echo "$ready" | tail -3 | sort)
+    local expected_penalized
+    expected_penalized=$(echo -e "BUG-002\nFEAT-002\nREFAC-002")
+    assert_equals "$expected_penalized" "$last_three" "All penalized siblings should be last"
 }
 
 # =============================================================================
@@ -403,6 +436,8 @@ run_test test_are_dependencies_satisfied_multiple_deps_partial
 # get_ready_tasks tests
 run_test test_get_ready_tasks_filters_blocked
 run_test test_get_ready_tasks_sorted_by_priority
+run_test test_get_ready_tasks_critical_priority_first
+run_test test_get_ready_tasks_sibling_wip_penalty
 
 # get_blocked_tasks tests
 run_test test_get_blocked_tasks_identifies_blocked

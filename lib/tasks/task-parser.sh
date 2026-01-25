@@ -252,10 +252,11 @@ get_effective_priority() {
 
     local numeric
     case "$base_priority" in
-        HIGH)   numeric=1 ;;
-        MEDIUM) numeric=2 ;;
-        LOW)    numeric=3 ;;
-        *)      numeric=2 ;;
+        CRITICAL) numeric=0 ;;
+        HIGH)     numeric=1 ;;
+        MEDIUM)   numeric=2 ;;
+        LOW)      numeric=3 ;;
+        *)        numeric=2 ;;
     esac
 
     # Subtract aging bonus (integer division)
@@ -272,13 +273,52 @@ get_effective_priority() {
     echo "$numeric"
 }
 
+# Extract task prefix from task ID (e.g., "CORTEX" from "CORTEX-001")
+# Args: task_id
+# Returns: prefix string
+get_task_prefix() {
+    local task_id="$1"
+    echo "$task_id" | sed 's/-[0-9]*$//'
+}
+
+# Check if any task with the same prefix is actively being worked on
+# (in-progress, pending approval, or failed - anything except pending/complete/not-planned)
+# Args: kanban_file task_id all_metadata
+# Returns: 0 if sibling is active, 1 otherwise
+has_sibling_in_progress() {
+    local task_id="$2"
+    local all_metadata="$3"
+
+    local prefix
+    prefix=$(get_task_prefix "$task_id")
+
+    # Check if any task with same prefix has an active status:
+    # "=" (in-progress), "P" (pending approval), "*" (failed)
+    # Excludes: " " (pending), "x" (complete), "N" (not planned)
+    local found
+    found=$(echo "$all_metadata" | awk -F'|' -v prefix="$prefix" -v self="$task_id" '
+        $1 != self && ($2 == "=" || $2 == "P" || $2 == "*") {
+            # Extract prefix from this task ID (remove trailing -NNN)
+            task_prefix = $1
+            sub(/-[0-9]+$/, "", task_prefix)
+            if (task_prefix == prefix) {
+                print "1"
+                exit
+            }
+        }
+    ')
+
+    [ "$found" = "1" ]
+}
+
 # Get tasks that are ready to run (pending, with satisfied dependencies)
-# Sorted by priority: HIGH > MEDIUM > LOW
-# Optional args: ready_since_file aging_factor
+# Sorted by priority: CRITICAL > HIGH > MEDIUM > LOW
+# Optional args: ready_since_file aging_factor sibling_wip_penalty
 get_ready_tasks() {
     local kanban="$1"
     local ready_since_file="${2:-}"
     local aging_factor="${3:-10}"
+    local sibling_wip_penalty="${4:-2}"  # Priority penalty when sibling task is WIP
 
     local all_metadata
     all_metadata=$(get_all_tasks_with_metadata "$kanban")
@@ -303,11 +343,20 @@ get_ready_tasks() {
             else
                 # No aging - use static priority
                 case "$priority" in
-                    HIGH)   effective_pri=1 ;;
-                    MEDIUM) effective_pri=2 ;;
-                    LOW)    effective_pri=3 ;;
-                    *)      effective_pri=2 ;;
+                    CRITICAL) effective_pri=0 ;;
+                    HIGH)     effective_pri=1 ;;
+                    MEDIUM)   effective_pri=2 ;;
+                    LOW)      effective_pri=3 ;;
+                    *)        effective_pri=2 ;;
                 esac
+            fi
+
+            # Apply penalty if a sibling task (same prefix) is in-progress
+            # This discourages parallel work on related features that might conflict
+            if [ "$sibling_wip_penalty" -gt 0 ]; then
+                if has_sibling_in_progress "$kanban" "$task_id" "$all_metadata"; then
+                    effective_pri=$(( effective_pri + sibling_wip_penalty ))
+                fi
             fi
 
             # Compute dependency depth for tiebreaking (higher depth = higher priority)

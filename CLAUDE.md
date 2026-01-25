@@ -133,6 +133,19 @@ Each worker operates in `.ralph/workers/worker-TASK-XXX-<timestamp>/` with:
 - Only `[x]` (Complete) satisfies dependencies - `[P]` does NOT
 - Status markers: `[ ]` Pending, `[=]` In-progress, `[P]` Pending approval, `[x]` Complete, `[*]` Failed, `[N]` Not planned
 
+### Task Prioritization
+
+Tasks are sorted by effective priority (lower number = higher priority):
+- CRITICAL = 0 (highest)
+- HIGH = 1
+- MEDIUM = 2
+- LOW = 3 (lowest)
+
+**Modifiers**:
+- **Aging**: Tasks waiting multiple iterations get promoted (configurable via `AGING_FACTOR`, default 10 iterations per level)
+- **Dependency depth**: Tasks blocking more downstream tasks are prioritized as a tiebreaker
+- **Sibling WIP penalty**: When a task with the same prefix is actively being worked on (`[=]` in-progress, `[P]` pending approval, or `[*]` failed), other pending tasks with that prefix are penalized by +2 priority levels. This discourages parallel work on related features that might cause file conflicts. Example: if `FEAT-001` is `[=]`, then `FEAT-002` gets demoted from HIGH (1) to LOW-equivalent (3).
+
 ## Testing Patterns
 
 Test framework uses custom assertions:

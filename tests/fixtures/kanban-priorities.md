@@ -21,3 +21,8 @@
   - Description: Should be returned with other high priority
   - Priority: HIGH
   - Dependencies: none
+
+- [ ] **[TASK-005]** Critical priority task
+  - Description: Should be returned first before HIGH
+  - Priority: CRITICAL
+  - Dependencies: none
