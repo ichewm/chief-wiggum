@@ -184,6 +184,8 @@ PLANNING TASK: $task_id
 
 4. **Write the Plan**: Document in $plan_output
 
+5. **Signal Completion**: When plan is complete, output the completion tag (see below)
+
 ## Required Output
 
 Write to $plan_output with this structure:
@@ -221,6 +223,14 @@ Write to $plan_output with this structure:
 
 The "### Critical Files" section is REQUIRED - list 3-5 files most critical for implementation.
 
+## Signaling Completion (REQUIRED)
+
+When your plan is complete with all sections filled, you MUST output this tag:
+
+<result>COMPLETE</result>
+
+This signals that planning is done. The tag MUST be exactly: COMPLETE
+
 REMEMBER: You can ONLY explore and plan. Do NOT write, edit, or modify any files except $plan_output.
 PROMPT_EOF
 
@@ -235,20 +245,27 @@ Check if $plan_output exists and is complete:
 2. "### Critical Files" section exists with specific files listed
 3. Implementation approach is detailed and actionable
 
-If incomplete, continue exploration and update. If complete, no action needed.
+If incomplete, continue exploration and update the plan.
+
+If complete, output the completion signal:
+<result>COMPLETE</result>
 CONTINUE_EOF
     fi
 }
 
 # Completion check - returns 0 if plan is complete
+# Checks for <result>COMPLETE</result> tag in logs (like security-audit pattern)
 _plan_completion_check() {
-    local project_dir
-    project_dir=$(agent_get_project_dir)
-    local plan_file="$project_dir/$_PLAN_OUTPUT_FILE"
+    local worker_dir
+    worker_dir=$(agent_get_worker_dir)
+    local step_id="${WIGGUM_STEP_ID:-planning}"
 
-    # Check if plan file exists and contains the critical section
-    if [ -f "$plan_file" ] && [ -s "$plan_file" ]; then
-        if grep -q '### Critical Files' "$plan_file" 2>/dev/null; then
+    # Find latest log file (excluding summary logs)
+    local latest_log
+    latest_log=$(find "$worker_dir/logs" -name "${step_id}-*.log" ! -name "*summary*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+
+    if [ -n "$latest_log" ] && [ -f "$latest_log" ]; then
+        if grep -qP '<result>COMPLETE</result>' "$latest_log" 2>/dev/null; then
             return 0  # Complete
         fi
     fi
