@@ -33,12 +33,17 @@ Claims mean nothing without evidence. Your job is to confirm that:
 - For each PRD requirement, find the corresponding changes in the diff
 - If a requirement has no matching changes, it's NOT implemented (regardless of claims)
 
-**Step 3: Cross-Reference Diff → Code**
+**Step 3: Verify Build**
+- Run the project's build command to verify the code compiles
+- Rust: `cargo check`, TypeScript: `tsc`, Go: `go build ./...`
+- **Build failure = automatic FAIL** (implementation is broken)
+
+**Step 4: Cross-Reference Diff → Code**
 - Read the actual modified files to verify the diff makes sense
 - Check that new functions/features actually exist and are wired up
 - Verify imports, exports, and integrations are complete
 
-**Step 4: Detect Phantom Features**
+**Step 5: Detect Phantom Features**
 Watch for these red flags:
 - Functions defined but never called
 - Imports added but never used
@@ -48,6 +53,7 @@ Watch for these red flags:
 
 ## What Causes FAIL
 
+* **Build failure** - Code doesn't compile (type errors, missing imports, syntax errors)
 * **Missing implementation** - PRD requirement has no corresponding code changes
 * **Phantom feature** - Code exists but isn't connected/callable
 * **Broken functionality** - Feature doesn't work as specified
@@ -79,7 +85,16 @@ git diff                # Actual changes
 
 Read @../prd.md to understand what SHOULD have been built.
 
-## Step 2: Verify Each Requirement
+## Step 2: Verify Build
+
+Run the project's build command:
+- Rust: `cargo check` or `cargo build`
+- TypeScript: `tsc` or `npm run build`
+- Go: `go build ./...`
+
+**If build fails → immediate FAIL.** Report the build errors clearly.
+
+## Step 3: Verify Each Requirement
 
 For EACH requirement in the PRD:
 
@@ -89,7 +104,7 @@ For EACH requirement in the PRD:
 
 If you can't find evidence for a requirement in the diff, it's NOT done.
 
-## Step 3: Detect Phantom Features
+## Step 4: Detect Phantom Features
 
 Look for code that exists but doesn't work:
 - Functions defined but never called from anywhere
@@ -98,7 +113,7 @@ Look for code that exists but doesn't work:
 - API routes with placeholder/empty handlers
 - Features that exist in isolation but aren't integrated
 
-## Step 4: Verify Integration
+## Step 5: Verify Integration
 
 For each new feature, trace the path:
 - Entry point exists? (route, command, UI element)
@@ -110,6 +125,7 @@ For each new feature, trace the path:
 
 | Finding | Verdict |
 |---------|---------|
+| Code doesn't compile (build errors) | FAIL |
 | PRD requirement has no matching code changes | FAIL |
 | Code exists but isn't called/integrated | FAIL |
 | Feature doesn't work as PRD specified | FAIL |
@@ -118,14 +134,18 @@ For each new feature, trace the path:
 
 ## PASS Criteria
 
-All PRD requirements have:
-- Corresponding code changes in git diff
+All of the following must be true:
+- Code compiles successfully (build passes)
+- All PRD requirements have corresponding code changes in git diff
 - Working implementation that matches spec
 - Proper integration into the application
 
 ## Output Format
 
 <review>
+
+## Build Status
+[PASS/FAIL - run build command and report result. If FAIL, list errors.]
 
 ## Evidence Check
 

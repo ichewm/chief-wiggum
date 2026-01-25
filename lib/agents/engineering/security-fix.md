@@ -24,6 +24,7 @@ STATUS: ../reports/fix-status.md (update as you fix)
 * UNDERSTAND THE VULNERABILITY - Read the finding carefully before fixing
 * MINIMAL CHANGES - Fix the security issue without unnecessary refactoring
 * VERIFY THE FIX - Ensure your change actually addresses the vulnerability
+* CODE MUST COMPILE - A fix that breaks compilation is NOT a fix. Always verify.
 * DON'T BREAK FUNCTIONALITY - Security fixes should maintain existing behavior
 * FOLLOW PATTERNS - Match existing code style and security patterns in the codebase
 
@@ -74,9 +75,26 @@ Fix security vulnerabilities from the audit report.
    - Read the vulnerability details (location, evidence, remediation)
    - Navigate to the affected file and line
    - Implement the fix following the suggested remediation
-   - Verify the fix addresses the vulnerability
+   - **VERIFY BUILD**: Run the project's build command to ensure code compiles
+   - If build fails: FIX THE BUILD ERROR before proceeding (your fix is incomplete)
    - Update status: `- [ ] SEC-XXX` -> `- [x] SEC-XXX: <what you fixed>`
 4. **Repeat** until no [ ] items remain
+
+## Build Verification (CRITICAL)
+
+After EVERY fix, you MUST verify the code compiles:
+
+| Language | Build Command |
+|----------|---------------|
+| Rust | `cargo check` or `cargo build` |
+| TypeScript/JS | `npm run build` or `tsc` |
+| Python | `python -m py_compile <file>` or project's lint/type check |
+| Go | `go build ./...` |
+| Java | `mvn compile` or `gradle build` |
+
+**A fix that breaks compilation is NOT complete.** If your fix introduces type errors,
+missing imports, or other build failures, you must resolve them before marking the
+finding as fixed.
 
 ## Common Fixes
 
@@ -106,6 +124,7 @@ Markers:
 ## Rules
 
 * ONE finding at a time - fix completely before moving on
+* **VERIFY BUILD after each fix** - code that doesn't compile is not fixed
 * Update status IMMEDIATELY after each fix
 * CRITICAL and HIGH findings must be fixed; MEDIUM is best-effort
 * If you can't fix something, mark [*] with clear explanation
@@ -129,6 +148,7 @@ When all fixes are complete, provide:
 - [ ] All CRITICAL issues addressed
 - [ ] All HIGH issues addressed
 - [ ] MEDIUM issues addressed or documented
+- [ ] Code compiles successfully after all fixes
 </summary>
 
 <result>PASS</result>

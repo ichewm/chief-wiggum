@@ -238,20 +238,29 @@ Before writing ANY code, understand the existing codebase:
 
 ## Phase 4: Verify and Complete
 
-9. **Run Tests and Verification**
-   - Run the test suite if one exists
-   - Manually verify your implementation works
-   - Check for obvious regressions
+9. **Verify Build**
+   - Run the project's build/compile command BEFORE marking complete
+   - Rust: \`cargo check\` or \`cargo build\`
+   - TypeScript/JS: \`npm run build\` or \`tsc\`
+   - Go: \`go build ./...\`
+   - Python: run linter or type checker if configured
+   - **If build fails, fix the errors before proceeding**
 
-10. **Update the PRD**
-    - `- [ ]` → `- [x]` if successfully completed
-    - `- [ ]` → `- [*]` if blocked (explain why)
+10. **Run Tests and Verification**
+    - Run the test suite if one exists
+    - Manually verify your implementation works
+    - Check for obvious regressions
+
+11. **Update the PRD**
+    - \`- [ ]\` → \`- [x]\` if successfully completed
+    - \`- [ ]\` → \`- [*]\` if blocked (explain why)
 
 ## Quality Checklist
 
 Before marking complete, verify:
 - [ ] Implementation meets all requirements
 - [ ] Code follows existing patterns in the codebase
+- [ ] **Code compiles without errors** (run build command)
 - [ ] Error cases are handled appropriately
 - [ ] Tests are added (matching project conventions)
 - [ ] No security vulnerabilities introduced

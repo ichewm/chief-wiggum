@@ -103,9 +103,23 @@ From the implementation summary, identify:
 - Independent tests (no shared state)
 - Test behavior, not implementation details
 
-## Step 4: Run Tests
+## Step 4: Verify Build First
 
-1. Run the project's test command (npm test, pytest, go test, etc.)
+Before running tests, verify the codebase compiles:
+
+| Language | Build Command |
+|----------|---------------|
+| Rust | `cargo check` or `cargo build` |
+| TypeScript/JS | `npm run build` or `tsc` |
+| Go | `go build ./...` |
+| Java | `mvn compile` |
+
+**If the build fails**, this is an implementation bug from an earlier step. Report as FAIL
+with clear details about the compilation errors - do NOT attempt to fix implementation bugs.
+
+## Step 5: Run Tests
+
+1. Run the project's test command (npm test, pytest, go test, cargo test, etc.)
 2. If tests fail due to test bugs -> fix the tests and re-run
 3. If tests fail due to implementation bugs -> report as FAIL
 4. Ensure existing tests still pass (no regressions)
@@ -113,7 +127,10 @@ From the implementation summary, identify:
 ## Result Criteria
 
 * **PASS**: Tests written for new code, all tests pass
-* **FAIL**: Tests reveal implementation bugs that need fixing
+* **FAIL**: Implementation bugs found - includes:
+  - Codebase doesn't compile (build errors from earlier steps)
+  - Tests reveal implementation bugs that need fixing
+  - Existing tests now fail (regression)
 * **SKIP**: No test framework exists, or no testable code changes
 
 ## Output Format
@@ -122,6 +139,9 @@ From the implementation summary, identify:
 
 ## Summary
 [1-2 sentences: what was tested]
+
+## Build Status
+[PASS/FAIL - if FAIL, list compilation errors]
 
 ## Framework Used
 [e.g., "jest (existing)" or "pytest (existing)"]
@@ -138,8 +158,15 @@ From the implementation summary, identify:
 |-------|--------|--------|---------|
 | [name] | N | N | N |
 
-## Failures
-(Only if implementation bugs found - omit if all pass)
+## Build Errors
+(Only if codebase doesn't compile - omit if build passes)
+
+### [File:Line]
+- **Error**: [compiler/type error message]
+- **Analysis**: [what's wrong - this is an implementation bug from earlier steps]
+
+## Test Failures
+(Only if implementation bugs found via tests - omit if all pass)
 
 ### [Test Name]
 - **Error**: [message]
