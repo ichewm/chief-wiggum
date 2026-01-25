@@ -37,7 +37,8 @@ find_tui() {
     return 1
 }
 
-find_tui
+# Try to find TUI, but don't fail if not available
+find_tui || true
 
 tui_available() {
     [ -n "$TUI_PYTHON" ] && [ -x "$TUI_PYTHON" ] && "$TUI_PYTHON" -c "import wiggum_tui" 2>/dev/null
