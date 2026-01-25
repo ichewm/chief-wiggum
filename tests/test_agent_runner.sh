@@ -208,6 +208,8 @@ test_detect_violations_creates_violations_log() {
     local agent_dir="$TEST_DIR/agent-viol-log"
     local project_dir="$TEST_DIR/project-log"
     mkdir -p "$project_dir/.ralph/logs"
+    # Set RALPH_DIR for this test's project
+    export RALPH_DIR="$project_dir/.ralph"
 
     agent_runner_init "$agent_dir" "$project_dir" 0
 
@@ -226,6 +228,7 @@ test_detect_violations_creates_violations_log() {
         "violations.log should contain VIOLATION entry"
 
     agent_runner_cleanup
+    unset RALPH_DIR
 }
 
 # =============================================================================
