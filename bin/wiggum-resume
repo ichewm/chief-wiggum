@@ -56,16 +56,18 @@ Worker ID Resolution:
   - worker-TASK-030-1891712  (full ID)
 
 Options:
-  --max-iters N  Maximum iterations per worker (default: 20)
-  --max-turns N  Maximum turns per Claude session (default: 50)
-  -f             Force resume, clearing any workspace violation status.
-                 Use this after manually resolving violations.
-  -h, --help     Show this help message
+  --max-iters N   Maximum iterations per worker (default: 20)
+  --max-turns N   Maximum turns per Claude session (default: 50)
+  --pipeline NAME Pipeline config to use (from config/pipelines/ or config/)
+  -f              Force resume, clearing any workspace violation status.
+                  Use this after manually resolving violations.
+  -h, --help      Show this help message
 
 Examples:
-  wiggum resume TASK-030        # Resume worker for TASK-030
-  wiggum resume 1891712         # Resume worker by timestamp
-  wiggum resume TASK-030 -f     # Force resume after fixing violations
+  wiggum resume TASK-030            # Resume worker for TASK-030
+  wiggum resume 1891712             # Resume worker by timestamp
+  wiggum resume TASK-030 -f         # Force resume after fixing violations
+  wiggum resume TASK-030 --pipeline fast  # Resume using fast pipeline
 
 EOF
 }
@@ -334,6 +336,14 @@ main() {
                     exit $EXIT_USAGE
                 fi
                 MAX_TURNS="$2"
+                shift 2
+                ;;
+            --pipeline)
+                if [[ -z "${2:-}" ]] || [[ "${2:-}" =~ ^- ]]; then
+                    echo "Error: --pipeline requires a name argument"
+                    exit $EXIT_USAGE
+                fi
+                export WIGGUM_PIPELINE="$2"
                 shift 2
                 ;;
             -*)

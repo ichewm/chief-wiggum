@@ -59,6 +59,7 @@ Options:
   --max-workers N      Maximum concurrent workers (default: 4)
   --max-iters N        Maximum iterations per worker (default: 20)
   --max-turns N        Maximum turns per Claude session (default: 50)
+  --pipeline NAME      Pipeline config to use (from config/pipelines/ or config/)
   --force              Override stale orchestrator lock
   -h, --help          Show this help message
 
@@ -67,6 +68,7 @@ Examples:
   wiggum run plan                         # Use planning mode for all workers
   wiggum run --max-workers 8              # Start with max 8 workers
   wiggum run plan --max-workers 2         # Planning mode with 2 workers
+  wiggum run --pipeline fast              # Use the fast pipeline
 
 Behavior:
   - Chief assigns pending tasks [ ] to workers based on dependency graph
@@ -420,6 +422,14 @@ main() {
                 MAX_TURNS="$2"
                 shift 2
                 ;;
+            --pipeline)
+                if [[ -z "${2:-}" ]] || [[ "${2:-}" =~ ^- ]]; then
+                    echo "Error: --pipeline requires a name argument"
+                    exit $EXIT_USAGE
+                fi
+                export WIGGUM_PIPELINE="$2"
+                shift 2
+                ;;
             --force)
                 FORCE_LOCK=true
                 shift
@@ -613,6 +623,9 @@ main() {
     local mode_desc="standard"
     if [ "${WIGGUM_PLAN_MODE:-false}" = "true" ]; then
         mode_desc="plan mode"
+    fi
+    if [ -n "${WIGGUM_PIPELINE:-}" ]; then
+        mode_desc="$mode_desc, pipeline: $WIGGUM_PIPELINE"
     fi
     log "Starting Chief Wiggum in $PROJECT_DIR ($mode_desc, max $MAX_WORKERS concurrent workers)"
     echo ""

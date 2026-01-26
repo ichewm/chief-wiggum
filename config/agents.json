@@ -132,6 +132,17 @@
         "SKIP": { "status": "success", "exit_code": 0, "default_jump": "next" }
       }
     },
+    "engineering.master-followup": {
+      "max_iterations": 10,
+      "max_turns": 100,
+      "timeout_seconds": 3600,
+      "result_mappings": {
+        "PASS": { "status": "success", "exit_code": 0, "default_jump": "next" },
+        "FAIL": { "status": "failure", "exit_code": 10, "default_jump": "abort" },
+        "FIX":  { "status": "partial", "exit_code": 0, "default_jump": "prev" },
+        "SKIP": { "status": "success", "exit_code": 0, "default_jump": "next" }
+      }
+    },
     "engineering.code-review": {
       "max_iterations": 6,
       "max_turns": 50,
