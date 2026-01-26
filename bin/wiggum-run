@@ -681,8 +681,8 @@ main() {
     # Initialize activity log
     activity_init "$PROJECT_DIR"
 
-    # Ensure only one orchestrator runs at a time
-    local orchestrator_lock="$RALPH_DIR/.orchestrator.pid"
+    # Ensure only one orchestrator runs at a time (not local - needed by trap handler)
+    orchestrator_lock="$RALPH_DIR/.orchestrator.pid"
 
     # Check if another orchestrator is already running
     if [ -f "$orchestrator_lock" ]; then
@@ -1258,7 +1258,7 @@ main() {
                     local dep_depth
                     dep_depth=$(get_dependency_depth "$RALPH_DIR/kanban.md" "$task_id")
                     effective_pri=$((effective_pri - dep_depth * DEP_BONUS_PER_TASK))
-                    [ "$effective_pri" -lt 0 ] && effective_pri=0
+                    [[ "$effective_pri" -lt 0 ]] && effective_pri=0 || true
                     echo "  - $task_id (score: $effective_pri)"
                     ((++display_count))
                 done
@@ -1267,7 +1267,7 @@ main() {
             # Show recent errors only (not info)
             if [ -f "$RALPH_DIR/logs/workers.log" ]; then
                 local recent_errors
-                recent_errors=$(grep -i "ERROR\|WARN" "$RALPH_DIR/logs/workers.log" 2>/dev/null | tail -n 5)
+                recent_errors=$(grep -i "ERROR\|WARN" "$RALPH_DIR/logs/workers.log" 2>/dev/null | tail -n 5 || true)
                 if [ -n "$recent_errors" ]; then
                     echo ""
                     echo "Recent errors:"
