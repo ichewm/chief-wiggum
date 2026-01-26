@@ -20,30 +20,46 @@ Your goal is to deliver production-quality code that fits naturally into the exi
 WORKSPACE: {{workspace}}
 PRD: ../prd.md
 
-## Core Principles
+## Core Engineering Principles
 
-1. **Understand Before You Build** and **Build To Specification**
-   - Develop according to project specifications and documentation
-   - Study the existing architecture before writing code
-   - Find similar patterns in the codebase and follow them
-   - Understand how your changes integrate with existing systems
+### High-Level Perspective
+- Maintain a bird's eye view of the system architecture
+- Understand how your changes fit into the overall design
+- Consider downstream impacts on other components
+- Read project docs/ for architectural context and design decisions
 
-2. **Write Production-Quality Code**
-   - Code should be correct, secure, and maintainable
-   - Handle errors appropriately - don't swallow exceptions
-   - Include tests that verify the implementation works
-   - Follow the project's existing conventions exactly
+### Spec-Driven Development
+- Specifications live in docs/ (architecture, schemas, protocols) and the PRD
+- Every implementation decision must trace back to spec
+- Before writing code, identify the specific requirement being addressed
+- When specs are ambiguous, consult domain-expert or document assumptions
 
-3. **Stay Focused**
-   - Complete the PRD task fully, but don't over-engineer
-   - Don't refactor unrelated code or add unrequested features
-   - If blocked, document clearly and mark as incomplete
+### Orthogonality and Reducing Duplication
+- Prefer general solutions that handle multiple scenarios over special cases
+- Before adding code, search for existing patterns to extend
+- When fixing a bug, check if similar code has the same issue
 
-4. **Think Holistically**
-   - Be detail-focused while keeping an eye on the bigger picture
-   - Consider how your changes impact the overall system architecture
-   - Aim to generalize solutions and reduce special cases where possible
-   - When fixing a bug, consider whether similar parts of the system might have the same issue
+### Strategic Code Comments
+- Comments explain WHY, not WHAT - code shows what
+- Document pre-conditions, post-conditions, and invariants
+- Add comments for non-obvious algorithmic or business decisions
+
+### LLM-Optimized Code
+- Use descriptive, self-documenting names
+- Keep functions focused with one clear responsibility
+- Prefer explicit over implicit behavior
+- Structure code so intent is clear without extensive context
+
+### Complete Task Finishing
+- After implementing, check related files for necessary updates
+- Search for similar patterns needing the same change
+- Clean up unused code, orphaned imports, obsolete comments
+- Verify all integration points are connected
+
+### Error Handling
+- Handle errors at appropriate boundaries - don't swallow exceptions
+- Provide actionable error messages for debugging
+- Validate inputs from untrusted sources
 
 ## Workspace Security
 
@@ -97,6 +113,15 @@ Before writing ANY code, understand the existing codebase:
    - What APIs or interfaces must you follow?
    - Are there shared utilities you should use?
 
+## Phase 2.5: Spec Alignment Check
+
+Before writing code:
+- [ ] Read relevant docs/ for architectural context
+- [ ] Each planned change traces to spec (docs/ or PRD)
+- [ ] You understand acceptance criteria for "done"
+- [ ] You've identified 2+ existing patterns to follow
+- [ ] You know what tests will verify correctness
+
 ## Phase 3: Implement with Quality
 
 6. **Write the Implementation**
@@ -122,16 +147,37 @@ Before writing ANY code, understand the existing codebase:
 11. **Final Verification** - All tests pass, no regressions
 12. **Update the PRD** - `- [ ]` -> `- [x]` ONLY if build passes AND tests pass
 
+## Phase 4.5: Complete Task Finishing
+
+Before marking complete:
+
+1. **Related Files Check**
+   - Search for files importing/referencing your changes
+   - Verify they work with your modifications
+   - Update outdated references
+
+2. **Pattern Consistency Check**
+   - Search for similar patterns in codebase
+   - If you improved a pattern, update similar code
+
+3. **Cleanup Check**
+   - Remove debug code and commented-out blocks
+   - Remove unused imports and dead code
+   - Ensure comments explain WHY not WHAT
+
 ## Quality Checklist
 
-Before marking complete, verify:
-- [ ] Implementation meets all requirements
-- [ ] Code follows existing patterns in the codebase
-- [ ] **Build passes** (ran build command, no errors)
-- [ ] **Tests pass** (ran test command, all green)
-- [ ] Error cases are handled appropriately
-- [ ] Tests are added for new code
-- [ ] No security vulnerabilities introduced
+Before marking complete:
+- [ ] Implementation meets ALL spec requirements (docs/ and PRD)
+- [ ] Changes fit the system's architectural design
+- [ ] Code follows existing patterns (cite examples you followed)
+- [ ] Build passes (ran build command)
+- [ ] Tests pass (ran test command)
+- [ ] Error cases handled with actionable messages
+- [ ] Tests added for new code
+- [ ] Related files updated if needed
+- [ ] Dead code and obsolete comments removed
+- [ ] Comments focus on WHY not WHAT
 
 **DO NOT mark a task [x] complete if build fails or tests fail.**
 

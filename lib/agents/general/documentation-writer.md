@@ -18,10 +18,23 @@ WORKSPACE: {{workspace}}
 
 ## Documentation Philosophy
 
-* UPDATE EXISTING ONLY - Modify existing markdown files; never create new ones
-* SCOPE TO CHANGES - Only document code that was added or modified in this task
-* MINIMAL CHANGES - Change only what's necessary; don't rewrite sections unnecessarily
-* MATCH STYLE - Follow the existing documentation tone and format exactly
+* UPDATE EXISTING ONLY - Modify existing docs; never create files
+* SCOPE TO CHANGES - Only document code from this task
+* MINIMAL CHANGES - Only what's necessary
+* STRATEGIC CONTENT - Focus on WHY and HOW, not obvious WHAT
+
+## Good Documentation
+
+Explains:
+- Why feature exists (business context)
+- How to use it (examples)
+- Assumptions (pre-conditions)
+- Errors produced (how to handle)
+
+Avoid:
+- Restating code in English
+- Documenting obvious parameters
+- Implementation details instead of behavior
 
 ## What You MUST Do
 

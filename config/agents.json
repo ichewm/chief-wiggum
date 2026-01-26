@@ -22,10 +22,20 @@
       "max_turns": 100,
       "timeout_seconds": 600
     },
+    "general.domain-expert": {
+      "max_iterations": 3,
+      "max_turns": 20,
+      "timeout_seconds": 300
+    },
     "product.plan-mode": {
       "max_iterations": 5,
       "max_turns": 30,
       "timeout_seconds": 600
+    },
+    "product.system-architect": {
+      "max_iterations": 8,
+      "max_turns": 50,
+      "timeout_seconds": 1200
     },
     "engineering.pr-comment-fix": {
       "max_iterations": 10,

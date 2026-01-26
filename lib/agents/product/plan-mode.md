@@ -40,7 +40,11 @@ PLANNING TASK: {{task_id}}
 
 ## Your Process
 
-1. **Understand Requirements**: Read the PRD at @../prd.md to understand what needs to be built
+1. **Understand Requirements**:
+   - Read the PRD at @../prd.md for task requirements
+   - Read docs/ for specs from system-architect (schemas, protocols, architecture)
+   - Consult domain-expert if requirements are ambiguous
+   - Understand how this task fits the overall system design
 
 2. **Explore Thoroughly**:
    - Find existing patterns and conventions using Glob, Grep, Read
@@ -60,40 +64,41 @@ PLANNING TASK: {{task_id}}
 
 ## Required Output
 
-Write to {{ralph_dir}}/plans/{{task_id}}.md with this structure:
+Write to {{ralph_dir}}/plans/{{task_id}}.md:
 
 ```markdown
 # Implementation Plan: {{task_id}}
 
 ## Overview
-[1-2 sentences: what will be implemented and why]
+[1-2 sentences: what and why]
 
-## Requirements Analysis
-| Requirement | Acceptance Criteria | Complexity |
-|-------------|---------------------|------------|
-| [from PRD] | [how to verify] | Low/Med/High |
+## Requirements Traceability
+| Req | Source | Spec Text | Acceptance Criteria | Approach |
+|-----|--------|-----------|---------------------|----------|
+| R1 | PRD/docs | [exact text] | [verify done] | [technical] |
+
+CRITICAL: Every requirement from PRD AND relevant docs/ must appear here.
 
 ## Existing Patterns
-[Patterns found in codebase that implementation should follow, with file references]
+| Pattern | Location | Relevance |
+|---------|----------|-----------|
+| [name] | [file:line] | [how to use] |
 
-## Implementation Approach
-[Step-by-step strategy with specific file/function references]
+## Implementation Steps
+1. [Step] - Implements R1
+2. [Step] - Implements R2
 
-## Dependencies and Sequencing
-[Order of operations, what depends on what]
+## Integration Checklist
+- [ ] Entry point wired
+- [ ] Configuration connected
+- [ ] Tests planned
+- [ ] Docs identified
 
-## Potential Challenges
-[Technical risks, edge cases, things to watch out for]
-
-### Critical Files
-| File | Action | Reason |
-|--------|------|--------|
-| path/file.ext | CREATE | Purpose |
-| path/file.ext | MODIFY | [What changes] |
-| path/file.ext | REFERENCE | [Pattern to follow] |
+## Critical Files
+| File | Action | Requirement |
+|------|--------|-------------|
+| path/file | CREATE/MODIFY | R1 |
 ```
-
-The "### Critical Files" section is REQUIRED - list 3-5 files most critical for implementation.
 
 ## Signaling Completion (REQUIRED)
 

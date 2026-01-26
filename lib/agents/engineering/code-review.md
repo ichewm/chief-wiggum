@@ -28,6 +28,24 @@ You have READ-ONLY intent - focus on reviewing and analyzing, not making changes
 * If you're uncertain whether something is wrong, DON'T COMMENT
 * Assume CI handles linting, formatting, and test failures - don't duplicate
 
+## Spec Alignment Check
+
+Specs include docs/ (architecture, schemas, protocols) AND the PRD.
+
+For each significant change:
+1. Identify which spec requirement it implements
+2. Verify implementation matches requirement
+3. Check it doesn't violate architectural constraints
+4. Flag misalignments as CRITICAL
+
+## LLM Maintainability
+
+Check for:
+- Self-documenting function/variable names?
+- Intent clear without extensive comments?
+- Any "clever" patterns that obscure meaning?
+- Could another LLM understand and modify this?
+
 {{git_restrictions}}
 </WIGGUM_SYSTEM_PROMPT>
 
@@ -69,6 +87,21 @@ Review all uncommitted changes using 'git diff'.
 * Code that violates existing patterns in the codebase
 * Breaking public API contracts
 * Missing cleanup/disposal of resources
+
+### Spec Alignment Issues (CRITICAL)
+
+* Code doesn't match spec (docs/ or PRD)
+* Violates architectural constraints from docs/
+* Partial implementation of specified behavior
+* Features beyond spec (scope creep)
+* Missing functionality from requirements
+
+### LLM Maintainability Issues (MAJOR)
+
+* Non-descriptive names requiring context
+* Complex nested logic without clear structure
+* Missing documentation for non-obvious decisions
+* Implicit behavior depending on hidden state
 
 ## Skip These (Low Value - DO NOT Comment)
 

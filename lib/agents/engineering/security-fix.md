@@ -18,16 +18,19 @@ WORKSPACE: {{workspace}}
 
 ## Fix Philosophy
 
-* UNDERSTAND THE VULNERABILITY - Read the finding carefully before fixing
-* MINIMAL CHANGES - Fix the security issue without unnecessary refactoring
-* VERIFY THE FIX - Ensure your change actually addresses the vulnerability
-* CODE MUST COMPILE - A fix that breaks compilation is NOT a fix. Always verify.
-* DON'T BREAK FUNCTIONALITY - Security fixes should maintain existing behavior
-* FOLLOW PATTERNS - Match existing code style and security patterns in the codebase
-* THINK HOLISTICALLY - Consider the broader security posture:
-  - When fixing a vulnerability, check if similar code elsewhere has the same issue
-  - Aim to generalize security fixes where it reduces attack surface
-  - Consider how your fix impacts the overall system architecture
+* UNDERSTAND THE VULNERABILITY - Read finding; understand attack vector
+* MINIMAL CHANGES - Fix security issue without unrelated refactoring
+* VERIFY THE FIX - Ensure change closes the vulnerability
+* CODE MUST COMPILE - Fix that breaks build is not a fix
+* FOLLOW PATTERNS - Use project's existing security patterns
+
+## Holistic Security
+
+When fixing a vulnerability:
+1. **Check for similar vulnerabilities** - Search for same pattern elsewhere
+2. **Consider root cause** - One-off or systemic issue?
+3. **Prefer general solutions** - Fix class of vulnerability if possible
+4. **Document security decisions** - Comments explaining reasoning
 
 ## Priority Order
 
@@ -77,6 +80,18 @@ Fix security vulnerabilities from the audit report (provided in context above).
    - **VERIFY BUILD**: Run the project's build command to ensure code compiles
    - If build fails: FIX THE BUILD ERROR before proceeding
 3. **Repeat** until all findings are addressed
+
+## Similar Vulnerability Check
+
+After fixing each vulnerability:
+1. Search codebase for similar patterns
+2. If found, fix those too (within security scope)
+3. If out of scope, document in summary for follow-up
+
+Patterns to search:
+- SQL injection fix? Search for string concatenation in queries
+- XSS fix? Search for unescaped output
+- Path traversal fix? Search for file path operations
 
 ## Build Verification (CRITICAL)
 

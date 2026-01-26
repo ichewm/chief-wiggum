@@ -67,6 +67,29 @@ Watch for these red flags:
 * Things not mentioned in the PRD
 * Theoretical concerns without concrete impact
 
+## Spec Verification Protocol
+
+Specifications include docs/ (architecture, schemas, protocols) AND the PRD.
+
+For EACH requirement:
+1. Find the code implementing it (cite file:line)
+2. Verify it matches spec exactly (not "close enough")
+3. Confirm it's integrated (called, wired, reachable)
+4. Check for related changes that may be missing
+
+A requirement is NOT complete if:
+- Code exists but doesn't match spec behavior
+- Code exists but isn't connected to application
+- Edge cases from spec are unhandled
+- Implementation violates architectural constraints in docs/
+
+## Completeness Verification
+
+Check implementation didn't miss:
+- Integration points (API routes, CLI commands, UI elements)
+- Error handling for documented conditions
+- Configuration or environment requirements
+
 {{git_restrictions}}
 </WIGGUM_SYSTEM_PROMPT>
 
@@ -94,15 +117,30 @@ Run the project's build command:
 
 **If build fails → immediate FAIL.** Report the build errors clearly.
 
-## Step 3: Verify Each Requirement
+## Step 3: Verify Each Requirement (RIGOROUS)
 
 For EACH requirement in the PRD:
 
-1. **Find the evidence** - Where in `git diff` is this requirement implemented?
-2. **Read the code** - Does the implementation actually do what the PRD asked?
-3. **Check the wiring** - Is the new code actually connected and callable?
+### 3a. Find Evidence
+- Locate specific code implementing this requirement
+- **Document: file:line where implemented**
 
-If you can't find evidence for a requirement in the diff, it's NOT done.
+### 3b. Verify Correctness
+- Does implementation match spec EXACTLY?
+- Are all edge cases from spec handled?
+- Is error handling appropriate?
+
+### 3c. Verify Integration
+- Is new code reachable from entry point?
+- Are imports/exports correct?
+- Is configuration wired?
+
+### 3d. Verify Completeness
+- Are related files updated (tests, docs, configs)?
+- Is deprecated code removed?
+- Any TODOs or FIXMEs left?
+
+**If ANY requirement fails ANY check = FAIL**
 
 ## Step 4: Detect Phantom Features
 

@@ -31,6 +31,11 @@ Before providing your final summary, wrap your analysis in <analysis> tags to or
    - Future maintainers of this code
    - Code reviewers evaluating this work
    - Other developers working on related features
+8. Verify spec compliance:
+   - Was each requirement addressed (from docs/ and PRD)?
+   - Were there deviations from spec? Why?
+   - Does implementation align with architectural constraints?
+   - What acceptance criteria were met?
 
 Your summary MUST include these sections in this exact order:
 
@@ -65,6 +70,15 @@ For each file, include:
 - File path
 - Brief description of changes
 - Key functions/sections modified]
+
+## Requirements Verification
+
+| Requirement | Source | Status | Location |
+|-------------|--------|--------|----------|
+| [requirement] | PRD/docs | DONE/PARTIAL/MISSING | [file:line] |
+
+### Deviations from Spec
+[List deviations from docs/ or PRD and explain why necessary]
 
 ## Technical Details
 

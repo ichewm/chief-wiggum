@@ -18,10 +18,28 @@ WORKSPACE: {{workspace}}
 
 ## Testing Philosophy
 
-* USE EXISTING FRAMEWORK ONLY - Find what test framework the project uses; use that
-* SCOPE TO CHANGES - Only test code that was added or modified in this task
-* FOLLOW PROJECT PATTERNS - Match existing test file structure, naming, and style
-* MEANINGFUL TESTS - Write tests that verify behavior, not just coverage
+* SPEC-DRIVEN TESTS - Write tests based on spec (docs/ + PRD), not code behavior
+* USE EXISTING FRAMEWORK ONLY - Find project's test framework; use that
+* SCOPE TO CHANGES - Only test code added/modified in this task
+* FOLLOW PROJECT PATTERNS - Match existing test structure exactly
+* TESTS VERIFY SPEC COMPLIANCE - Tests catch when code deviates from spec
+
+## Test Quality Standards
+
+Good tests:
+- Derived from spec requirements, not observed code behavior
+- Test one requirement/behavior per test case
+- Descriptive names: `test_<feature>_<scenario>_<expected>`
+- Include edge cases and error conditions from spec
+- Isolated (don't depend on other tests)
+- Would FAIL if code doesn't meet spec (even if code "works")
+
+Avoid:
+- Writing tests by observing what code does (tests spec, not code)
+- Testing implementation details (private methods, internal state)
+- Vague names like "test1", "testBasic"
+- Multiple behaviors in one test
+- Tests that just document current behavior without verifying correctness
 
 ## What You MUST Do
 
@@ -74,15 +92,38 @@ Find what the project uses:
 
 **If no test framework exists -> SKIP** (do not install one)
 
-## Step 2: Identify What to Test
+## Step 2: Understand Spec Requirements
 
-From the implementation summary, identify:
+**Read the spec FIRST** (docs/ and @../prd.md):
+- What behavior does the spec require?
+- What edge cases does the spec define?
+- What error conditions should be handled?
+
+Then identify which code changes implement these requirements:
 - New functions/methods that were added
 - Modified functions with changed behavior
 - New API endpoints or commands
-- Edge cases and error handling in new code
 
-**Only test code from this task's changes.**
+**Tests verify spec compliance, not code behavior.**
+
+## Step 2.5: Test Design (From Spec)
+
+For each spec requirement, plan tests:
+
+| Spec Requirement | Expected Behavior | Edge Cases | Error Cases |
+|------------------|-------------------|------------|-------------|
+| [from docs/PRD] | [what spec says] | [boundaries from spec] | [errors from spec] |
+
+CRITICAL: Derive test cases from spec, not from reading the code.
+
+## Test Naming Convention
+
+Pattern: `test_<feature>_<scenario>_<expected>`
+
+Examples:
+- `test_login_valid_credentials_returns_token`
+- `test_login_invalid_password_raises_auth_error`
+- `test_calculate_total_empty_cart_returns_zero`
 
 ## Step 3: Write Tests
 
@@ -99,9 +140,10 @@ From the implementation summary, identify:
 
 ### Quality
 - Arrange-Act-Assert structure
-- Descriptive test names
+- Descriptive test names that reference spec requirement
 - Independent tests (no shared state)
-- Test behavior, not implementation details
+- Test expected behavior FROM SPEC, not observed code behavior
+- If test fails, code is wrong (not the test)
 
 ## Step 4: Verify Build First
 
@@ -125,8 +167,9 @@ with clear details about the compilation errors - do NOT attempt to fix implemen
 4. Ensure existing tests still pass (no regressions)
 
 **Key distinction:**
-- If YOUR test code is wrong (bad assertion, typo in test) -> fix it yourself
-- If the MAIN code is wrong (implementation bug discovered by tests) -> report as FIX
+- If YOUR test code has bugs (typo, wrong import, syntax error) -> fix it yourself
+- If code doesn't match SPEC (test derived from spec fails) -> report as FIX
+- Never change test expectations to match code behavior - code must match spec
 
 ## Result Criteria
 

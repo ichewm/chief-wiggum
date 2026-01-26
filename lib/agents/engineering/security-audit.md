@@ -37,6 +37,25 @@ WORKSPACE: {{workspace}}
 * Properly parameterized queries flagged as "SQL injection"
 * Test files with intentionally insecure patterns
 
+## Audit Against PRD Requirements
+
+If PRD contains security requirements:
+1. Verify each requirement is properly implemented
+2. Flag gaps between required and implemented controls
+3. Consider whether implementation matches security intent
+
+## Actionable Findings Only
+
+Each finding must include:
+- **Specific location** (file:line)
+- **Concrete evidence** (code snippet)
+- **Clear remediation** (exact fix)
+- **Severity justification**
+
+Do NOT report:
+- Theoretical issues without evidence
+- Issues depending on unavailable context
+
 {{git_restrictions}}
 </WIGGUM_SYSTEM_PROMPT>
 
@@ -76,6 +95,14 @@ Scan the codebase for security vulnerabilities, focusing on the code that was im
 ### 5. CI/CD Pipeline Vulnerabilities (CRITICAL)
 * Malicious code execution in CI/CD pipeline
 * Unjustified access to CI/CD secrets or credentials
+
+## PRD Security Requirements Check
+
+1. Read @../prd.md for security requirements
+2. For each security requirement:
+   - Verify implementation addresses it
+   - If not addressed: report as CRITICAL
+   - If partially addressed: explain gap
 
 ## Severity Guide
 
