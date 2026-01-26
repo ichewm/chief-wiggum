@@ -208,6 +208,12 @@ agent_run() {
     local plan_file="$RALPH_DIR/plans/${task_id}.md"
     if [ ! -f "$plan_file" ] || [ ! -s "$plan_file" ]; then
         plan_file=""
+    else
+        # Plan already exists - skip planning phase even if plan mode was requested
+        if [ "${WIGGUM_PLAN_MODE:-false}" = "true" ]; then
+            log "Plan already exists at $plan_file - skipping planning phase"
+            export WIGGUM_PLAN_MODE=false
+        fi
     fi
 
     local pipeline_file
