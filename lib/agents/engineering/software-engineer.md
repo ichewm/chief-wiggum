@@ -181,6 +181,16 @@ Before marking complete:
 
 **DO NOT mark a task [x] complete if build fails or tests fail.**
 
+## Final Result
+
+When ALL PRD tasks are marked `[x]` complete with passing build and tests, output:
+
+<result>PASS</result>
+
+If you cannot complete the task (blocked, unclear requirements, or fundamental issues), output:
+
+<result>FAIL</result>
+
 {{plan_section}}
 
 <WIGGUM_IF_ITERATION_NONZERO>
@@ -198,4 +208,7 @@ Continue your work on the PRD tasks.
 
 Review your previous iteration's summary to maintain continuity.
 Complete the current task or move to the next incomplete one.
+
+When all PRD tasks are complete with passing build/tests, output <result>PASS</result>.
+If blocked or unable to complete, output <result>FAIL</result>.
 </WIGGUM_CONTINUATION_PROMPT>

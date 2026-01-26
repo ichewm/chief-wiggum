@@ -766,10 +766,48 @@ _md_user_prompt_callback() {
 # RESULT EXTRACTION
 # =============================================================================
 
+# Extract result from status file for status_file completion check
+#
+# Args:
+#   status_file - Path to the status file (already interpolated)
+#   valid_regex - Pipe-separated valid result values
+#
+# Returns: Result value (PASS, FAIL, etc.) or empty string
+_md_extract_result_from_status_file() {
+    local status_file="$1"
+    local valid_regex="$2"
+
+    if [ ! -f "$status_file" ]; then
+        echo ""
+        return
+    fi
+
+    # First try to extract <result>VALUE</result> tags from the file
+    local result
+    result=$(grep_pcre_match "(?<=<result>)(${valid_regex})(?=</result>)" "$status_file" | tail -1) || true
+
+    if [ -n "$result" ]; then
+        echo "$result"
+        return
+    fi
+
+    # No result tag found - check markdown checklists
+    # PASS if all items checked, FAIL if any unchecked
+    if grep -q '\- \[ \]' "$status_file" 2>/dev/null; then
+        echo "FAIL"
+    else
+        echo "PASS"
+    fi
+}
+
 # Extract result and write to epoch-named files
 _md_extract_and_write_result() {
     local worker_dir="$1"
     local step_id="${WIGGUM_STEP_ID:-agent}"
+    local check_type="${_MD_COMPLETION_CHECK:-result_tag}"
+
+    local agent_name
+    agent_name=$(echo "$_MD_TYPE" | tr '[:lower:]' '[:upper:]' | tr '.' '_')
 
     # Build valid values regex for extraction
     local valid_regex=""
@@ -783,10 +821,24 @@ _md_extract_and_write_result() {
         fi
     done
 
-    # Use the unified extraction function
-    local agent_name
-    agent_name=$(echo "$_MD_TYPE" | tr '[:lower:]' '[:upper:]' | tr '.' '_')
+    # For status_file completion check, derive result from the status file only
+    if [[ "$check_type" == status_file:* ]]; then
+        local file_path="${check_type#status_file:}"
+        file_path=$(_md_interpolate "$file_path")
 
+        local result
+        result=$(_md_extract_result_from_status_file "$file_path" "$valid_regex")
+
+        if [ -z "$result" ]; then
+            result="UNKNOWN"
+        fi
+
+        agent_write_result "$worker_dir" "$result"
+        log "${agent_name} result: $result"
+        return
+    fi
+
+    # For other completion checks, use log extraction
     agent_extract_and_write_result "$worker_dir" "$agent_name" "$step_id" "${_MD_REPORT_TAG:-report}" "$valid_regex"
 }
 
