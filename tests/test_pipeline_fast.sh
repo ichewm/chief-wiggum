@@ -32,7 +32,7 @@ teardown() {
 # =============================================================================
 
 test_pipeline_fast_loads_successfully() {
-    pipeline_load "$WIGGUM_HOME/config/pipeline-fast.json"
+    pipeline_load "$WIGGUM_HOME/config/pipelines/fast.json"
     local rc=$?
 
     assert_equals "0" "$rc" "pipeline-fast.json should load successfully"
@@ -40,13 +40,13 @@ test_pipeline_fast_loads_successfully() {
 }
 
 test_pipeline_fast_has_five_steps() {
-    pipeline_load "$WIGGUM_HOME/config/pipeline-fast.json"
+    pipeline_load "$WIGGUM_HOME/config/pipelines/fast.json"
 
     assert_equals "5" "$(pipeline_step_count)" "Fast pipeline should have 5 steps"
 }
 
 test_pipeline_fast_step_ids() {
-    pipeline_load "$WIGGUM_HOME/config/pipeline-fast.json"
+    pipeline_load "$WIGGUM_HOME/config/pipelines/fast.json"
 
     assert_equals "planning" "$(pipeline_get 0 ".id")" "Step 0 should be planning"
     assert_equals "execution" "$(pipeline_get 1 ".id")" "Step 1 should be execution"
@@ -56,7 +56,7 @@ test_pipeline_fast_step_ids() {
 }
 
 test_pipeline_fast_agents() {
-    pipeline_load "$WIGGUM_HOME/config/pipeline-fast.json"
+    pipeline_load "$WIGGUM_HOME/config/pipelines/fast.json"
 
     assert_equals "product.plan-mode" "$(pipeline_get 0 ".agent")" "Step 0 agent should be product.plan-mode"
     assert_equals "engineering.software-engineer" "$(pipeline_get 1 ".agent")" "Step 1 agent should be engineering.software-engineer"
@@ -66,7 +66,7 @@ test_pipeline_fast_agents() {
 }
 
 test_pipeline_fast_master_followup_has_fix_handler() {
-    pipeline_load "$WIGGUM_HOME/config/pipeline-fast.json"
+    pipeline_load "$WIGGUM_HOME/config/pipelines/fast.json"
 
     local fix_handler
     fix_handler=$(pipeline_get_on_result 3 "FIX")
@@ -76,25 +76,25 @@ test_pipeline_fast_master_followup_has_fix_handler() {
 }
 
 test_pipeline_fast_master_followup_has_max() {
-    pipeline_load "$WIGGUM_HOME/config/pipeline-fast.json"
+    pipeline_load "$WIGGUM_HOME/config/pipelines/fast.json"
 
     assert_equals "3" "$(pipeline_get_max 3)" "master-followup step should have max=3"
 }
 
 test_pipeline_fast_master_followup_commit_after() {
-    pipeline_load "$WIGGUM_HOME/config/pipeline-fast.json"
+    pipeline_load "$WIGGUM_HOME/config/pipelines/fast.json"
 
     assert_equals "true" "$(pipeline_get 3 ".commit_after" "false")" "master-followup should have commit_after=true"
 }
 
 test_pipeline_fast_planning_enabled_by() {
-    pipeline_load "$WIGGUM_HOME/config/pipeline-fast.json"
+    pipeline_load "$WIGGUM_HOME/config/pipelines/fast.json"
 
     assert_equals "WIGGUM_PLAN_MODE" "$(pipeline_get 0 ".enabled_by")" "planning should be enabled_by WIGGUM_PLAN_MODE"
 }
 
 test_pipeline_fast_readonly_steps() {
-    pipeline_load "$WIGGUM_HOME/config/pipeline-fast.json"
+    pipeline_load "$WIGGUM_HOME/config/pipelines/fast.json"
 
     assert_equals "true" "$(pipeline_get 0 ".readonly" "false")" "planning should be readonly"
     assert_equals "true" "$(pipeline_get 2 ".readonly" "false")" "summary should be readonly"
