@@ -1033,6 +1033,77 @@ _extract_result_value_from_stream_json() {
         || true
 }
 
+# Extract session_id from stream-JSON log file
+#
+# The session_id is stored in the iteration_start JSON object at the beginning
+# of the log file with format: {"type":"iteration_start",...,"session_id":"<uuid>",...}
+#
+# Args:
+#   log_file - Path to the stream-JSON log file
+#
+# Returns: UUID session_id or empty string if not found
+_extract_session_id_from_log() {
+    local log_file="$1"
+
+    [ ! -f "$log_file" ] && return 0
+
+    # Look for session_id in iteration_start JSON object (typically first line)
+    # Pattern matches: "session_id":"<uuid>" where uuid is hex with dashes
+    grep -oP '"session_id"\s*:\s*"\K[a-f0-9-]+(?=")' "$log_file" 2>/dev/null | head -1 || true
+}
+
+# Resume session with focused prompt to extract result (backup mechanism)
+#
+# When result extraction fails (UNKNOWN), this function attempts to resume
+# the Claude session and request only the result tag.
+#
+# Args:
+#   session_id   - Session ID to resume
+#   valid_values - Pipe-separated valid result values (e.g., "PASS|FAIL")
+#   worker_dir   - Worker directory path
+#   log_prefix   - Log file prefix for naming the backup log
+#
+# Returns: Extracted result value or "UNKNOWN"
+_backup_result_extraction() {
+    local session_id="$1"
+    local valid_values="$2"
+    local worker_dir="$3"
+    local log_prefix="$4"
+
+    # Convert pipe-separated values to human-readable format
+    local human_values="${valid_values//|/, }"
+
+    local prompt="Based on your previous work, provide ONLY the final result.
+Valid results: ${human_values}
+Format: <result>VALUE</result>
+Return ONLY the result tag, nothing else."
+
+    # Create backup log directory and file
+    local run_id="${RALPH_RUN_ID:-default}"
+    local backup_log
+    backup_log="$worker_dir/logs/$run_id/${log_prefix}-backup-$(date +%s).log"
+    mkdir -p "$(dirname "$backup_log")"
+
+    # Source resume capabilities if not already loaded
+    source "$WIGGUM_HOME/lib/claude/run-claude-resume.sh"
+
+    # Attempt to resume session with focused prompt (max 2 turns)
+    if ! run_agent_resume "$session_id" "$prompt" "$backup_log" 2 2>/dev/null; then
+        echo "UNKNOWN"
+        return 0
+    fi
+
+    # Extract result from backup log
+    local backup_result
+    backup_result=$(_extract_result_value_from_stream_json "$backup_log" "$valid_values") || true
+
+    if [ -n "$backup_result" ]; then
+        echo "$backup_result"
+    else
+        echo "UNKNOWN"
+    fi
+}
+
 # Extract content between the LAST occurrence of XML-style tags from stream-JSON
 # This fixes the bug where sed was trying to match tags in raw JSON instead of extracted text
 #
@@ -1149,8 +1220,36 @@ agent_extract_and_write_result() {
         fi
     fi
 
-    # Write epoch-named result JSON with gate_result
-    agent_write_result "$worker_dir" "$result"
+    # Get session_id for output and potential backup extraction
+    local session_id="${RALPH_LOOP_LAST_SESSION_ID:-}"
+    if [ -z "$session_id" ] && [ -n "$log_file" ] && [ -f "$log_file" ]; then
+        session_id=$(_extract_session_id_from_log "$log_file")
+    fi
+
+    # Backup extraction if result is UNKNOWN and session_id is available
+    if [ "$result" = "UNKNOWN" ] && [ -n "$session_id" ]; then
+        local backup_enabled="${WIGGUM_RESULT_BACKUP_ENABLED:-true}"
+        if [ "$backup_enabled" = "true" ]; then
+            log "Result UNKNOWN - attempting backup extraction via session resume"
+            local backup_result
+            backup_result=$(_backup_result_extraction "$session_id" "$valid_values" "$worker_dir" "$log_prefix")
+            if [ -n "$backup_result" ] && [ "$backup_result" != "UNKNOWN" ]; then
+                result="$backup_result"
+                log "Backup extraction recovered result: $result"
+            else
+                log_warn "Backup extraction failed - result remains UNKNOWN"
+            fi
+        fi
+    fi
+
+    # Build extra_outputs with session_id for downstream steps
+    local extra_outputs="{}"
+    if [ -n "$session_id" ]; then
+        extra_outputs="{\"session_id\":\"$session_id\"}"
+    fi
+
+    # Write epoch-named result JSON with gate_result and session_id
+    agent_write_result "$worker_dir" "$result" "$extra_outputs"
 
     # Set global variable for the calling agent (sanitize name: hyphens -> underscores)
     local var_name="${agent_name//-/_}_RESULT"

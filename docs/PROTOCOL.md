@@ -14,22 +14,22 @@ Agents can pass state and data through two scopes: **sequential** (to the next p
 
 | # | Mechanism | How It Works | Key Location |
 |---|-----------|-------------|--------------|
-| 1 | **Gate result files** | Each agent writes `outputs.gate_result` (PASS/FAIL/FIX/STOP/SKIP) to its epoch-named result JSON. The pipeline runner reads this to decide whether to continue, skip, or trigger a fix loop. | `lib/pipeline/pipeline-runner.sh:160` |
-| 2 | **Step dependencies (`depends_on`)** | A pipeline step declares `"depends_on": "step_id"` in `config/pipeline.json`. If the dependency's gate result is FAIL or UNKNOWN, the step is skipped. | `lib/pipeline/pipeline-runner.sh:68-79` |
-| 3 | **Environment variable inheritance** | Parent exports context vars (`PIPELINE_PLAN_FILE`, `PIPELINE_RESUME_INSTRUCTIONS`, `WIGGUM_STEP_ID`, etc.) that sub-agents inherit via `run_sub_agent()`. | `lib/worker/agent-registry.sh:220-230` |
-| 4 | **Git state globals** | Git operations set shell globals (`GIT_COMMIT_BRANCH`, `GIT_PR_URL`, `GIT_SAFETY_CHECKPOINT_SHA`) consumed by subsequent steps in the same process. | `lib/git/git-operations.sh:72,211,289` |
-| 5 | **Fix-retry loop** | When an agent returns `FIX`, the pipeline invokes a nested fix agent, then re-runs the original agent to verify. State flows: audit result → fix agent → re-audit. | `lib/pipeline/pipeline-runner.sh:216` |
+| 1 | **Gate result files** | Each agent writes `outputs.gate_result` (PASS/FAIL/FIX/STOP/SKIP) to its epoch-named result JSON. The pipeline runner reads this to decide whether to continue, skip, or trigger a fix loop. | `lib/pipeline/pipeline-runner.sh:444` |
+| 2 | **Step enablement (`enabled_by`)** | A pipeline step declares `"enabled_by": "ENV_VAR"` in `config/pipeline.json`. The step is skipped if the environment variable is not set or empty. | `lib/pipeline/pipeline-runner.sh:390-399` |
+| 3 | **Environment variable inheritance** | Parent exports context vars (`PIPELINE_PLAN_FILE`, `PIPELINE_RESUME_INSTRUCTIONS`, `WIGGUM_STEP_ID`, etc.) that sub-agents inherit via `run_sub_agent()`. | `lib/agents/system/task-worker.sh`, `lib/pipeline/pipeline-runner.sh` |
+| 4 | **Git state globals** | Git operations set shell globals (`GIT_COMMIT_BRANCH`, `GIT_PR_URL`, `GIT_SAFETY_CHECKPOINT_SHA`) consumed by subsequent steps in the same process. | `lib/git/git-operations.sh:72,209,287` |
+| 5 | **Fix-retry loop** | When an agent returns `FIX`, the pipeline invokes a nested fix agent, then re-runs the original agent to verify. State flows: audit result → fix agent → re-audit. | `lib/pipeline/pipeline-runner.sh:247+` (`_run_inline_agent`) |
 
 ### Arbitrary: Any Agent to Any Agent (7 mechanisms)
 
 | # | Mechanism | How It Works | Key Location |
 |---|-----------|-------------|--------------|
-| 1 | **`agent_comm_*` interface** | Unified lookup API. Any agent calls `agent_comm_path(worker_dir, type)` to resolve paths to another agent's result, report, summary, comments, prd, or workspace. | `lib/core/agent-base.sh:651-708` |
-| 2 | **Result file reads by agent name** | `agent_read_subagent_result(worker_dir, agent_name)` and `agent_find_latest_result()` let any agent read any other agent's epoch-named result JSON. | `lib/core/agent-base.sh:860,428` |
+| 1 | **`agent_comm_*` interface** | Unified lookup API. Any agent calls `agent_comm_path(worker_dir, type)` to resolve paths to another agent's result, report, summary, comments, prd, or workspace. | `lib/core/agent-base.sh:943-970` |
+| 2 | **Result file reads by agent name** | `agent_read_subagent_result(worker_dir, agent_name)` and `agent_find_latest_result()` let any agent read any other agent's epoch-named result JSON. | `lib/core/agent-base.sh:1169-1187,687-693` |
 | 3 | **Shared workspace** | All agents in a task share `worker_dir/workspace/` (a git worktree). Code changes committed by one agent are visible to all subsequent agents. | `lib/worker/agent-registry.sh:376-387` |
-| 4 | **Event log (JSONL)** | Append-only stream at `.ralph/logs/events.jsonl`. Any agent can emit events (`emit_task_started`, `emit_agent_completed`, `emit_pr_created`, etc.) and query by type/task/worker. | `lib/utils/event-emitter.sh:271-311` |
-| 5 | **Checkpoint files** | Structured JSON at `checkpoints/checkpoint-N.json` containing `files_modified`, `completed_tasks`, `next_steps`, and `prose_summary`. Readable by any agent in the worker. | `lib/core/checkpoint.sh:100-113` |
-| 6 | **Kanban status** | Shared `.ralph/kanban.md` with file-locked status markers (`[=]`, `[x]`, `[*]`, `[P]`). Any agent can read task status set by any other agent. | `lib/tasks/task-parser.sh` |
+| 4 | **Event log (JSONL)** | Append-only stream at `.ralph/logs/events.jsonl`. Any agent can emit events (`emit_task_started`, `emit_agent_completed`, `emit_pr_created`, etc.) and query by type/task/worker. | `lib/utils/event-emitter.sh:92-252` (emit), `271-347` (query) |
+| 5 | **Checkpoint files** | Structured JSON at `checkpoints/checkpoint-N.json` containing `files_modified`, `completed_tasks`, `next_steps`, and `prose_summary`. Readable by any agent in the worker. | `lib/core/checkpoint.sh:115-138` |
+| 6 | **Kanban status** | Shared `.ralph/kanban.md` with file-locked status markers (`[=]`, `[x]`, `[*]`, `[P]`, `[N]`). Any agent can read task status set by any other agent. | `lib/core/file-lock.sh` (writes), `lib/tasks/task-parser.sh` (reads) |
 | 7 | **Reports, summaries, and logs** | Markdown reports (`reports/`), iteration summaries (`summaries/`), and conversation logs (`logs/`) in the shared worker directory are readable by any agent. | worker directory convention |
 
 ### Architectural Notes
@@ -274,24 +274,25 @@ jq 'select(.timestamp >= "2024-01-15T10:00:00Z")' .ralph/logs/events.jsonl
 
 Agents update task status in `.ralph/kanban.md`:
 
-| Marker | Status | Set By |
-|--------|--------|--------|
-| `[ ]` | TODO | Initial state |
-| `[=]` | In Progress | system.task-worker start |
-| `[x]` | Complete | post-PR merge |
-| `[P]` | Pending Approval | PR created |
-| `[*]` | Failed | validation failed |
-| `[N]` | Not Planned | manual |
+| Marker | Status | Set By | Behavior |
+|--------|--------|--------|----------|
+| `[ ]` | TODO | Initial state | Eligible for scheduling |
+| `[=]` | In Progress | system.task-worker start | Currently being worked on |
+| `[x]` | Complete | post-PR merge | Satisfies dependencies |
+| `[P]` | Pending Approval | PR created | Awaiting review (does NOT satisfy dependencies) |
+| `[*]` | Failed | validation failed | Needs manual intervention |
+| `[N]` | Not Planned | manual | Ignored by `wiggum run`; never scheduled |
 
 ### Status Update Functions
 
 ```bash
-source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
+source "$WIGGUM_HOME/lib/core/file-lock.sh"
 
-update_kanban_status "$kanban_file" "$task_id" "="   # In progress
+update_kanban_status "$kanban_file" "$task_id" "="   # In progress [=]
 update_kanban_pending_approval "$kanban_file" "$task_id"  # [P]
 update_kanban "$kanban_file" "$task_id"             # [x] Complete
 update_kanban_failed "$kanban_file" "$task_id"      # [*] Failed
+update_kanban_not_planned "$kanban_file" "$task_id" # [N] Not Planned
 ```
 
 ## File Locking
@@ -303,12 +304,12 @@ Use file locks for shared resource access:
 ```bash
 source "$WIGGUM_HOME/lib/core/file-lock.sh"
 
-# Lock kanban.md during update
+# Lock kanban.md during update (timeout in seconds as 2nd arg)
 with_file_lock "$kanban_file.lock" 5 \
     update_kanban_status "$kanban_file" "$task_id" "="
 
-# Retry with backoff
-with_file_lock_retry "$pid_file.lock" 10 3 \
+# Lock with longer timeout for operations that may take more time
+with_file_lock "$pid_file.lock" 10 \
     register_pid "$pid_file" "$$"
 ```
 
