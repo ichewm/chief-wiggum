@@ -304,6 +304,30 @@ test_get_ready_tasks_sibling_wip_penalty() {
     assert_equals "$expected_penalized" "$last_three" "All penalized siblings should be last"
 }
 
+test_get_ready_tasks_plan_bonus() {
+    local ralph_dir="$FIXTURES_DIR/ralph-plans"
+    local kanban="$ralph_dir/kanban.md"
+
+    # Pass ralph_dir to enable plan bonus
+    local ready
+    ready=$(get_ready_tasks "$kanban" "" 10 20000 "$ralph_dir" 5000)
+
+    # TASK-002 (HIGH with plan, 10000-5000=5000) should come before TASK-001 (HIGH without plan, 10000)
+    local first_task
+    first_task=$(echo "$ready" | head -1)
+    assert_equals "TASK-002" "$first_task" "HIGH task with plan should be first"
+
+    # TASK-001 (HIGH without plan) should come second
+    local second_task
+    second_task=$(echo "$ready" | sed -n '2p')
+    assert_equals "TASK-001" "$second_task" "HIGH task without plan should be second"
+
+    # TASK-003 (MEDIUM without plan) should be last
+    local last_task
+    last_task=$(echo "$ready" | tail -1)
+    assert_equals "TASK-003" "$last_task" "MEDIUM task without plan should be last"
+}
+
 # =============================================================================
 # get_blocked_tasks() Tests
 # =============================================================================
@@ -438,6 +462,7 @@ run_test test_get_ready_tasks_filters_blocked
 run_test test_get_ready_tasks_sorted_by_priority
 run_test test_get_ready_tasks_critical_priority_first
 run_test test_get_ready_tasks_sibling_wip_penalty
+run_test test_get_ready_tasks_plan_bonus
 
 # get_blocked_tasks tests
 run_test test_get_blocked_tasks_identifies_blocked

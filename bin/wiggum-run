@@ -31,6 +31,9 @@ MAX_SKIP_RETRIES=3     # Kanban update failures before permanent skip
 FIX_WORKER_TIMEOUT=1800  # Fix worker max runtime (seconds)
 FIX_WORKER_LIMIT=2     # Max concurrent fix workers
 AGING_FACTOR=10        # Iterations per priority level promotion
+SIBLING_WIP_PENALTY=20000  # Fixed-point penalty when sibling is WIP (20000 = 2.0)
+PLAN_BONUS=15000           # Fixed-point bonus for tasks with plans (15000 = 1.5)
+DEP_BONUS_PER_TASK=7000    # Fixed-point bonus per task blocked (7000 = 0.7)
 
 show_help() {
     cat << EOF
@@ -592,8 +595,9 @@ main() {
         fi
 
         # Get tasks ready to run (pending with satisfied dependencies, sorted by priority)
+        # Includes: aging bonus, sibling WIP penalty, plan bonus, dependency bonus
         local ready_tasks
-        ready_tasks=$(get_ready_tasks "$RALPH_DIR/kanban.md" "$ready_since_file" "$AGING_FACTOR")
+        ready_tasks=$(get_ready_tasks "$RALPH_DIR/kanban.md" "$ready_since_file" "$AGING_FACTOR" "$SIBLING_WIP_PENALTY" "$RALPH_DIR" "$PLAN_BONUS" "$DEP_BONUS_PER_TASK")
 
         # Update ready-since tracking: increment for tasks still ready, add new entries
         local new_ready_since

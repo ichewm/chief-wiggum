@@ -242,9 +242,6 @@ get_dependency_depth() {
     echo "$count"
 }
 
-# Fixed-point scale: 10000 = 1.0000 (4 decimal places)
-PRIORITY_SCALE=10000
-
 # Compute effective priority with aging (fixed-point arithmetic)
 # Args: base_priority (CRITICAL|HIGH|MEDIUM|LOW), iterations_waiting, aging_factor
 # Returns: fixed-point priority (lower = higher priority), floored at 0
@@ -263,9 +260,9 @@ get_effective_priority() {
         *)        numeric=20000 ;;
     esac
 
-    # Subtract aging bonus (1 priority level = 10000 per aging_factor iterations)
+    # Subtract aging bonus: -0.8 levels per aging_factor iterations = -8000 per cycle
     if [ "$aging_factor" -gt 0 ] && [ "$iterations_waiting" -gt 0 ]; then
-        local aging_bonus=$(( (iterations_waiting * PRIORITY_SCALE) / aging_factor ))
+        local aging_bonus=$(( (iterations_waiting * 8000) / aging_factor ))
         numeric=$(( numeric - aging_bonus ))
     fi
 
@@ -323,15 +320,29 @@ get_sibling_penalty() {
     '
 }
 
+# Check if a task has an implementation plan
+# Args: ralph_dir task_id
+# Returns: 0 if plan exists, 1 otherwise
+task_has_plan() {
+    local ralph_dir="$1"
+    local task_id="$2"
+    local plan_file="$ralph_dir/plans/${task_id}.md"
+
+    [ -f "$plan_file" ]
+}
+
 # Get tasks that are ready to run (pending, with satisfied dependencies)
 # Sorted by priority: CRITICAL > HIGH > MEDIUM > LOW
 # Uses fixed-point arithmetic (10000 = 1.0000)
-# Optional args: ready_since_file aging_factor sibling_wip_penalty_fp
+# Optional args: ready_since_file aging_factor sibling_wip_penalty_fp ralph_dir plan_bonus_fp dep_bonus_fp
 get_ready_tasks() {
     local kanban="$1"
     local ready_since_file="${2:-}"
     local aging_factor="${3:-10}"
     local sibling_wip_penalty="${4:-20000}"  # 2.0 in fixed-point (penalty when sibling is WIP)
+    local ralph_dir="${5:-}"                  # Optional: .ralph directory for plan lookup
+    local plan_bonus="${6:-15000}"            # 1.5 in fixed-point (bonus for having a plan)
+    local dep_bonus_per_task="${7:-7000}"     # 0.7 in fixed-point (bonus per task blocked)
 
     local all_metadata
     all_metadata=$(get_all_tasks_with_metadata "$kanban")
@@ -373,15 +384,31 @@ get_ready_tasks() {
                 effective_pri=$(( effective_pri + penalty ))
             fi
 
-            # Compute dependency depth for tiebreaking (higher depth = higher priority)
-            local dep_depth
-            dep_depth=$(get_dependency_depth "$kanban" "$task_id")
-            # Invert depth for ascending sort (subtract from large number)
-            local inverted_depth=$(( 9999 - dep_depth ))
+            # Apply bonus if task has an implementation plan
+            # Tasks with plans are more likely to succeed, so prioritize them
+            if [ -n "$ralph_dir" ] && [ "$plan_bonus" -gt 0 ]; then
+                if task_has_plan "$ralph_dir" "$task_id"; then
+                    effective_pri=$(( effective_pri - plan_bonus ))
+                fi
+            fi
 
-            echo "$effective_pri|$inverted_depth|$task_id"
+            # Apply dependency depth bonus (more tasks blocked = higher priority)
+            # Each blocked task gives a bonus to prioritize unblocking work
+            if [ "$dep_bonus_per_task" -gt 0 ]; then
+                local dep_depth
+                dep_depth=$(get_dependency_depth "$kanban" "$task_id")
+                local dep_bonus=$(( dep_depth * dep_bonus_per_task ))
+                effective_pri=$(( effective_pri - dep_bonus ))
+            fi
+
+            # Floor at 0
+            if [ "$effective_pri" -lt 0 ]; then
+                effective_pri=0
+            fi
+
+            echo "$effective_pri|$task_id"
         fi
-    done | sort -t'|' -k1,1n -k2,2n | cut -d'|' -f3
+    done | sort -t'|' -k1,1n | cut -d'|' -f2
 }
 
 # Get blocked tasks (pending but dependencies not satisfied)
