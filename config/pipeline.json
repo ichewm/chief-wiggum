@@ -37,7 +37,15 @@
       "id": "test",
       "agent": "engineering.test-coverage",
       "max": 2,
-      "commit_after": true
+      "commit_after": true,
+      "on_result": {
+        "FIX": {
+          "id": "test-fix",
+          "agent": "engineering.generic-fix",
+          "max": 2,
+          "commit_after": true
+        }
+      }
     },
     {
       "id": "docs",

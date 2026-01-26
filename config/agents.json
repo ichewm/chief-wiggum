@@ -51,6 +51,11 @@
       "max_turns": 50,
       "timeout_seconds": 2400
     },
+    "engineering.generic-fix": {
+      "max_iterations": 15,
+      "max_turns": 50,
+      "timeout_seconds": 2400
+    },
     "engineering.code-review": {
       "max_iterations": 6,
       "max_turns": 50,

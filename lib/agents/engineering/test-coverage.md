@@ -2,7 +2,7 @@
 type: engineering.test-coverage
 description: Test generation agent for modified code using existing framework
 required_paths: [workspace]
-valid_results: [PASS, FAIL, SKIP]
+valid_results: [PASS, FIX, FAIL, SKIP]
 mode: ralph_loop
 readonly: false
 report_tag: report
@@ -109,28 +109,34 @@ Before running tests, verify the codebase compiles:
 
 | Language | Build Command |
 |----------|---------------|
-| Rust | `cargo check` or `cargo build` |
+| Rust | `cargo check` or `cargo build` (allow for longer timeout) |
 | TypeScript/JS | `npm run build` or `tsc` |
 | Go | `go build ./...` |
 | Java | `mvn compile` |
 
-**If the build fails**, this is an implementation bug from an earlier step. Report as FAIL
+**If the build fails**, this is an implementation bug from an earlier step. Report as FIX
 with clear details about the compilation errors - do NOT attempt to fix implementation bugs.
 
 ## Step 5: Run Tests
 
 1. Run the project's test command (npm test, pytest, go test, cargo test, etc.)
-2. If tests fail due to test bugs -> fix the tests and re-run
-3. If tests fail due to implementation bugs -> report as FAIL
+2. **Test bugs** (wrong assertions, missing test imports, test typos) -> fix the tests yourself and re-run
+3. **Implementation bugs** (code doesn't do what it should, missing functionality, regressions) -> report as FIX
 4. Ensure existing tests still pass (no regressions)
+
+**Key distinction:**
+- If YOUR test code is wrong (bad assertion, typo in test) -> fix it yourself
+- If the MAIN code is wrong (implementation bug discovered by tests) -> report as FIX
 
 ## Result Criteria
 
-* **PASS**: Tests written for new code, all tests pass
-* **FAIL**: Implementation bugs found - includes:
-  - Codebase doesn't compile (build errors from earlier steps)
-  - Tests reveal implementation bugs that need fixing
-  - Existing tests now fail (regression)
+* **PASS**: Tests written for new code, all tests pass (including any test bugs you fixed yourself)
+* **FIX**: Issues in MAIN CODE (not test code) that require fixes:
+  - Build failures, compilation errors (from earlier steps)
+  - Implementation bugs discovered by tests (code doesn't do what it should)
+  - Regressions in existing tests (main code changes broke existing behavior)
+  - Architectural issues requiring changes outside test files
+* **FAIL**: Truly unrecoverable issues (contradictory requirements, impossible to test)
 * **SKIP**: No test framework exists, or no testable code changes
 
 ## Output Format
@@ -158,29 +164,30 @@ with clear details about the compilation errors - do NOT attempt to fix implemen
 |-------|--------|--------|---------|
 | [name] | N | N | N |
 
-## Build Errors
-(Only if codebase doesn't compile - omit if build passes)
+## Issues Requiring Fixes
+(Only if returning FIX - omit if PASS or SKIP)
 
-### [File:Line]
-- **Error**: [compiler/type error message]
-- **Analysis**: [what's wrong - this is an implementation bug from earlier steps]
+### Build Errors
+| File:Line | Error | Analysis |
+|-----------|-------|----------|
+| path/file.py:42 | SyntaxError: ... | Missing closing bracket from earlier step |
 
-## Test Failures
-(Only if implementation bugs found via tests - omit if all pass)
-
-### [Test Name]
-- **Error**: [message]
-- **Analysis**: [why this is an implementation bug, not test bug]
+### Implementation Bugs
+| Test | Error | Analysis |
+|------|-------|----------|
+| test_foo | Expected X got Y | Implementation returns wrong value |
 
 </report>
 
 <result>PASS</result>
 OR
+<result>FIX</result>
+OR
 <result>FAIL</result>
 OR
 <result>SKIP</result>
 
-The <result> tag MUST be exactly: PASS, FAIL, or SKIP.
+The <result> tag MUST be exactly: PASS, FIX, FAIL, or SKIP.
 </WIGGUM_USER_PROMPT>
 
 <WIGGUM_CONTINUATION_PROMPT>
@@ -194,5 +201,5 @@ Please continue:
 3. If tests failed due to test bugs, fix the tests and re-run
 4. When complete, provide the final <report> and <result> tags
 
-Remember: The <result> tag must contain exactly PASS, FAIL, or SKIP.
+Remember: The <result> tag must contain exactly PASS, FIX, FAIL, or SKIP.
 </WIGGUM_CONTINUATION_PROMPT>

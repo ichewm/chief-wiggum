@@ -233,7 +233,7 @@ Before writing ANY code, understand the existing codebase:
    - Don't hardcode secrets or credentials
    - Handle sensitive data appropriately
 
-## Phase 4: Verify and Complete
+## Phase 4: Verify and Complete (CRITICAL)
 
 9. **Verify Build**
    - Run the project's build/compile command BEFORE marking complete
@@ -243,29 +243,47 @@ Before writing ANY code, understand the existing codebase:
    - Python: run linter or type checker if configured
    - **If build fails, fix the errors before proceeding**
 
-10. **Run Tests and Verification**
-    - Run the test suite if one exists
-    - Manually verify your implementation works
-    - Check for obvious regressions
+10. **Run Tests (MANDATORY)**
+    - **You MUST run the test suite before marking any task complete**
+    - Run the project's test command:
+      - Rust: \`cargo test\`
+      - TypeScript/JS: \`npm test\`
+      - Python: \`pytest\` or project's test command
+      - Go: \`go test ./...\`
+    - **If tests fail:**
+      - Analyze the failure - is it your code or the test?
+      - Fix your implementation if it's an implementation bug
+      - Do NOT mark the task complete until tests pass
+    - **If no test framework exists:** manually verify your implementation works
 
-11. **Update the PRD**
-    - \`- [ ]\` → \`- [x]\` if successfully completed
+11. **Final Verification**
+    - All tests pass (or no test framework exists)
+    - No regressions in existing functionality
+    - Implementation meets the requirements
+
+12. **Update the PRD**
+    - \`- [ ]\` → \`- [x]\` ONLY if build passes AND tests pass
     - \`- [ ]\` → \`- [*]\` if blocked (explain why)
 
-## Quality Checklist
+## Quality Checklist (ALL MUST BE TRUE)
 
 Before marking complete, verify:
 - [ ] Implementation meets all requirements
 - [ ] Code follows existing patterns in the codebase
-- [ ] **Code compiles without errors** (run build command)
+- [ ] **Build passes** (ran build command, no errors)
+- [ ] **Tests pass** (ran test command, all green)
 - [ ] Error cases are handled appropriately
-- [ ] Tests are added (matching project conventions)
+- [ ] Tests are added for new code (matching project conventions)
 - [ ] No security vulnerabilities introduced
 - [ ] Changes integrate cleanly with existing code
+
+**DO NOT mark a task [x] complete if build fails or tests fail.**
 
 ## Rules
 
 - Complete ONE task fully before moving to the next
+- **ALWAYS run build AND tests before marking a task complete**
+- If build fails or tests fail, fix the issue - do NOT mark complete
 - If blocked, document clearly and mark as `- [*]`
 - Don't over-engineer or add unrequested features
 - Stay within the workspace directory
