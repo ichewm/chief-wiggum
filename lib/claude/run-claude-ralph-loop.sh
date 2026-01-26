@@ -44,7 +44,7 @@ extract_summary_text() {
 _extract_supervisor_decision() {
     local log_file="$1"
     local decision
-    decision=$(grep -oP '(?<=<decision>)(CONTINUE|STOP|RESTART)(?=</decision>)' "$log_file" 2>/dev/null | head -1) || true
+    decision=$(grep_pcre_match '(?<=<decision>)(CONTINUE|STOP|RESTART)(?=</decision>)' "$log_file" | head -1) || true
 
     # Default to CONTINUE if not found or invalid
     if [ -z "$decision" ]; then

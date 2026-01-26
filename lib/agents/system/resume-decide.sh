@@ -593,7 +593,7 @@ _extract_decision() {
 
     # Find the latest log file matching the step pattern (unified agent interface)
     local log_file
-    log_file=$(find "$worker_dir/logs" -name "${step_id}-*.log" ! -name "*summary*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+    log_file=$(find_newest "$worker_dir/logs" -name "${step_id}-*.log" ! -name "*summary*")
 
     if [ -z "$log_file" ] || [ ! -f "$log_file" ]; then
         log_error "No resume-decide log file found in $worker_dir/logs"
@@ -623,7 +623,7 @@ _extract_decision() {
     valid_steps=$(_get_valid_steps)
     local step
     step=$(echo "$full_text" | \
-        grep -oP "(?<=<step>)(${valid_steps}|ABORT)(?=</step>)" 2>/dev/null | \
+        grep_pcre_match "(?<=<step>)(${valid_steps}|ABORT)(?=</step>)" | \
         tail -1) || true
 
     if [ -z "$step" ]; then

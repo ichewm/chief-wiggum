@@ -20,6 +20,9 @@ set -euo pipefail
 [ -n "${_AGENT_BASE_LOADED:-}" ] && return 0
 _AGENT_BASE_LOADED=1
 
+# Source platform.sh at top level for portable helper functions (find_newest, grep_pcre_*, etc.)
+source "$WIGGUM_HOME/lib/core/platform.sh"
+
 # =============================================================================
 # METADATA SETUP
 # =============================================================================
@@ -552,9 +555,8 @@ agent_find_latest_result() {
     local worker_dir="$1"
     local agent_name="$2"
 
-    # Use find with -printf for reliable mtime sorting (handles filenames with spaces)
-    find "$worker_dir/results" -maxdepth 1 -name "*-${agent_name}-result.json" \
-        -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-
+    # Use find_newest for portable mtime sorting (handles filenames with spaces)
+    find_newest "$worker_dir/results" -maxdepth 1 -name "*-${agent_name}-result.json"
 }
 
 # Find the latest report file for a given agent type
@@ -568,9 +570,8 @@ agent_find_latest_report() {
     local worker_dir="$1"
     local agent_name="$2"
 
-    # Use find with -printf for reliable mtime sorting (handles filenames with spaces)
-    find "$worker_dir/reports" -maxdepth 1 -name "*-${agent_name}-report.md" \
-        -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-
+    # Use find_newest for portable mtime sorting (handles filenames with spaces)
+    find_newest "$worker_dir/reports" -maxdepth 1 -name "*-${agent_name}-report.md"
 }
 
 # Write a report file with epoch naming
@@ -653,7 +654,7 @@ agent_write_result() {
         duration_seconds=$(($(date +%s) - _AGENT_START_EPOCH))
     elif [ -f "$worker_dir/worker.log" ]; then
         local start_epoch
-        start_epoch=$(grep "AGENT_STARTED" "$worker_dir/worker.log" 2>/dev/null | tail -1 | grep -oP 'start_time=\K\d+' || true)
+        start_epoch=$(grep "AGENT_STARTED" "$worker_dir/worker.log" 2>/dev/null | tail -1 | grep_pcre_match 'start_time=\K\d+' || true)
         if [ -n "$start_epoch" ] && [[ "$start_epoch" =~ ^[0-9]+$ ]]; then
             started_at=$(date -Iseconds -d "@$start_epoch" 2>/dev/null || date -Iseconds)
             duration_seconds=$(($(date +%s) - start_epoch))
@@ -897,7 +898,7 @@ _extract_result_value_from_stream_json() {
 
     # Extract text, find all <result>VALUE</result> matches, take LAST one
     _extract_text_from_stream_json "$log_file" | \
-        grep -oP "(?<=<result>)(${valid_values})(?=</result>)" 2>/dev/null | \
+        grep_pcre_match "(?<=<result>)(${valid_values})(?=</result>)" | \
         tail -1 \
         || true
 }
@@ -964,7 +965,7 @@ agent_extract_and_write_result() {
     # Find the latest log file (excluding summary logs)
     # Pattern matches both old format (prefix-N.log) and new format (prefix-N-timestamp.log)
     local log_file
-    log_file=$(find "$worker_dir/logs" -name "${log_prefix}-*.log" ! -name "*summary*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+    log_file=$(find_newest "$worker_dir/logs" -name "${log_prefix}-*.log" ! -name "*summary*")
 
     if [ -n "$log_file" ] && [ -f "$log_file" ]; then
         # Extract report content and save using agent_write_report
@@ -987,8 +988,9 @@ agent_extract_and_write_result() {
     # Write epoch-named result JSON with gate_result
     agent_write_result "$worker_dir" "$result"
 
-    # Set global variable for the calling agent
-    printf -v "${agent_name}_RESULT" '%s' "$result"
+    # Set global variable for the calling agent (sanitize name: hyphens -> underscores)
+    local var_name="${agent_name//-/_}_RESULT"
+    printf -v "$var_name" '%s' "$result"
 
     log "${agent_name} result: $result"
 }

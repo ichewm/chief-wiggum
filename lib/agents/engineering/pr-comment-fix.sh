@@ -295,7 +295,7 @@ _init_comment_status() {
 
     # Extract comment IDs from the markdown file
     # Look for patterns like "**ID:** 12345" which we added in comments_to_markdown
-    grep -oP '(?<=\*\*ID:\*\* )\d+' "$comments_file" 2>/dev/null | while read -r id; do
+    grep_pcre_match '(?<=\*\*ID:\*\* )\d+' "$comments_file" | while read -r id; do
         echo "- [ ] Comment $id" >> "$status_file"
     done
 

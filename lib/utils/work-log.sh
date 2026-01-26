@@ -16,6 +16,8 @@
 [ -n "${_WORK_LOG_LOADED:-}" ] && return 0
 _WORK_LOG_LOADED=1
 
+source "$WIGGUM_HOME/lib/core/platform.sh"
+
 # Initialize work log directory structure
 #
 # Args:
@@ -95,7 +97,7 @@ work_log_write_iteration() {
     # Extract files changed from log file if available
     local files_changed=""
     if [ -n "$log_file" ] && [ -f "$log_file" ]; then
-        files_changed=$(grep -oP '"file_path"\s*:\s*"\K[^"]+' "$log_file" 2>/dev/null | sort -u | head -20)
+        files_changed=$(grep_pcre_match '"file_path"\s*:\s*"\K[^"]+' "$log_file" | sort -u | head -20)
     fi
 
     # Write iteration markdown

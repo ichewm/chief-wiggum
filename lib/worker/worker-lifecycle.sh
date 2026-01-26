@@ -8,6 +8,7 @@
 # the "bash" pattern since agents run via run_agent() in subshells.
 set -euo pipefail
 
+source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/file-lock.sh"
 
@@ -29,8 +30,7 @@ find_worker_by_task_id() {
     local ralph_dir="$1"
     local task_id="$2"
 
-    find "$ralph_dir/workers" -maxdepth 1 -type d -name "worker-$task_id-*" \
-        -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-
+    find_newest "$ralph_dir/workers" -maxdepth 1 -type d -name "worker-$task_id-*"
 }
 
 # Find any worker directory matching a task ID (for checking if one exists)

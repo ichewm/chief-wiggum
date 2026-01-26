@@ -5,6 +5,7 @@
 # alongside prose summaries. Enables robust resume capabilities.
 set -euo pipefail
 
+source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/logger.sh"
 
 # Checkpoint schema version
@@ -191,8 +192,7 @@ checkpoint_get_latest() {
     fi
 
     # Find the most recently modified checkpoint across all run subdirectories
-    find "$base_dir" -name "checkpoint-*.json" -printf '%T@ %p\n' 2>/dev/null | \
-        sort -rn | head -1 | cut -d' ' -f2-
+    find_newest "$base_dir" -name "checkpoint-*.json"
 }
 
 # Get the latest iteration number from checkpoints
@@ -368,8 +368,8 @@ checkpoint_extract_files_modified() {
 
     # Look for Edit, Write tool calls and extract file paths
     local files
-    files=$(grep -oP '"name":"(Edit|Write)".*?"file_path":"[^"]+' "$log_file" 2>/dev/null | \
-        grep -oP '"file_path":"[^"]+' | \
+    files=$(grep_pcre_match '"name":"(Edit|Write)".*?"file_path":"[^"]+' "$log_file" | \
+        grep_pcre_match '"file_path":"[^"]+' | \
         sed 's/"file_path":"//g' | \
         sort -u) || true
 

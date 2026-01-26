@@ -11,6 +11,8 @@
 
 set -euo pipefail
 
+source "$WIGGUM_HOME/lib/core/platform.sh"
+
 # Maximum size for content truncation
 MAX_CONTENT=3000
 MAX_TOOL_INPUT=1500
@@ -261,7 +263,7 @@ convert_dir() {
         local_name=$(basename "$log_file" .log)
         convert_log "$log_file" "$conv_dir/${local_name}.md"
         ((converted++)) || true
-    done < <(find "$logs_dir" -name "*.log" ! -name "*summary*" -printf '%T@ %p\n' 2>/dev/null | sort -n | cut -d' ' -f2-)
+    done < <(find_sorted_by_mtime "$logs_dir" -name "*.log" ! -name "*summary*")
 
     echo "Converted $converted log files to conversations in $conv_dir" >&2
 }

@@ -518,11 +518,11 @@ _md_completion_check_result_tag() {
 
     # Find latest log
     local latest_log
-    latest_log=$(find "$worker_dir/logs" -name "${step_id}-*.log" ! -name "*summary*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+    latest_log=$(find_newest "$worker_dir/logs" -name "${step_id}-*.log" ! -name "*summary*")
 
     if [ -n "$latest_log" ] && [ -f "$latest_log" ]; then
         local result_tag="${_MD_RESULT_TAG:-result}"
-        if grep -qP "<${result_tag}>(${valid_regex})</${result_tag}>" "$latest_log" 2>/dev/null; then
+        if grep_pcre_test "<${result_tag}>(${valid_regex})</${result_tag}>" "$latest_log"; then
             return 0  # Complete
         fi
     fi
