@@ -14,7 +14,7 @@ set -euo pipefail
 # OUTPUT_FILES:
 #   - resume-step.txt         : Contains the step name to resume from (or ABORT)
 #   - resume-instructions.md  : Context and guidance for the resumed worker
-#   - resume-result.json      : Contains PASS, STOP, or FAIL
+#   - resume-result.json      : Contains PASS or FAIL
 # =============================================================================
 
 # Source base library and initialize metadata
@@ -269,10 +269,9 @@ agent_run() {
     # Archive artifacts from the resume point onward (not earlier phases)
     if [ "$step" != "ABORT" ]; then
         archive_from_step "$worker_dir" "$step"
-        agent_write_result "$worker_dir" "PASS" "$(printf '{"resume_step":"%s"}' "$step")"
-    else
-        agent_write_result "$worker_dir" "STOP" '{"resume_step":"ABORT"}'
     fi
+    # Both resume and abort are successful decisions
+    agent_write_result "$worker_dir" "PASS" "$(printf '{"resume_step":"%s"}' "$step")"
 
     return 0
 }
@@ -593,7 +592,7 @@ _extract_decision() {
 
     # Find the latest log file matching the step pattern (unified agent interface)
     local log_file
-    log_file=$(find_newest "$worker_dir/logs" -name "${step_id}-*.log" ! -name "*summary*")
+    log_file=$(find_newest "$worker_dir/logs" -name "${step_id}-*.log")
 
     if [ -z "$log_file" ] || [ ! -f "$log_file" ]; then
         log_error "No resume-decide log file found in $worker_dir/logs"

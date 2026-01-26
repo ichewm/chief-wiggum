@@ -516,9 +516,9 @@ _md_completion_check_result_tag() {
         fi
     done
 
-    # Find latest log
+    # Find latest log for this step
     local latest_log
-    latest_log=$(find_newest "$worker_dir/logs" -name "${step_id}-*.log" ! -name "*summary*")
+    latest_log=$(find_newest "$worker_dir/logs" -name "${step_id}-*.log")
 
     if [ -n "$latest_log" ] && [ -f "$latest_log" ]; then
         local result_tag="${_MD_RESULT_TAG:-result}"

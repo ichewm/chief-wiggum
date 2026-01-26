@@ -597,15 +597,15 @@ agent_write_report() {
 #
 # Args:
 #   worker_dir    - Worker directory path
-#   gate_result   - Gate result: PASS, FAIL, FIX, SKIP, STOP
+#   gate_result   - Gate result: PASS, FAIL, FIX, SKIP
 #   extra_outputs - JSON object string of additional output values (optional)
 #   errors        - JSON array string of error messages (optional)
 #
 # The function automatically derives status and exit_code from gate_result:
-#   PASS/SKIP/STOP -> status=success, exit_code=0
-#   FAIL           -> status=failure, exit_code=10
-#   FIX            -> status=partial, exit_code=0
-#   other          -> status=unknown, exit_code=1
+#   PASS/SKIP -> status=success, exit_code=0
+#   FAIL      -> status=failure, exit_code=10
+#   FIX       -> status=partial, exit_code=0
+#   other     -> status=unknown, exit_code=1
 agent_write_result() {
     local worker_dir="$1"
     local gate_result="$2"
@@ -619,10 +619,10 @@ agent_write_result() {
     # Derive status and exit_code from gate_result
     local result_status exit_code
     case "$gate_result" in
-        PASS|SKIP|STOP) result_status="success"; exit_code=0 ;;
-        FAIL)           result_status="failure"; exit_code=10 ;;
-        FIX)            result_status="partial"; exit_code=0 ;;
-        *)              result_status="unknown"; exit_code=1 ;;
+        PASS|SKIP) result_status="success"; exit_code=0 ;;
+        FAIL)      result_status="failure"; exit_code=10 ;;
+        FIX)       result_status="partial"; exit_code=0 ;;
+        *)         result_status="unknown"; exit_code=1 ;;
     esac
 
     # Merge gate_result into outputs
@@ -962,10 +962,10 @@ agent_extract_and_write_result() {
 
     local result="UNKNOWN"
 
-    # Find the latest log file (excluding summary logs)
+    # Find the latest log file for this step
     # Pattern matches both old format (prefix-N.log) and new format (prefix-N-timestamp.log)
     local log_file
-    log_file=$(find_newest "$worker_dir/logs" -name "${log_prefix}-*.log" ! -name "*summary*")
+    log_file=$(find_newest "$worker_dir/logs" -name "${log_prefix}-*.log")
 
     if [ -n "$log_file" ] && [ -f "$log_file" ]; then
         # Extract report content and save using agent_write_report

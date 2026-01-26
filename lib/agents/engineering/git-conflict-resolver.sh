@@ -252,10 +252,10 @@ EOF
 _extract_resolution_summary() {
     local worker_dir="$1"
 
-    # Find the latest resolve log (excluding summary logs)
+    # Find the latest resolve log for this step
     local step_id="${WIGGUM_STEP_ID:-resolve}"
     local log_file
-    log_file=$(find_newest "$worker_dir/logs" -name "${step_id}-*.log" ! -name "*summary*")
+    log_file=$(find_newest "$worker_dir/logs" -name "${step_id}-*.log")
 
     local report_content=""
 
