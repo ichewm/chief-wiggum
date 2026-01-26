@@ -70,41 +70,6 @@ Examples:
 EOF
 }
 
-# Archive previous run artifacts before resuming
-# Moves logs, summaries, checkpoints, conversations, etc. to history/
-# Workspace and results/ are LEFT UNTOUCHED:
-#   - workspace/ has the actual code changes
-#   - results/ has epoch-named result files needed for parent context on resume
-archive_previous_run() {
-    local worker_dir="$1"
-    local archive_dir
-    archive_dir="$worker_dir/history/resume-$(date +%s)"
-
-    mkdir -p "$archive_dir"
-
-    # Move run artifacts — workspace/ and results/ are LEFT UNTOUCHED
-    # results/ is preserved so _export_step_context() can find parent step output
-    mv "$worker_dir/logs" "$archive_dir/" 2>/dev/null || true
-    mv "$worker_dir/summaries" "$archive_dir/" 2>/dev/null || true
-    mv "$worker_dir/checkpoints" "$archive_dir/" 2>/dev/null || true
-    mv "$worker_dir/conversations" "$archive_dir/" 2>/dev/null || true
-    mv "$worker_dir/supervisors" "$archive_dir/" 2>/dev/null || true
-    mv "$worker_dir/worker.log" "$archive_dir/" 2>/dev/null || true
-    mv "$worker_dir/reports" "$archive_dir/" 2>/dev/null || true
-    mv "$worker_dir/agent-result.json" "$archive_dir/" 2>/dev/null || true
-    # Preserve the latest resume-decide report — needed by the resumed worker via {{parent.report}}
-    if [ -d "$archive_dir/reports" ]; then
-        local resume_report
-        resume_report=$(find_newest "$archive_dir/reports" -maxdepth 1 -name "*-system.resume-decide-report.md")
-        if [ -n "$resume_report" ] && [ -f "$resume_report" ]; then
-            mkdir -p "$worker_dir/reports"
-            mv "$resume_report" "$worker_dir/reports/"
-        fi
-    fi
-
-    echo "Archived previous run to $(basename "$archive_dir")"
-}
-
 # Resume a stopped worker
 do_resume() {
     local worker_dir="$1"
@@ -263,13 +228,7 @@ do_resume() {
     echo "Resume decision: start from '$resume_step' step (index $step_idx)"
     echo ""
 
-    # === STEP 4: Archive old artifacts ===
-    archive_previous_run "$worker_dir"
-
-    # === STEP 5: Re-create required directories ===
-    mkdir -p "$worker_dir/logs" "$worker_dir/summaries"
-
-    # === STEP 6: Check rate limit before launching ===
+    # === STEP 4: Check rate limit before launching ===
     # Update usage data and check rate limit (orchestrator may not be running)
     usage_tracker_write_shared "$RALPH_DIR" > /dev/null 2>&1 || true
     if rate_limit_check "$RALPH_DIR"; then
@@ -278,7 +237,7 @@ do_resume() {
         usage_tracker_write_shared "$RALPH_DIR" > /dev/null 2>&1 || true
     fi
 
-    # === STEP 7: Launch system.task-worker ===
+    # === STEP 5: Launch system.task-worker ===
     # Always use normal system.task-worker (not plan-mode) — it picks up existing plan files
     echo "Launching system.task-worker from step: $resume_step"
 
