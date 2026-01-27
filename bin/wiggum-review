@@ -578,6 +578,12 @@ cmd_task_resolve() {
             return 1
         fi
 
+        # Set git identity for automated merges
+        export GIT_AUTHOR_NAME="Ralph Wiggum"
+        export GIT_AUTHOR_EMAIL="ralph@wiggum.cc"
+        export GIT_COMMITTER_NAME="Ralph Wiggum"
+        export GIT_COMMITTER_EMAIL="ralph@wiggum.cc"
+
         # Try to merge main - this may create conflicts
         if git -C "$workspace" merge origin/main --no-edit 2>&1; then
             log "Merged origin/main successfully (no conflicts)"
