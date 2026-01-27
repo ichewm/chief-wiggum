@@ -72,7 +72,8 @@ agent_run() {
 
     # Check if there are any comments to fix
     local comment_count
-    comment_count=$(grep -c '^### ' "$comments_file" 2>/dev/null || echo "0")
+    comment_count=$(grep -c '^### ' "$comments_file" 2>/dev/null | tr -d '\n' || echo "0")
+    [[ "$comment_count" =~ ^[0-9]+$ ]] || comment_count=0
     if [ "$comment_count" -eq 0 ]; then
         log "No comments found in $comments_file - nothing to fix"
         agent_setup_context "$worker_dir" "$workspace" "$project_dir"
@@ -127,12 +128,17 @@ agent_run() {
     fi
 
     # Count comment statuses from status file
+    # Note: grep -c output is sanitized with tr to handle edge cases with embedded newlines
     local comments_fixed=0 comments_pending=0 comments_skipped=0
     if [ -f "$status_file" ]; then
-        comments_fixed=$(grep -c '^\- \[x\]' "$status_file" 2>/dev/null || echo "0")
-        comments_pending=$(grep -c '^\- \[ \]' "$status_file" 2>/dev/null || echo "0")
-        comments_skipped=$(grep -c '^\- \[\*\]' "$status_file" 2>/dev/null || echo "0")
+        comments_fixed=$(grep -c '^\- \[x\]' "$status_file" 2>/dev/null | tr -d '\n' || echo "0")
+        comments_pending=$(grep -c '^\- \[ \]' "$status_file" 2>/dev/null | tr -d '\n' || echo "0")
+        comments_skipped=$(grep -c '^\- \[\*\]' "$status_file" 2>/dev/null | tr -d '\n' || echo "0")
     fi
+    # Ensure counts are valid integers (fallback to 0)
+    [[ "$comments_fixed" =~ ^[0-9]+$ ]] || comments_fixed=0
+    [[ "$comments_pending" =~ ^[0-9]+$ ]] || comments_pending=0
+    [[ "$comments_skipped" =~ ^[0-9]+$ ]] || comments_skipped=0
 
     # Determine gate_result
     local gate_result="FAIL"

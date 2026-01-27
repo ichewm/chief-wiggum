@@ -329,6 +329,40 @@ conflict_queue_get_batch() {
     jq --arg batch_id "$batch_id" '.batches[$batch_id]' "$queue_file"
 }
 
+# Get batch status
+#
+# Args:
+#   ralph_dir - Ralph directory path
+#   batch_id  - Batch identifier
+#
+# Returns: Status string (pending, planning, planned, failed, etc.)
+conflict_queue_get_batch_status() {
+    local ralph_dir="$1"
+    local batch_id="$2"
+
+    local queue_file="$ralph_dir/conflict-queue.json"
+    [ -f "$queue_file" ] || { echo "unknown"; return 1; }
+
+    jq -r --arg batch_id "$batch_id" '.batches[$batch_id].status // "unknown"' "$queue_file"
+}
+
+# Get task IDs for a batch
+#
+# Args:
+#   ralph_dir - Ralph directory path
+#   batch_id  - Batch identifier
+#
+# Returns: Newline-separated list of task IDs
+conflict_queue_get_batch_tasks() {
+    local ralph_dir="$1"
+    local batch_id="$2"
+
+    local queue_file="$ralph_dir/conflict-queue.json"
+    [ -f "$queue_file" ] || return 1
+
+    jq -r --arg batch_id "$batch_id" '.batches[$batch_id].task_ids[]' "$queue_file"
+}
+
 # Get pending batches that need planning
 #
 # Args:

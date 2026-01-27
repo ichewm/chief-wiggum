@@ -369,11 +369,23 @@ handle_fix_worker_completion() {
     local worker_dir="$1"
     local task_id="$2"
 
-    # Read the most recent agent result to check push status
-    local result_file
-    result_file=$(find_newest "$worker_dir/results" -maxdepth 1 -name "*-result.json")
-    if [ -z "$result_file" ] || [ ! -f "$result_file" ]; then
-        log_warn "No result file for $task_id - cannot verify fix completion"
+    # Find the fix agent result by looking for result files with push_succeeded field
+    # (which is unique to fix agents). Check newest results first.
+    local result_file=""
+    local candidate
+    while read -r candidate; do
+        [ -f "$candidate" ] || continue
+        # Check if this result has push_succeeded (fix agent signature)
+        if jq -e '.outputs.push_succeeded' "$candidate" &>/dev/null; then
+            result_file="$candidate"
+            break
+        fi
+    done < <(find "$worker_dir/results" -maxdepth 1 -name "*-result.json" -type f 2>/dev/null | sort -r)
+
+    if [ -z "$result_file" ]; then
+        # Fix agent didn't produce a result - it may have failed to start or exited early
+        log_warn "No fix agent result for $task_id - fix agent may not have run"
+        # Don't change state - leave as needs_fix for retry
         return 1
     fi
 

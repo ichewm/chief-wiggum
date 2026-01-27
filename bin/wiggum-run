@@ -302,8 +302,71 @@ _handle_resolve_worker_timeout() {
     handle_resolve_worker_timeout "$worker_dir" "$task_id" "$RESOLVE_WORKER_TIMEOUT"
 }
 
-# Check for conflict batches and spawn multi-PR planner if needed
+# Check for completed multi-PR planners and process their results
+_check_completed_planners() {
+    for planner_dir in "$RALPH_DIR/workers"/planner-batch-*; do
+        [ -d "$planner_dir" ] || continue
+
+        local batch_id
+        batch_id=$(basename "$planner_dir" | sed 's/^planner-//')
+
+        # Skip if not in planning status
+        local status
+        status=$(conflict_queue_get_batch_status "$RALPH_DIR" "$batch_id" 2>/dev/null || echo "unknown")
+        [ "$status" = "planning" ] || continue
+
+        # Check if planner is still running
+        local pid_file="$planner_dir/planner.pid"
+        if [ -f "$pid_file" ]; then
+            local pid
+            pid=$(cat "$pid_file")
+            if kill -0 "$pid" 2>/dev/null; then
+                continue  # Still running
+            fi
+        fi
+
+        # Planner finished - check result
+        local result_file
+        result_file=$(find "$planner_dir/results" -name "*-result.json" 2>/dev/null | head -1)
+
+        if [ -n "$result_file" ] && [ -f "$result_file" ]; then
+            local gate_result
+            gate_result=$(jq -r '.outputs.gate_result // "FAIL"' "$result_file")
+
+            if [ "$gate_result" = "PASS" ]; then
+                conflict_queue_update_batch_status "$RALPH_DIR" "$batch_id" "planned"
+                log "Multi-PR planning completed for batch $batch_id"
+
+                # Mark individual workers as ready for resolution with plan
+                local task_ids
+                task_ids=$(conflict_queue_get_batch_tasks "$RALPH_DIR" "$batch_id")
+                while read -r task_id; do
+                    [ -n "$task_id" ] || continue
+                    local worker_dir
+                    worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$task_id" 2>/dev/null)
+                    if [ -n "$worker_dir" ] && [ -d "$worker_dir" ]; then
+                        git_state_set "$worker_dir" "needs_resolve" "wiggum-run._check_completed_planners" "Resolution plan ready"
+                    fi
+                done <<< "$task_ids"
+            else
+                conflict_queue_update_batch_status "$RALPH_DIR" "$batch_id" "failed"
+                log_error "Multi-PR planning failed for batch $batch_id"
+            fi
+        else
+            # No result file - check if planner ran at all
+            if [ -f "$pid_file" ]; then
+                log_warn "Multi-PR planner for $batch_id exited without result"
+                conflict_queue_update_batch_status "$RALPH_DIR" "$batch_id" "failed"
+            fi
+        fi
+    done
+}
+
+# Check for conflict batches and spawn multi-PR planner if needed (non-blocking)
 _check_and_spawn_multi_pr_planner() {
+    # First, check for completed planners
+    _check_completed_planners
+
     # Initialize conflict queue if needed
     conflict_queue_init "$RALPH_DIR"
 
@@ -311,6 +374,19 @@ _check_and_spawn_multi_pr_planner() {
     if ! conflict_queue_batch_ready "$RALPH_DIR"; then
         return 0
     fi
+
+    # Check if a planner is already running
+    for planner_dir in "$RALPH_DIR/workers"/planner-batch-*; do
+        [ -d "$planner_dir" ] || continue
+        local pid_file="$planner_dir/planner.pid"
+        if [ -f "$pid_file" ]; then
+            local pid
+            pid=$(cat "$pid_file")
+            if kill -0 "$pid" 2>/dev/null; then
+                return 0  # Planner already running, don't spawn another
+            fi
+        fi
+    done
 
     # Get groups of related conflicts
     local groups
@@ -344,9 +420,9 @@ _check_and_spawn_multi_pr_planner() {
     # Update batch status
     conflict_queue_update_batch_status "$RALPH_DIR" "$batch_id" "planning"
 
-    log "Spawning multi-PR planner for batch $batch_id"
+    log "Spawning multi-PR planner for batch $batch_id (non-blocking)"
 
-    # Launch planner agent
+    # Launch planner agent in background
     (
         export WIGGUM_HOME
         source "$WIGGUM_HOME/lib/worker/agent-registry.sh"
@@ -354,42 +430,9 @@ _check_and_spawn_multi_pr_planner() {
     ) >> "$RALPH_DIR/logs/planner.log" 2>&1 &
 
     local planner_pid=$!
+    echo "$planner_pid" > "$planner_worker_dir/planner.pid"
 
-    # Wait briefly for completion (planner is typically fast)
-    local wait_count=0
-    while kill -0 "$planner_pid" 2>/dev/null && [ $wait_count -lt 60 ]; do
-        sleep 1
-        ((wait_count++)) || true
-    done
-
-    # Check result
-    local result_file
-    result_file=$(find "$planner_worker_dir/results" -name "*-result.json" 2>/dev/null | head -1)
-
-    if [ -n "$result_file" ] && [ -f "$result_file" ]; then
-        local gate_result
-        gate_result=$(jq -r '.outputs.gate_result // "FAIL"' "$result_file")
-
-        if [ "$gate_result" = "PASS" ]; then
-            conflict_queue_update_batch_status "$RALPH_DIR" "$batch_id" "planned"
-            log "Multi-PR planning completed for batch $batch_id"
-
-            # Mark individual workers as ready for resolution with plan
-            while read -r task_id; do
-                local worker_dir
-                worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$task_id" 2>/dev/null)
-                if [ -n "$worker_dir" ] && [ -d "$worker_dir" ]; then
-                    git_state_set "$worker_dir" "needs_resolve" "wiggum-run._check_and_spawn_multi_pr_planner" "Resolution plan ready"
-                fi
-            done < <(echo "$task_ids" | jq -r '.[]')
-        else
-            conflict_queue_update_batch_status "$RALPH_DIR" "$batch_id" "failed"
-            log_error "Multi-PR planning failed for batch $batch_id"
-        fi
-    else
-        log_warn "Multi-PR planner did not produce result file"
-        conflict_queue_update_batch_status "$RALPH_DIR" "$batch_id" "failed"
-    fi
+    log "Multi-PR planner spawned (PID: $planner_pid) - will check results on next cycle"
 }
 
 # Schedule resume of stopped workers
