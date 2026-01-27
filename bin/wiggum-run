@@ -292,7 +292,64 @@ _handle_resolve_worker_completion() {
         if git_state_is "$worker_dir" "needs_merge"; then
             attempt_pr_merge "$worker_dir" "$task_id" "$RALPH_DIR" || true
         fi
+
+        # If this was a batch worker, immediately spawn the next one
+        _spawn_next_batch_worker "$worker_dir" || true
     fi
+}
+
+# Spawn the next worker in a batch queue (for back-to-back execution)
+#
+# Called after a batch worker completes to immediately trigger the next one.
+# Returns 0 if a worker was spawned, 1 if batch is complete/failed/no next worker.
+_spawn_next_batch_worker() {
+    local completed_worker_dir="$1"
+
+    # Check if this was a batch worker
+    source "$WIGGUM_HOME/lib/scheduler/batch-coordination.sh"
+    batch_coord_has_worker_context "$completed_worker_dir" || return 1
+
+    local batch_id
+    batch_id=$(batch_coord_read_worker_context "$completed_worker_dir" "batch_id")
+    [ -n "$batch_id" ] || return 1
+
+    # Check batch status
+    local status
+    status=$(batch_coord_get_status "$batch_id" "$PROJECT_DIR")
+    case "$status" in
+        complete|failed) return 1 ;;
+    esac
+
+    # Find the next worker that should execute
+    local next_task_id
+    next_task_id=$(batch_coord_get_next_task "$batch_id" "$PROJECT_DIR")
+    [ -n "$next_task_id" ] || return 1
+
+    # Find worker directory for next task
+    local next_worker_dir
+    next_worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$next_task_id" 2>/dev/null)
+    [ -n "$next_worker_dir" ] && [ -d "$next_worker_dir" ] || return 1
+
+    # Verify it's this task's turn and it needs resolution
+    git_state_is "$next_worker_dir" "needs_resolve" || return 1
+    batch_coord_is_my_turn "$batch_id" "$next_task_id" "$PROJECT_DIR" || return 1
+
+    # Check priority worker capacity
+    local fix_count resolve_count total_priority
+    fix_count=$(pool_count "fix")
+    resolve_count=$(pool_count "resolve")
+    total_priority=$((fix_count + resolve_count))
+    if [ "$total_priority" -ge "$FIX_WORKER_LIMIT" ]; then
+        log "Batch: deferring next worker - at capacity ($total_priority/$FIX_WORKER_LIMIT)"
+        return 1
+    fi
+
+    log "Batch $batch_id: immediately spawning next worker for $next_task_id"
+
+    # Use the existing spawn function from priority-workers.sh
+    source "$WIGGUM_HOME/lib/scheduler/priority-workers.sh"
+    _spawn_batch_resolve_worker "$RALPH_DIR" "$PROJECT_DIR" "$next_worker_dir" "$next_task_id"
+    return $?
 }
 
 # Handle resolve worker timeout (callback for pool_cleanup_finished)

@@ -303,6 +303,36 @@ batch_coord_get_task_position() {
     echo "$pos"
 }
 
+# Get the task ID of the next worker that should execute
+#
+# Args:
+#   batch_id    - Batch identifier
+#   project_dir - Project root directory
+#
+# Returns: Task ID of next worker, or empty if batch complete/failed
+batch_coord_get_next_task() {
+    local batch_id="$1"
+    local project_dir="$2"
+
+    local coord_file
+    coord_file=$(batch_coord_get_path "$batch_id" "$project_dir")
+
+    if [ ! -f "$coord_file" ]; then
+        echo ""
+        return 1
+    fi
+
+    jq -r '
+        if .status == "complete" or .status == "failed" then
+            ""
+        elif .current_position >= .total then
+            ""
+        else
+            .order[.current_position]
+        end
+    ' "$coord_file"
+}
+
 # =============================================================================
 # WORKER CONTEXT FILE OPERATIONS
 # =============================================================================
