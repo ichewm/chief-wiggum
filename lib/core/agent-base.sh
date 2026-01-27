@@ -557,7 +557,7 @@ agent_log_start() {
     local worker_id
     worker_id=$(basename "$worker_dir")
 
-    echo "[$(date -Iseconds)] INFO: AGENT_STARTED agent=$AGENT_TYPE worker_id=$worker_id task_id=$task_id start_time=$(date +%s)" >> "$worker_dir/worker.log"
+    echo "[$(date -Iseconds)] INFO: AGENT_STARTED agent=$AGENT_TYPE worker_id=$worker_id task_id=$task_id pipeline=${WIGGUM_PIPELINE:-default} start_time=$(date +%s)" >> "$worker_dir/worker.log"
 }
 
 # Log agent completion event
