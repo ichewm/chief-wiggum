@@ -1073,10 +1073,14 @@ _backup_result_extraction() {
     # Convert pipe-separated values to human-readable format
     local human_values="${valid_values//|/, }"
 
-    local prompt="Based on your previous work, provide ONLY the final result.
+    # Strong prompt to interrupt ongoing work and force result output
+    local prompt="STOP ALL YOUR WORK IMMEDIATELY. DO NOT CONTINUE ANY PREVIOUS TASKS.
+
+Based on your previous work, provide ONLY the final result.
 Valid results: ${human_values}
 Format: <result>VALUE</result>
-Return ONLY the result tag, nothing else."
+
+RESPOND ONLY WITH THE RESULT TAG. NO OTHER OUTPUT."
 
     # Create backup log directory and file
     local run_id="${RALPH_RUN_ID:-default}"
@@ -1087,8 +1091,8 @@ Return ONLY the result tag, nothing else."
     # Source resume capabilities if not already loaded
     source "$WIGGUM_HOME/lib/claude/run-claude-resume.sh"
 
-    # Attempt to resume session with focused prompt (max 2 turns)
-    if ! run_agent_resume "$session_id" "$prompt" "$backup_log" 2 2>/dev/null; then
+    # Attempt to resume session with focused prompt (max 7 turns to allow completion)
+    if ! run_agent_resume "$session_id" "$prompt" "$backup_log" 7 2>/dev/null; then
         echo "UNKNOWN"
         return 0
     fi

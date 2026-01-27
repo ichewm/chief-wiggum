@@ -668,7 +668,9 @@ _md_completion_check_result_tag() {
 
     if [ -n "$latest_log" ] && [ -f "$latest_log" ]; then
         local result_tag="${_MD_RESULT_TAG:-result}"
-        if grep_pcre_test "<${result_tag}>(${valid_regex})</${result_tag}>" "$latest_log"; then
+        # Only search assistant messages to avoid matching example tags in prompts
+        if grep '"type":"assistant"' "$latest_log" 2>/dev/null | \
+           grep_pcre_test "<${result_tag}>(${valid_regex})</${result_tag}>"; then
             return 0  # Complete
         fi
     fi
