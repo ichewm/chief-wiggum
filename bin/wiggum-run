@@ -438,7 +438,8 @@ _schedule_resume_workers() {
         fi
 
         # Resume the worker via wiggum resume (handles interrupted vs completed logic)
-        log "Resuming $task_id from step '$current_step'"
+        # Note: resume-decide may determine a different starting step based on analysis
+        log "Initiating resume for $task_id (pipeline at: '$current_step')"
         local worker_id
         worker_id=$(basename "$worker_dir")
 
@@ -458,8 +459,8 @@ _schedule_resume_workers() {
             pid=$(cat "$worker_dir/agent.pid")
             pool_add "$pid" "main" "$task_id"
             scheduler_mark_event
-            activity_log "worker.resumed" "$(basename "$worker_dir")" "$task_id" "step=$current_step pid=$pid"
-            log "Resumed worker for $task_id (PID: $pid) at step '$current_step'"
+            activity_log "worker.resumed" "$(basename "$worker_dir")" "$task_id" "pipeline_step=$current_step pid=$pid"
+            log "Resumed worker for $task_id (PID: $pid)"
         else
             log_error "Resume started but PID not created for $task_id"
         fi

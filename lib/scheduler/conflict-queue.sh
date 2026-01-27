@@ -383,10 +383,10 @@ conflict_queue_build_batch_file() {
             pr_number=$(echo "$task_entry" | jq '.pr_number')
             affected_files=$(echo "$task_entry" | jq '.affected_files')
 
-            # Get branch name from worker
+            # Get branch name from workspace
             local branch=""
-            if [ -f "$worker_dir/branch.txt" ]; then
-                branch=$(cat "$worker_dir/branch.txt")
+            if [ -d "$worker_dir/workspace" ]; then
+                branch=$(git -C "$worker_dir/workspace" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
             fi
 
             # Determine which files have conflicts (intersection with common_files)

@@ -141,11 +141,19 @@ test_git_state_set_pr_sets_number() {
     assert_equals "123" "$pr" "Should set PR number"
 }
 
-test_git_state_set_pr_fails_without_state_file() {
-    local result=0
-    git_state_set_pr "$WORKER_DIR" 123 || result=$?
+test_git_state_set_pr_creates_file_if_missing() {
+    # Should create state file with PR number if it doesn't exist
+    git_state_set_pr "$WORKER_DIR" 123
 
-    assert_equals "1" "$result" "Should fail when no state file exists"
+    assert_file_exists "$WORKER_DIR/git-state.json" "Should create state file"
+
+    local pr
+    pr=$(jq -r '.pr_number' "$WORKER_DIR/git-state.json")
+    assert_equals "123" "$pr" "Should set PR number in new file"
+
+    local state
+    state=$(jq -r '.current_state' "$WORKER_DIR/git-state.json")
+    assert_equals "none" "$state" "Should have 'none' as initial state"
 }
 
 # =============================================================================
@@ -477,7 +485,7 @@ run_test test_git_state_set_fails_on_missing_worker_dir
 
 # git_state_set_pr tests
 run_test test_git_state_set_pr_sets_number
-run_test test_git_state_set_pr_fails_without_state_file
+run_test test_git_state_set_pr_creates_file_if_missing
 
 # git_state_get_pr tests
 run_test test_git_state_get_pr_returns_number

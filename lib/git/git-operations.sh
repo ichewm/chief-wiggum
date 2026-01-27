@@ -7,6 +7,7 @@ set -euo pipefail
 
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/utils/calculate-cost.sh"
+source "$WIGGUM_HOME/lib/worker/git-state.sh"
 
 # =============================================================================
 # READ-ONLY AGENT GIT SAFETY
@@ -283,9 +284,20 @@ ${metrics_section}
 
         log "Created Pull Request for $task_id"
 
-        # Get and save PR URL (with timeout)
-        GIT_PR_URL=$(timeout "$gh_timeout" gh pr view "$branch_name" --json url -q .url 2>/dev/null || echo "N/A")
+        # Get and save PR URL and number (with timeout)
+        local pr_info
+        pr_info=$(timeout "$gh_timeout" gh pr view "$branch_name" --json url,number 2>/dev/null || echo '{}')
+        GIT_PR_URL=$(echo "$pr_info" | jq -r '.url // "N/A"')
+        local pr_number
+        pr_number=$(echo "$pr_info" | jq -r '.number // empty')
+
         echo "$GIT_PR_URL" > "$worker_dir/pr_url.txt"
+
+        # Save PR number to git-state.json for merge flow
+        if [ -n "$pr_number" ]; then
+            git_state_set_pr "$worker_dir" "$pr_number" 2>/dev/null || true
+        fi
+
         return 0
     else
         local exit_code=$?

@@ -316,8 +316,7 @@ create_orphan_pr_workspaces() {
             continue
         fi
 
-        # Record branch and PR info
-        echo "$branch" > "$worker_dir/branch.txt"
+        # Record PR info
         git_state_set_pr "$worker_dir" "$pr_number"
 
         # Sync comments from review directory if they exist

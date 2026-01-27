@@ -107,16 +107,25 @@ git_state_set() {
 #   worker_dir - Worker directory path
 #   pr_number  - PR number (integer)
 #
-# Returns: 1 if state file doesn't exist
+# Creates state file if it doesn't exist
 git_state_set_pr() {
     local worker_dir="$1"
     local pr_number="$2"
     local state_file="$worker_dir/git-state.json"
 
-    [ -f "$state_file" ] || return 1
-
-    jq --argjson pr "$pr_number" '.pr_number = $pr' "$state_file" > "$state_file.tmp" \
-        && mv "$state_file.tmp" "$state_file"
+    # Create minimal state file if it doesn't exist
+    if [ ! -f "$state_file" ]; then
+        jq -n --argjson pr "$pr_number" '{
+            current_state: "none",
+            pr_number: $pr,
+            merge_attempts: 0,
+            last_error: null,
+            transitions: []
+        }' > "$state_file"
+    else
+        jq --argjson pr "$pr_number" '.pr_number = $pr' "$state_file" > "$state_file.tmp" \
+            && mv "$state_file.tmp" "$state_file"
+    fi
 }
 
 # Get PR number from git-state.json

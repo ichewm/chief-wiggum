@@ -39,14 +39,15 @@ attempt_pr_merge() {
     pr_number=$(git_state_get_pr "$worker_dir")
 
     if [ "$pr_number" = "null" ] || [ -z "$pr_number" ]; then
-        # Try to find PR number from branch
-        local branch_file="$worker_dir/branch.txt"
-        if [ -f "$branch_file" ]; then
+        # Try to find PR number from workspace branch
+        if [ -d "$worker_dir/workspace" ]; then
             local branch
-            branch=$(cat "$branch_file")
-            pr_number=$(gh pr list --head "$branch" --state open --json number -q '.[0].number' 2>/dev/null || true)
-            if [ -n "$pr_number" ]; then
-                git_state_set_pr "$worker_dir" "$pr_number"
+            branch=$(git -C "$worker_dir/workspace" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+            if [ -n "$branch" ] && [ "$branch" != "HEAD" ]; then
+                pr_number=$(gh pr list --head "$branch" --state open --json number -q '.[0].number' 2>/dev/null || true)
+                if [ -n "$pr_number" ]; then
+                    git_state_set_pr "$worker_dir" "$pr_number"
+                fi
             fi
         fi
     fi

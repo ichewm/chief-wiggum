@@ -49,13 +49,15 @@ agent_run() {
     pr_number=$(git_state_get_pr "$worker_dir")
 
     if [ "$pr_number" = "null" ] || [ -z "$pr_number" ]; then
-        # Try to find PR number from branch
-        if [ -f "$worker_dir/branch.txt" ]; then
+        # Try to find PR number from workspace branch
+        if [ -d "$workspace" ]; then
             local branch
-            branch=$(cat "$worker_dir/branch.txt")
-            pr_number=$(gh pr list --head "$branch" --state open --json number -q '.[0].number' 2>/dev/null || true)
-            if [ -n "$pr_number" ]; then
-                git_state_set_pr "$worker_dir" "$pr_number"
+            branch=$(git -C "$workspace" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+            if [ -n "$branch" ] && [ "$branch" != "HEAD" ]; then
+                pr_number=$(gh pr list --head "$branch" --state open --json number -q '.[0].number' 2>/dev/null || true)
+                if [ -n "$pr_number" ]; then
+                    git_state_set_pr "$worker_dir" "$pr_number"
+                fi
             fi
         fi
     fi
