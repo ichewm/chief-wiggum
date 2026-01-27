@@ -165,8 +165,8 @@ display_orchestrator_status() {
     ready_count=$(echo "$ready_tasks" | grep -c . 2>/dev/null || true)
     ready_count=${ready_count:-0}
 
-    # Subtract in-progress and deferred tasks from count
-    ready_count=$((ready_count - main_count - ${#deferred_conflicts[@]}))
+    # Subtract deferred tasks from count (in-progress tasks already excluded by get_ready_tasks)
+    ready_count=$((ready_count - ${#deferred_conflicts[@]}))
 
     if [ "$ready_count" -gt 0 ]; then
         echo "Ready ($ready_count tasks, top 7 by priority):"

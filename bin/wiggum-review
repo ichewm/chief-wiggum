@@ -500,8 +500,10 @@ cmd_task_fix() {
         fi
 
         _log_ts "INFO: Running agent engineering.pr-comment-fix"
-        if ! run_agent "engineering.pr-comment-fix" "'"$worker_dir"'" "'"$PROJECT_DIR"'"; then
-            _log_ts "ERROR: run_agent failed with exit code $?"
+        run_agent "engineering.pr-comment-fix" "'"$worker_dir"'" "'"$PROJECT_DIR"'"
+        local _exit_code=$?
+        if [ $_exit_code -ne 0 ]; then
+            _log_ts "ERROR: run_agent failed with exit code $_exit_code"
             exit 1
         fi
     ' >> "$RALPH_DIR/logs/fix-workers.log" 2>&1 &
