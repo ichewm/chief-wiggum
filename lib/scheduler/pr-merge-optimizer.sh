@@ -51,6 +51,72 @@ _pr_merge_state_file() {
     echo "$1/pr-merge-state.json"
 }
 
+# Clean up worktree after PR is merged (keeps logs/results/reports)
+#
+# Args:
+#   worker_dir - Worker directory path
+_cleanup_merged_worktree() {
+    local worker_dir="$1"
+    local workspace="$worker_dir/workspace"
+
+    [ -d "$workspace" ] || return 0
+
+    log "      Cleaning up worktree..."
+
+    # Get the worktree path for git worktree remove
+    local repo_root
+    repo_root=$(git -C "$workspace" rev-parse --show-toplevel 2>/dev/null || echo "")
+
+    if [ -n "$repo_root" ]; then
+        # Try to remove via git worktree (cleanest method)
+        # Need to run from the main repo, not the worktree itself
+        local main_repo
+        main_repo=$(git -C "$workspace" worktree list --porcelain 2>/dev/null | head -1 | sed 's/^worktree //')
+
+        if [ -n "$main_repo" ] && [ -d "$main_repo" ]; then
+            git -C "$main_repo" worktree remove --force "$workspace" 2>/dev/null || true
+        fi
+    fi
+
+    # If worktree remove didn't work, just remove the directory
+    if [ -d "$workspace" ]; then
+        rm -rf "$workspace"
+    fi
+
+    # Mark cleanup in worker state
+    if [ -d "$worker_dir" ]; then
+        echo "merged_and_cleaned" > "$worker_dir/.cleanup_status"
+    fi
+
+    log "      Worktree removed (logs preserved)"
+}
+
+# Check if pr-comment-fix agent completed successfully (PASS)
+# Looks for the most recent result file from the fix agent
+#
+# Args:
+#   worker_dir - Worker directory path
+#
+# Returns: 0 if PASS found, 1 otherwise
+_check_fix_agent_passed() {
+    local worker_dir="$1"
+    local results_dir="$worker_dir/results"
+
+    [ -d "$results_dir" ] || return 1
+
+    # Find the most recent pr-comment-fix result file
+    local latest_result
+    latest_result=$(find "$results_dir" -name "*pr-comment-fix*.json" -type f 2>/dev/null | sort -r | head -1)
+
+    [ -n "$latest_result" ] && [ -f "$latest_result" ] || return 1
+
+    # Check if gate_result is PASS
+    local gate_result
+    gate_result=$(jq -r '.gate_result // empty' "$latest_result" 2>/dev/null)
+
+    [ "$gate_result" = "PASS" ]
+}
+
 # Check if there are new comments since the last fix commit
 # Compares comment IDs in the main section vs those listed in ## Commit section
 #
@@ -257,13 +323,17 @@ _gather_pr_data() {
         comment_count=$(grep -c '^### ' "$worker_dir/task-comments.md" 2>/dev/null | head -1 || echo "0")
         comment_count="${comment_count:-0}"
         if [[ "$comment_count" =~ ^[0-9]+$ ]] && [ "$comment_count" -gt 0 ]; then
-            # First check: is there a ## Commit section indicating comments were addressed?
+            # Check 1: is there a ## Commit section indicating comments were addressed?
             if grep -q '^## Commit$' "$worker_dir/task-comments.md" 2>/dev/null; then
                 # Comments were addressed by a previous fix commit
                 # Check if there are NEW comments since the commit (comments not in the addressed list)
                 has_new_comments=$(_check_for_new_comments_since_commit "$worker_dir/task-comments.md")
+            # Check 2: did pr-comment-fix agent complete successfully (PASS)?
+            elif _check_fix_agent_passed "$worker_dir"; then
+                # Agent reported PASS - all comments were addressed
+                has_new_comments="false"
+            # Check 3: check status file for pending items
             elif [ -f "$worker_dir/reports/comment-status.md" ]; then
-                # Fallback: check status file for pending items
                 local pending
                 pending=$(grep -c '^\- \[ \]' "$worker_dir/reports/comment-status.md" 2>/dev/null | head -1 || echo "0")
                 pending="${pending:-0}"
@@ -960,11 +1030,29 @@ _attempt_merge() {
     local gh_timeout="${WIGGUM_GH_TIMEOUT:-30}"
 
     # Try to merge via gh CLI
-    if timeout "$gh_timeout" gh pr merge "$pr_number" --merge --delete-branch 2>&1; then
+    # Note: --delete-branch may fail for worktree branches (can't delete local branch in use)
+    # but the merge itself may have succeeded. Check PR state afterward.
+    local merge_output
+    merge_output=$(timeout "$gh_timeout" gh pr merge "$pr_number" --merge --delete-branch 2>&1) || true
+
+    # Check if PR is now merged (handles case where merge succeeded but branch delete failed)
+    local pr_state
+    pr_state=$(timeout "$gh_timeout" gh pr view "$pr_number" --json state -q '.state' 2>/dev/null || echo "UNKNOWN")
+
+    if [ "$pr_state" = "MERGED" ]; then
         log "    ✓ Merged PR #$pr_number"
+
+        # Clean up worktree now that PR is merged (keep logs/results)
+        local worker_dir
+        worker_dir=$(jq -r --arg t "$task_id" '.prs[$t].worker_dir' "$state_file")
+        if [ -n "$worker_dir" ] && [ -d "$worker_dir/workspace" ]; then
+            _cleanup_merged_worktree "$worker_dir"
+        fi
+
         return 0
     else
         log "    ✗ Failed to merge PR #$pr_number"
+        log "      $merge_output"
         return 1
     fi
 }
