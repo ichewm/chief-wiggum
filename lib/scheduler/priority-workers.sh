@@ -247,11 +247,11 @@ _spawn_batch_resolve_worker() {
     log "Spawning batch resolver for $task_id (batch: $batch_id, position $((position + 1)) of $total)..."
 
     # Launch worker using multi-pr-resolve pipeline
+    # Use wiggum-start --worker-dir to run fresh pipeline on existing worker
     (
         cd "$project_dir" || exit 1
-        export WIGGUM_PIPELINE="multi-pr-resolve"
-        "$WIGGUM_HOME/bin/wiggum-resume" "$(basename "$worker_dir")" --quiet \
-            --pipeline multi-pr-resolve 2>&1 | \
+        "$WIGGUM_HOME/bin/wiggum-start" --worker-dir "$worker_dir" \
+            --pipeline multi-pr-resolve --quiet 2>&1 | \
             sed "s/^/  [batch-resolve-$task_id] /"
     ) &
     local resolver_pid=$!
