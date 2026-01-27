@@ -666,9 +666,18 @@ _schedule_pending_pr_fixes() {
         task_status=$(get_task_status "$RALPH_DIR/kanban.md" "$task_id")
         [ "$task_status" = "P" ] || continue
 
-        # Check if worker has a PR recorded
+        # Check if worker has a PR recorded (backfill from pr_url.txt if missing)
         local pr_number
         pr_number=$(git_state_get_pr "$worker_dir" 2>/dev/null)
+        if { [ -z "$pr_number" ] || [ "$pr_number" = "null" ]; } && [ -f "$worker_dir/pr_url.txt" ]; then
+            local pr_url
+            pr_url=$(cat "$worker_dir/pr_url.txt")
+            pr_number=$(echo "$pr_url" | grep -oE '[0-9]+$' || true)
+            if [ -n "$pr_number" ]; then
+                log "Backfilling PR #$pr_number for $task_id from pr_url.txt"
+                git_state_set_pr "$worker_dir" "$pr_number" 2>/dev/null || true
+            fi
+        fi
         [ -n "$pr_number" ] && [ "$pr_number" != "null" ] || continue
 
         pending_with_pr+=("$worker_dir|$task_id|$pr_number")

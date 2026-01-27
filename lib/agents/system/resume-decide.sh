@@ -59,6 +59,77 @@ _load_pipeline_config() {
     fi
 }
 
+# Find the last step with commit_after=true before a given step
+# This identifies the recovery checkpoint for workspace reset
+#
+# Args:
+#   step_id - The step we want to resume from
+#
+# Returns: step_id of the last checkpoint, or empty if none
+_find_last_checkpoint_before() {
+    local target_step="$1"
+    local step_count
+    step_count=$(pipeline_step_count)
+
+    local target_idx=-1
+    local last_checkpoint=""
+    local i=0
+
+    # First, find the target step's index
+    while [ "$i" -lt "$step_count" ]; do
+        local step_id
+        step_id=$(pipeline_get "$i" ".id")
+        if [ "$step_id" = "$target_step" ]; then
+            target_idx=$i
+            break
+        fi
+        i=$((i + 1))
+    done
+
+    # If target not found, return empty
+    [ "$target_idx" -lt 0 ] && return
+
+    # Now find the last checkpoint before target
+    i=0
+    while [ "$i" -lt "$target_idx" ]; do
+        local step_id commit_after
+        step_id=$(pipeline_get "$i" ".id")
+        commit_after=$(pipeline_get "$i" ".commit_after" "false")
+
+        if [ "$commit_after" = "true" ]; then
+            last_checkpoint="$step_id"
+        fi
+        i=$((i + 1))
+    done
+
+    echo "$last_checkpoint"
+}
+
+# Check if a step has commit_after=true
+#
+# Args:
+#   step_id - The step to check
+#
+# Returns: 0 if true, 1 if false
+_step_has_commit_after() {
+    local target_step="$1"
+    local step_count
+    step_count=$(pipeline_step_count)
+
+    local i=0
+    while [ "$i" -lt "$step_count" ]; do
+        local step_id commit_after
+        step_id=$(pipeline_get "$i" ".id")
+        if [ "$step_id" = "$target_step" ]; then
+            commit_after=$(pipeline_get "$i" ".commit_after" "false")
+            [ "$commit_after" = "true" ] && return 0
+            return 1
+        fi
+        i=$((i + 1))
+    done
+    return 1
+}
+
 # Get an agent's execution mode from its .md file
 # Returns: mode string (ralph_loop, once, resume) or empty if not found
 _get_agent_mode() {
@@ -102,17 +173,18 @@ _generate_steps_table() {
     local step_count
     step_count=$(pipeline_step_count)
 
-    echo "| # | Step | Agent | Special Handling |"
-    echo "|---|------|-------|------------------|"
+    echo "| # | Step | Agent | Commit After | Recovery Notes |"
+    echo "|---|------|-------|--------------|----------------|"
 
     local i=0
     local step_num=1
     while [ "$i" -lt "$step_count" ]; do
-        local step_id agent is_readonly enabled_by special=""
+        local step_id agent is_readonly enabled_by commit_after notes=""
         step_id=$(pipeline_get "$i" ".id")
         agent=$(pipeline_get "$i" ".agent")
         is_readonly=$(pipeline_get "$i" ".readonly" "false")
         enabled_by=$(pipeline_get "$i" ".enabled_by" "")
+        commit_after=$(pipeline_get "$i" ".commit_after" "false")
 
         # Skip disabled-by-default steps in the table
         if [ -n "$enabled_by" ]; then
@@ -120,17 +192,23 @@ _generate_steps_table() {
             continue
         fi
 
-        # Determine special handling notes
+        # Determine recovery notes
         local agent_mode
         agent_mode=$(_get_agent_mode "$agent")
         if [ "$agent_mode" = "ralph_loop" ]; then
-            # ralph_loop agents maintain state via summaries; must restart from beginning
-            special="Cannot resume mid-step"
+            notes="Stateful - restart from beginning"
         elif [ "$is_readonly" = "true" ]; then
-            special="Read-only"
+            notes="Read-only - no workspace changes"
+        elif [ "$commit_after" = "true" ]; then
+            notes="**Checkpoint** - workspace recoverable"
+        else
+            notes="No checkpoint - workspace state uncertain"
         fi
 
-        echo "| $step_num | \`$step_id\` | $agent | $special |"
+        local commit_marker="No"
+        [ "$commit_after" = "true" ] && commit_marker="**Yes**"
+
+        echo "| $step_num | \`$step_id\` | $agent | $commit_marker | $notes |"
         step_num=$((step_num + 1))
         i=$((i + 1))
     done
@@ -140,14 +218,39 @@ _generate_steps_table() {
 # Returns markdown via stdout
 _generate_decision_criteria() {
     cat << 'EOF'
-| Scenario | Decision |
-|----------|----------|
-| PRD has incomplete `- [ ]` tasks | First step marked "Cannot resume mid-step" |
-| PRD says complete but workspace diff contradicts claims | First step marked "Cannot resume mid-step" |
-| A step never ran or has no result file | That step |
-| A step produced FAIL that needs retry | That step |
-| All phases complete with outputs | `ABORT` |
-| Fundamental issue (impossible task, repeated failures, bad PRD) | `ABORT` |
+## Recovery-Focused Decision Making
+
+Your goal is NOT just to find the interruption point, but to identify the **best step to resume from**
+that will successfully recover the pipeline. Consider these factors:
+
+### Workspace Recoverability
+
+Steps marked with **Commit After = Yes** create git commits after completion. This means:
+- The workspace can be reset to a known state from that commit
+- Resuming from the NEXT step after a committed step is safe
+- The resumed step will see a clean, known workspace state
+
+Steps without commits leave the workspace in an indeterminate state:
+- Partial changes may exist
+- Resuming may encounter conflicts or inconsistencies
+- You may need to go back to an earlier committed step
+
+### Decision Matrix
+
+| Scenario | Best Recovery Step |
+|----------|-------------------|
+| Pipeline went in unexpected direction (wrong approach, bad assumptions) | Last **committed checkpoint** before divergence |
+| PRD incomplete but workspace has useful progress | First stateful step (to restart with preserved workspace) |
+| Step failed due to transient issue (rate limits, timeouts) | The failed step itself |
+| Workspace is corrupted or in unknown state | Last committed checkpoint (or `ABORT` if none) |
+| All phases complete but results are wrong | The step that produced wrong results |
+| All phases complete with correct outputs | `ABORT` (nothing to resume) |
+| Fundamental issue (impossible task, bad PRD) | `ABORT` |
+
+### The Key Question
+
+Ask yourself: "If I resume from step X, will the workspace be in a known good state that allows
+that step to succeed?" If the answer is uncertain, go back to an earlier committed checkpoint.
 EOF
 }
 
@@ -228,6 +331,23 @@ agent_run() {
         instructions="${instructions:-Resume-decide agent did not produce a valid step decision.}"
     fi
 
+    # Determine workspace recovery information
+    local last_checkpoint=""
+    local recovery_possible="false"
+
+    if [ "$step" != "ABORT" ]; then
+        # Find the last commit checkpoint before the chosen step
+        last_checkpoint=$(_find_last_checkpoint_before "$step")
+
+        # Recovery is possible if there's a checkpoint
+        if [ -n "$last_checkpoint" ]; then
+            recovery_possible="true"
+            log "Found recovery checkpoint: $last_checkpoint (before $step)"
+        else
+            log "No commit checkpoint found before $step - workspace state may be uncertain"
+        fi
+    fi
+
     # Write outputs
     echo "$step" > "$worker_dir/resume-step.txt"
     if [ -z "$instructions" ]; then
@@ -240,10 +360,28 @@ agent_run() {
     # Log completion footer
     log_subsection "RESUME-DECIDE COMPLETED"
     log_kv "Decision" "$step"
+    log_kv "Last Checkpoint" "${last_checkpoint:-none}"
+    log_kv "Recovery Possible" "$recovery_possible"
     log_kv "Finished" "$(date -Iseconds)"
 
+    # Build result JSON with recovery metadata
+    local result_json
+    result_json=$(jq -n \
+        --arg resume_step "$step" \
+        --arg report_file "${_RESUME_DECIDE_REPORT_PATH:-}" \
+        --arg last_checkpoint "$last_checkpoint" \
+        --arg recovery_possible "$recovery_possible" \
+        '{
+            resume_step: $resume_step,
+            report_file: $report_file,
+            workspace_recovery: {
+                last_checkpoint_step: (if $last_checkpoint == "" then null else $last_checkpoint end),
+                recovery_possible: ($recovery_possible == "true")
+            }
+        }')
+
     # Both resume and abort are successful decisions
-    agent_write_result "$worker_dir" "PASS" "$(printf '{"resume_step":"%s","report_file":"%s"}' "$step" "${_RESUME_DECIDE_REPORT_PATH:-}")"
+    agent_write_result "$worker_dir" "PASS" "$result_json"
 
     return 0
 }
@@ -255,15 +393,20 @@ _get_system_prompt() {
     cat << EOF
 RESUME DECISION AGENT:
 
-You determine where an interrupted worker should resume from. You do NOT fix issues - only analyze and decide.
+You determine where an interrupted worker should resume from to **recover the pipeline**.
+You do NOT fix issues - only analyze and decide the best recovery point.
 
 WORKER DIRECTORY: $worker_dir
 
-## Core Principle: EVIDENCE OVER ASSUMPTIONS
+## Core Principle: FIND THE BEST RECOVERY POINT
 
-Trust nothing about the worker's state without verifying it in the logs and filesystem.
-A phase claiming success means nothing if its output files are missing.
-An interrupted phase needs evidence of WHERE it stopped, not just THAT it stopped.
+Your job is NOT just to find where the pipeline stopped. It's to identify which step,
+when resumed from, will lead to successful pipeline completion.
+
+This may mean:
+- Going back to an earlier step if the workspace is in an unknown state
+- Resuming from a step with a committed checkpoint (see "Commit After" column in pipeline table)
+- Restarting execution entirely if the approach taken was fundamentally wrong
 
 ## Worker Directory Layout
 
@@ -272,31 +415,53 @@ $worker_dir/
 ├── worker.log           ← Phase-level status log (YOUR PRIMARY EVIDENCE)
 ├── prd.md               ← Task requirements (check completion status)
 ├── workspace/           ← Code changes (PRESERVED - do not modify)
-├── conversations/       ← Converted conversation logs from previous run
-│   ├── execution-*.md   ← Main work loop conversations
-│   ├── audit-*.md       ← Security audit conversations
-│   ├── test-*.md        ← Test coverage conversations
-│   └── ...              ← Other sub-agent conversations
+├── pipeline-config.json ← Pipeline configuration with step info
+├── conversations/       ← Converted conversation logs (step-*.md files)
 ├── logs/                ← Raw JSON stream logs (DO NOT READ - too large)
 ├── summaries/           ← Iteration summaries
-├── results/             ← Phase result files (PASS/FAIL/FIX/etc.)
-└── reports/             ← Phase report files
+├── results/             ← Step result files (*-<step>-result.json)
+└── reports/             ← Step report files (*-<step>-report.md)
 \`\`\`
 
 ## Pipeline Steps (in execution order)
 
 $(_generate_steps_table)
 
-## Phase Completion Evidence
+## Understanding Commit Checkpoints
 
-| Phase | Log Pattern (in worker.log) | Output File |
-|-------|---------------------------|-------------|
-| execution | "Task completed successfully" or "Ralph loop finished" | summaries/summary.txt |
-| audit | "Security audit result: PASS\|FIX\|FAIL" | results/*-security-audit-result.json |
-| test | "Test coverage result: PASS\|FAIL\|SKIP" | results/*-test-coverage-result.json |
-| docs | "Documentation writer result:" | results/*-documentation-writer-result.json |
-| validation | "Validation review completed with result:" | results/*-validation-review-result.json |
-| finalization | "PR created:" or "Commit created" | results/*-system.task-worker-result.json |
+Steps with **Commit After = Yes** create git commits after completion. These are **recovery checkpoints**:
+- The workspace state at that point is recorded in git history
+- When resuming from the NEXT step, the workspace can be reset to this known state
+- If something went wrong after a checkpoint, going back to it is safe
+
+Steps without commits have uncertain workspace state:
+- Partial work may exist
+- Files may be in inconsistent states
+- Resuming may encounter unexpected conditions
+
+## Discovering Phase Evidence
+
+**DO NOT rely on hardcoded phase names.** Explore the worker directory to discover what ran:
+
+1. **List result files**: \`ls -la $worker_dir/results/\`
+   - Files are named: \`<epoch>-<step-id>-result.json\`
+   - Read the JSON to see the gate_result (PASS/FAIL/FIX/SKIP)
+
+2. **List summaries**: \`ls -la $worker_dir/summaries/\`
+   - Contains iteration-by-iteration progress
+
+3. **List conversations**: \`ls -la $worker_dir/conversations/\`
+   - Human-readable logs showing what each step did
+
+4. **Read worker.log**: Contains timestamped phase markers like:
+   - "PIPELINE STEP: <step_id>" - step started
+   - "STEP COMPLETED: <step_id>" with "Result: <result>" - step finished
+   - Errors and warnings
+
+5. **Check git history in workspace**:
+   \`cd $worker_dir/workspace && git log --oneline -10\`
+   - Shows commits from steps with commit_after=true
+   - Helps identify recovery checkpoints
 
 ## Git Restrictions (CRITICAL)
 
@@ -313,148 +478,176 @@ You are a READ-ONLY analyst. The workspace contains uncommitted work that MUST N
 EOF
 }
 
-# Build user prompt — structured methodology matching validation-review/security-audit patterns
+# Build user prompt — structured methodology for dynamic pipeline exploration
 _build_user_prompt() {
     local worker_dir="$1"
-
-    # List available conversation files for the agent's awareness
-    local conv_files=""
-    if [ -d "$worker_dir/conversations" ]; then
-        conv_files=$(ls "$worker_dir/conversations/"*.md 2>/dev/null | sort || true)
-    fi
-
-    # List result files that exist (epoch-named JSON results)
-    local result_files=""
-    result_files=$(ls "$worker_dir/results/"*-result.json 2>/dev/null | sort || true)
 
     cat << EOF
 RESUME ANALYSIS TASK:
 
-Determine where this interrupted worker should resume from. Trust nothing - verify everything.
+Analyze this interrupted worker and determine the **best step to resume from** for successful
+pipeline recovery. Your job is NOT just to find where it stopped - it's to find the step that,
+when resumed, will lead to successful completion.
 
-## Step 1: Establish Ground Truth
+## Step 1: Explore the Worker Directory Structure
 
-Read the worker.log to understand what phases actually ran:
+First, understand what exists in this worker directory:
+
+\`\`\`bash
+# List all top-level contents
+ls -la $worker_dir/
+
+# Check what result files exist (shows which steps completed)
+ls -la $worker_dir/results/ 2>/dev/null || echo "No results directory"
+
+# Check what summaries exist
+ls -la $worker_dir/summaries/ 2>/dev/null || echo "No summaries directory"
+
+# Check what conversations were logged
+ls -la $worker_dir/conversations/ 2>/dev/null || echo "No conversations directory"
+\`\`\`
+
+## Step 2: Read the Worker Log
+
+The worker.log is your primary evidence of what happened:
 
 \`\`\`
 $worker_dir/worker.log
 \`\`\`
 
-For EACH phase, look for:
-- **Start marker**: "Running security audit..." / "Running test generation..." / etc.
-- **Completion marker**: "result: PASS" / "result: FAIL" / etc.
-- **Error markers**: "ERROR" / non-zero exit codes / missing output
+Look for these patterns:
+- **"PIPELINE STEP: <step_id>"** — A step started
+- **"STEP COMPLETED: <step_id>"** with **"Result: <PASS|FAIL|FIX|SKIP>"** — A step finished
+- **"ERROR"** markers — Something went wrong
+- **Timestamps** — Understand the sequence of events
 
-## Step 2: Verify Phase Outputs
+Build a timeline of which steps ran and what their results were.
 
-Cross-reference log claims against actual output files:
+## Step 3: Examine Result Files
 
-$(if [ -n "$result_files" ]; then
-    echo "Result files found:"
-    echo "$result_files" | while read -r f; do echo "- $f"; done
-else
-    echo "No result files found (phases may not have completed)."
-fi)
+For each step that claims to have completed, read its result file:
 
-For each phase that claims completion in the log, verify its output file EXISTS and is NON-EMPTY.
-A phase is NOT complete if its output file is missing, even if the log says it ran.
+\`\`\`bash
+# Result files are named: <epoch>-<step-id>-result.json
+cat $worker_dir/results/*-result.json 2>/dev/null
+\`\`\`
 
-## Step 3: Check PRD Completion Status
+Each result JSON contains:
+- \`gate_result\`: PASS, FAIL, FIX, or SKIP
+- \`outputs\`: Additional metadata from the step
+
+A step is NOT complete if:
+- The log says it started but no result file exists
+- The result file shows FAIL or an unexpected state
+
+## Step 4: Identify Recovery Checkpoints
+
+Check the git history in the workspace to find committed checkpoints:
+
+\`\`\`bash
+cd $worker_dir/workspace && git log --oneline -15
+\`\`\`
+
+Commits from pipeline steps (with commit_after=true) are recovery points.
+If you need to resume from a step after a checkpoint, the workspace can be
+reset to that known state.
+
+## Step 5: Check PRD Completion Status
 
 \`\`\`
 $worker_dir/prd.md
 \`\`\`
 
-Count:
-- \`- [x]\` tasks (completed)
-- \`- [ ]\` tasks (incomplete)
-- \`- [*]\` tasks (blocked/failed)
+Count task markers:
+- \`- [x]\` = completed
+- \`- [ ]\` = incomplete
+- \`- [*]\` = blocked/failed
 
-If ANY tasks are \`- [ ]\`, execution is NOT complete.
+If tasks are incomplete, determine if:
+- Execution never finished (resume from execution)
+- Execution finished but went in wrong direction (may need to go back further)
 
-## Step 4: Verify Workspace Matches Claims
+## Step 6: Verify Workspace State
 
-If execution appears complete, verify the workspace reflects what was claimed:
+Check what actual changes exist:
 
 \`\`\`bash
-cd $worker_dir/workspace && git diff --name-only   # What files actually changed
-cd $worker_dir/workspace && git diff --stat         # Summary of changes
+cd $worker_dir/workspace && git status
+cd $worker_dir/workspace && git diff --stat
 \`\`\`
 
-Cross-reference against:
-- The PRD task descriptions (what SHOULD have been modified)
-- The summary file (summaries/summary.txt - what was CLAIMED to be modified)
-- Conversation logs (what the agent SAID it did)
+Compare against what was claimed in:
+- PRD task descriptions
+- Summaries (if they exist)
+- Conversation logs
 
-For each claimed modification:
-1. **Does the file appear in git diff?** If not, the change was never made or was reverted
-2. **Does the diff content match the description?** A file listed as "added new endpoint" should contain route/handler code, not just a comment
-3. **Are claimed new files actually present?** Check \`git status\` for untracked files
+If workspace contradicts claims, you may need to go back to an earlier checkpoint.
 
-If workspace state contradicts claims (files missing, changes don't match descriptions), execution is NOT truly complete — resume from \`execution\`.
+## Step 7: Decide the Best Recovery Step
 
-## Step 5: Identify the Interruption Point
+Consider these questions:
 
-The resume step is the EARLIEST phase that:
-- Started but did not produce its output file, OR
-- Never started (no log entry), OR
-- Produced a FAIL/error result that needs retry, OR
-- Claims completion but workspace evidence contradicts it
+1. **Is the workspace in a known good state?**
+   - If uncertain, find the last committed checkpoint and resume from the step AFTER it
 
-## Step 6: Gather Context for Instructions
+2. **Did the pipeline go in the wrong direction?**
+   - If the approach was fundamentally wrong, go back to a checkpoint before the divergence
+   - The resumed step can try a different approach
 
-If resuming from a post-execution step, read the relevant conversation logs for context:
+3. **Was this a transient failure?**
+   - If a step failed due to rate limits, timeouts, or similar, resume from that step
 
-$(if [ -n "$conv_files" ]; then
-    echo "Available conversation logs:"
-    echo "$conv_files" | while read -r f; do echo "- $f"; done
-else
-    echo "No conversation logs found."
-fi)
-
-Read ONLY the conversations relevant to understanding what was accomplished (not the failed phase's log).
+4. **Are all steps actually complete?**
+   - If everything completed successfully, return ABORT
 
 ## Decision Criteria
 
 $(_generate_decision_criteria)
 
-## Common Mistakes to Avoid
+## Important Considerations
 
-- **Don't trust PRD checkboxes alone** — verify workspace diff actually contains the claimed changes
-- **Don't resume from a post-execution step if the diff is empty** — execution didn't actually produce work
-- **Don't skip a phase** — always resume from the EARLIEST incomplete phase
-- **Don't assume a phase ran** just because the next phase started (it may have been skipped)
-- **Don't read logs/ directory** — these are raw JSON streams that will exhaust your context
+- **Read logs dynamically** — Don't assume specific phase names. Explore what actually exists.
+- **Trust evidence over claims** — Verify workspace diff matches what logs/PRD say happened.
+- **Consider workspace recoverability** — Steps with commit_after create safe recovery points.
+- **Don't read logs/ directory** — Raw JSON streams will exhaust your context.
+- **Recovery > Correctness** — Choose the step that gives the best chance of successful completion.
 
 ## Output Format
 
-<step>STEP_NAME</step>
+<step>STEP_ID</step>
 
 <instructions>
+## Analysis Summary
+
+[Brief summary of what you found: which steps ran, their results, current state]
+
 ## What Was Accomplished
 
-[Bullet points of completed work, with specific files modified and patterns used]
+[Bullet points of completed work, referencing specific files and results]
 
-## Current State
+## Why This Recovery Point
 
-[Description of workspace state: what code exists, what's been committed vs uncommitted]
+[Explain why you chose this step:
+- Is there a committed checkpoint before it?
+- What state will the workspace be in?
+- What makes this the best recovery choice?]
 
-## What Needs to Happen Now
+## Guidance for Resumed Step
 
-[Specific guidance for the resumed phase:
-- If execution: which PRD tasks remain, what patterns to follow
-- If audit/test/docs/validation: context about what was implemented
-- If finalization: what to commit, branch naming, PR description context]
+[Specific instructions for the resumed step:
+- If going back to execution: what approach to try, what to preserve
+- If resuming a failed step: what caused the failure, how to avoid it
+- Context the resumed agent needs to succeed]
 
 ## Warnings
 
-[Issues from the previous run to be aware of:
-- Errors encountered
-- Partial work that may need cleanup
-- Patterns or decisions that should be maintained]
+[Issues to be aware of:
+- Errors from previous run
+- Partial work that may need attention
+- Decisions that should be preserved or changed]
 </instructions>
 
-The <step> tag MUST be exactly one of the pipeline step IDs shown in the table above, or ABORT
+The <step> tag MUST be exactly one of the pipeline step IDs from the table in the system prompt, or ABORT
 EOF
 }
 

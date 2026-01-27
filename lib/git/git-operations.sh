@@ -294,8 +294,15 @@ ${metrics_section}
         echo "$GIT_PR_URL" > "$worker_dir/pr_url.txt"
 
         # Save PR number to git-state.json for merge flow
+        # Fallback: extract from URL if gh pr view failed
+        if [ -z "$pr_number" ] && [ "$GIT_PR_URL" != "N/A" ]; then
+            pr_number=$(echo "$GIT_PR_URL" | grep -oE '[0-9]+$' || true)
+            [ -n "$pr_number" ] && log "Extracted PR number from URL: $pr_number"
+        fi
         if [ -n "$pr_number" ]; then
-            git_state_set_pr "$worker_dir" "$pr_number" 2>/dev/null || true
+            git_state_set_pr "$worker_dir" "$pr_number" 2>/dev/null || log_warn "Failed to save PR number to git-state.json"
+        else
+            log_warn "Could not determine PR number - conflict resolution may not work"
         fi
 
         return 0
