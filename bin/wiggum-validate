@@ -29,6 +29,10 @@ show_help() {
 wiggum validate - Validate kanban.md format and structure
 
 Usage: wiggum validate [options]
+       wiggum validate sort [options]
+
+Subcommands:
+  sort              Validate and sort kanban tasks by status and task ID
 
 Options:
   -f, --file FILE   Validate a specific kanban file (default: .ralph/kanban.md)
@@ -44,13 +48,22 @@ Validates:
   - Proper indentation (2 spaces for fields, 4 spaces for sub-items)
   - TASKS section exists
 
+Sort Order:
+  1. [x] Complete tasks (top)
+  2. [*] Failed tasks
+  3. [P] Pending approval tasks
+  4. [ ] and [=] Pending/In-progress tasks (sorted by task ID)
+  5. [N] Not planned tasks (bottom)
+
 Examples:
   wiggum validate                          # Validate .ralph/kanban.md
   wiggum validate -f custom-kanban.md      # Validate specific file
   wiggum validate --quiet                  # Only show errors
+  wiggum validate sort                     # Validate and sort kanban
+  wiggum validate sort -f custom.md        # Sort specific file
 
 Exit codes:
-  0  - Kanban file is valid
+  0  - Kanban file is valid (or sorted successfully)
   2  - Usage/argument error
   30 - File not found
   31 - Validation errors found
@@ -324,9 +337,215 @@ validate_kanban() {
     return 0
 }
 
+# Get status sort priority (lower = higher in sorted output)
+# Returns: 1=[x], 2=[*], 3=[P], 4=[ ]/[=], 5=[N]
+get_status_priority() {
+    local status="$1"
+    case "$status" in
+        "x") echo 1 ;;  # Complete - top
+        "*") echo 2 ;;  # Failed
+        "P") echo 3 ;;  # Pending approval
+        " ") echo 4 ;;  # Pending
+        "=") echo 4 ;;  # In-progress (same as pending)
+        "N") echo 5 ;;  # Not planned - bottom
+        *)   echo 4 ;;  # Default to pending
+    esac
+}
+
+# Get section header name for a status priority
+get_section_header() {
+    local priority="$1"
+    case "$priority" in
+        1) echo "### Completed" ;;
+        2) echo "### Failed" ;;
+        3) echo "### Pending Approval" ;;
+        4) echo "### Pending" ;;
+        5) echo "### Not Planned" ;;
+        *) echo "### Other" ;;
+    esac
+}
+
+sort_kanban() {
+    local kanban_file="$1"
+    local quiet="${2:-false}"
+
+    if [ ! -f "$kanban_file" ]; then
+        echo "Error: Kanban file not found: $kanban_file" >&2
+        return $EXIT_VALIDATE_FILE_NOT_FOUND
+    fi
+
+    # First validate the file
+    validate_kanban "$kanban_file"
+    if [ "$VALID" = false ]; then
+        echo "Cannot sort: validation failed" >&2
+        return $EXIT_VALIDATE_ERRORS_FOUND
+    fi
+
+    local header=""
+    local footer=""
+    local in_tasks_section=false
+    local past_tasks_section=false
+    local tasks_header=""
+
+    # Arrays to hold task blocks
+    declare -a task_blocks=()
+    declare -a task_sort_keys=()
+    local current_block=""
+
+    # Read file and parse into sections
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Check for TASKS section header
+        if [[ "$line" =~ ^##[[:space:]]+TASKS[[:space:]]*$ ]]; then
+            in_tasks_section=true
+            tasks_header="$line"
+            continue
+        fi
+
+        # Check for next section after TASKS (## something else)
+        if [ "$in_tasks_section" = true ] && [[ "$line" =~ ^##[[:space:]] ]] && [[ ! "$line" =~ ^##[[:space:]]+TASKS ]]; then
+            in_tasks_section=false
+            past_tasks_section=true
+            # Save any pending block
+            if [ -n "$current_block" ]; then
+                task_blocks+=("$current_block")
+                current_block=""
+            fi
+            footer="$line"
+            continue
+        fi
+
+        if [ "$in_tasks_section" = false ] && [ "$past_tasks_section" = false ]; then
+            # Before TASKS section - accumulate header
+            if [ -n "$header" ]; then
+                header="$header"$'\n'"$line"
+            else
+                header="$line"
+            fi
+        elif [ "$past_tasks_section" = true ]; then
+            # After TASKS section - accumulate footer
+            footer="$footer"$'\n'"$line"
+        else
+            # Inside TASKS section
+            # Skip existing section headers (### lines) - we'll add our own
+            if [[ "$line" =~ ^###[[:space:]] ]]; then
+                continue
+            fi
+
+            # Check for task line
+            if [[ "$line" =~ ^-[[:space:]]\[([[:space:]x=PN\*])\][[:space:]]\*\*\[([A-Za-z0-9-]+)\]\*\* ]]; then
+                # Save previous block if exists
+                if [ -n "$current_block" ]; then
+                    task_blocks+=("$current_block")
+                fi
+
+                local status="${BASH_REMATCH[1]}"
+                local task_id="${BASH_REMATCH[2]}"
+                local status_priority
+                status_priority=$(get_status_priority "$status")
+
+                # Create sort key: status_priority|task_id
+                task_sort_keys+=("$status_priority|$task_id")
+                current_block="$line"
+            elif [ -n "$current_block" ]; then
+                # Continuation of current task block (fields, sub-items, blank lines)
+                current_block="$current_block"$'\n'"$line"
+            fi
+            # Ignore lines before first task (blank lines at start of section)
+        fi
+    done < "$kanban_file"
+
+    # Save last block
+    if [ -n "$current_block" ]; then
+        task_blocks+=("$current_block")
+    fi
+
+    # Sort tasks by sort key
+    local num_tasks=${#task_blocks[@]}
+    if [ "$num_tasks" -eq 0 ]; then
+        if [ "$quiet" = false ]; then
+            echo "No tasks to sort"
+        fi
+        return $EXIT_OK
+    fi
+
+    # Create array of indices and sort by sort key
+    local sorted_indices=()
+    for ((i=0; i<num_tasks; i++)); do
+        sorted_indices+=("$i|${task_sort_keys[$i]}")
+    done
+
+    # Sort: by status priority (field 2), then by task-id (field 3)
+    IFS=$'\n' read -r -d '' -a sorted_indices < <(
+        printf '%s\n' "${sorted_indices[@]}" | LC_ALL=C sort -t'|' -k2,2n -k3,3
+        printf '\0'
+    )
+
+    # Write sorted file
+    {
+        # Write header (remove trailing whitespace-only lines)
+        while [[ "$header" =~ $'\n'[[:space:]]*$ ]]; do
+            header="${header%$'\n'*}"
+        done
+        printf '%s\n' "$header"
+        echo ""
+        echo "$tasks_header"
+
+        # Write sorted tasks grouped by status with section headers
+        local current_section=""
+        for entry in "${sorted_indices[@]}"; do
+            local idx="${entry%%|*}"
+            local sort_key="${entry#*|}"
+            local status_priority="${sort_key%%|*}"
+
+            # Check if we need a new section header
+            local section_header
+            section_header=$(get_section_header "$status_priority")
+            if [ "$section_header" != "$current_section" ]; then
+                echo ""
+                echo "$section_header"
+                echo ""
+                current_section="$section_header"
+            fi
+
+            local block="${task_blocks[$idx]}"
+            # Remove trailing whitespace-only lines from block
+            while [[ "$block" =~ $'\n'[[:space:]]*$ ]]; do
+                block="${block%$'\n'*}"
+            done
+            printf '%s\n' "$block"
+            echo ""
+        done
+
+        # Write footer if exists
+        if [ -n "$footer" ]; then
+            # Remove leading whitespace-only lines from footer
+            while [[ "$footer" =~ ^[[:space:]]*$'\n' ]]; do
+                footer="${footer#*$'\n'}"
+            done
+            printf '%s\n' "$footer"
+        fi
+    } > "$kanban_file.tmp"
+
+    # Replace original with sorted version
+    mv "$kanban_file.tmp" "$kanban_file"
+
+    if [ "$quiet" = false ]; then
+        echo "Sorted $num_tasks tasks in $kanban_file"
+    fi
+
+    return $EXIT_OK
+}
+
 main() {
     local kanban_file="$RALPH_DIR/kanban.md"
     local quiet=false
+    local do_sort=false
+
+    # Check for sort subcommand first
+    if [[ "${1:-}" == "sort" ]]; then
+        do_sort=true
+        shift
+    fi
 
     # Parse options
     while [[ $# -gt 0 ]]; do
@@ -362,7 +581,13 @@ main() {
         esac
     done
 
-    # Run validation
+    # Handle sort subcommand
+    if [ "$do_sort" = true ]; then
+        sort_kanban "$kanban_file" "$quiet"
+        exit $?
+    fi
+
+    # Run validation only
     validate_kanban "$kanban_file"
     local validate_result=$?
 
