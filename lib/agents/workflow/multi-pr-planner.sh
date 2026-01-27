@@ -118,7 +118,7 @@ ${diff_output}
     log "Running planner (max $max_turns turns)..."
 
     # Run one-shot Claude call
-    run_claude_once "$project_dir" "$system_prompt" "$user_prompt" "$log_file" "$max_turns"
+    run_agent_once "$project_dir" "$system_prompt" "$user_prompt" "$log_file" "$max_turns"
     local agent_exit=$?
 
     if [ $agent_exit -ne 0 ]; then
