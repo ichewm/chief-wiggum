@@ -216,8 +216,12 @@ agent_run() {
         fi
     fi
 
+    log "DEBUG: Resolving pipeline (WIGGUM_PIPELINE=${WIGGUM_PIPELINE:-unset})"
     local pipeline_file
-    pipeline_file=$(pipeline_resolve "$project_dir" "$task_id" "${WIGGUM_PIPELINE:-}")
+    pipeline_file=$(pipeline_resolve "$project_dir" "$task_id" "${WIGGUM_PIPELINE:-}") || {
+        log_error "pipeline_resolve failed with exit code $?"
+    }
+    log "DEBUG: Pipeline resolved to: ${pipeline_file:-builtin}"
     if [ -n "$pipeline_file" ]; then
         pipeline_load "$pipeline_file"
     else
