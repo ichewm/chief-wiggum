@@ -373,7 +373,7 @@ scheduler_detect_orphan_workers() {
             local worker_dir="$_SCHED_RALPH_DIR/workers/$worker_id"
             if [ -f "$worker_dir/git-state.json" ]; then
                 local git_state
-                git_state=$(jq -r '.state // ""' "$worker_dir/git-state.json" 2>/dev/null)
+                git_state=$(jq -r '.current_state // ""' "$worker_dir/git-state.json" 2>/dev/null)
                 case "$git_state" in
                     resolving|needs_resolve|needs_multi_resolve)
                         type="resolve"
