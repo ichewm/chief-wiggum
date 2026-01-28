@@ -311,6 +311,7 @@ orch_spawn_multi_pr_planner() {
 #
 # Args:
 #   completion_callback - Optional callback function name
+# shellcheck disable=SC2120  # Optional callback parameter for extensibility
 orch_cleanup_main_workers() {
     local callback="${1:-}"
 
