@@ -20,6 +20,7 @@ set -euo pipefail
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
 source "$WIGGUM_HOME/lib/core/checkpoint.sh"
+source "$WIGGUM_HOME/lib/claude/retry-strategy.sh"
 source "$WIGGUM_HOME/lib/utils/work-log.sh"
 source "$WIGGUM_HOME/lib/claude/usage-tracker.sh"
 
@@ -350,9 +351,9 @@ run_ralph_loop() {
                   }'
         } > "$log_file"
 
-        # PHASE 1: Work session with turn limit
+        # PHASE 1: Work session with turn limit (with retry for transient failures)
         local exit_code=0
-        "run_claude" --verbose \
+        run_claude_with_retry --verbose \
             --output-format stream-json \
             ${WIGGUM_HOME:+--plugin-dir "$WIGGUM_HOME/skills"} \
             --append-system-prompt "$system_prompt" \
@@ -424,7 +425,7 @@ Please provide your summary based on the conversation so far, following this str
         local summary_txt="$output_dir/summaries/$run_id/${session_prefix}-${iteration}-summary.txt"
 
         local summary_exit_code=0
-        "run_claude" --verbose --resume "$session_id" --max-turns 2 \
+        run_claude_with_retry --verbose --resume "$session_id" --max-turns 2 \
             --output-format stream-json \
             --dangerously-skip-permissions -p "$summary_prompt" \
             > "$summary_log" 2>&1 || summary_exit_code=$?
@@ -515,9 +516,9 @@ Please provide your summary based on the conversation so far, following this str
                       }'
             } > "$supervisor_log"
 
-            # Run supervisor
+            # Run supervisor (with retry for transient failures)
             local supervisor_exit_code=0
-            "run_claude" --verbose \
+            run_claude_with_retry --verbose \
                 --output-format stream-json \
                 ${WIGGUM_HOME:+--plugin-dir "$WIGGUM_HOME/skills"} \
                 --append-system-prompt "$supervisor_system_prompt" \

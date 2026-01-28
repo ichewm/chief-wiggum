@@ -23,6 +23,7 @@ agent_required_paths() {
 
 # Source dependencies
 agent_source_core
+source "$WIGGUM_HOME/lib/git/git-operations.sh"
 
 # Main entry point
 agent_run() {
@@ -71,10 +72,26 @@ agent_run() {
     local current_branch
     current_branch=$(git -C "$workspace" rev-parse --abbrev-ref HEAD 2>/dev/null)
 
+    # Handle detached HEAD - create a task branch
     if [ "$current_branch" = "HEAD" ]; then
-        log_error "Not on a branch (detached HEAD state)"
-        agent_write_result "$worker_dir" "FAIL" '{}' '["Detached HEAD - not on a branch"]'
-        return 1
+        # Extract task_id from worker directory name
+        local worker_id task_id
+        worker_id=$(basename "$worker_dir")
+        task_id=$(echo "$worker_id" | sed -E 's/worker-([A-Za-z]{2,10}-[0-9]{1,4})-.*/\1/')
+
+        if [ -n "$task_id" ] && [ "$task_id" != "$worker_id" ]; then
+            current_branch="task/${task_id}-$(date +%s)"
+            log "Detached HEAD - creating branch: $current_branch"
+            if ! git -C "$workspace" checkout -b "$current_branch" 2>&1; then
+                log_error "Failed to create branch from detached HEAD"
+                agent_write_result "$worker_dir" "FAIL" '{}' '["Failed to create branch from detached HEAD"]'
+                return 1
+            fi
+        else
+            log_error "Not on a branch (detached HEAD state) and cannot extract task ID"
+            agent_write_result "$worker_dir" "FAIL" '{}' '["Detached HEAD - not on a branch"]'
+            return 1
+        fi
     fi
 
     log "Committing changes on branch: $current_branch"
@@ -87,10 +104,7 @@ agent_run() {
     fi
 
     # Set git author/committer identity
-    export GIT_AUTHOR_NAME="Ralph Wiggum"
-    export GIT_AUTHOR_EMAIL="ralph@wiggum.cc"
-    export GIT_COMMITTER_NAME="Ralph Wiggum"
-    export GIT_COMMITTER_EMAIL="ralph@wiggum.cc"
+    git_set_identity
 
     # Check for resolution plan to customize commit message
     if [ -f "$worker_dir/resolution-plan.md" ]; then

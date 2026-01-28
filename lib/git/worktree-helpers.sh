@@ -13,15 +13,20 @@ WORKTREE_PATH=""
 
 # Setup a git worktree for isolated agent work
 #
+# Creates worktree in DETACHED HEAD state at current commit SHA, then creates
+# a task-specific branch to avoid branch contention between concurrent workers.
+#
 # Args:
 #   project_dir - The project root directory (must be a git repo)
 #   worker_dir  - The worker directory to create workspace in
+#   task_id     - (optional) Task ID for branch naming; extracted from worker_dir if not provided
 #
 # Returns: 0 on success, 1 on failure
 # Sets: WORKTREE_PATH to the created workspace path
 setup_worktree() {
     local project_dir="$1"
     local worker_dir="$2"
+    local task_id="${3:-}"
 
     if [ -z "$project_dir" ] || [ -z "$worker_dir" ]; then
         log_error "setup_worktree: missing required parameters"
@@ -44,12 +49,40 @@ setup_worktree() {
         return 0
     fi
 
-    log_debug "Creating git worktree at $workspace"
-    git worktree add "$workspace" HEAD 2>&1 | tee -a "$worker_dir/worker.log"
+    # Extract task_id from worker dir if not provided
+    if [ -z "$task_id" ]; then
+        task_id=$(basename "$worker_dir" | sed -E 's/worker-([A-Za-z]{2,10}-[0-9]{1,4})-.*/\1/')
+    fi
+
+    # Get commit SHA (not branch ref) - avoids branch contention
+    local commit_sha
+    commit_sha=$(git rev-parse HEAD 2>/dev/null)
+    if [ -z "$commit_sha" ]; then
+        log_error "setup_worktree: failed to get commit SHA"
+        return 1
+    fi
+
+    log_debug "Creating git worktree at $workspace (detached HEAD at $commit_sha)"
+
+    # Create worktree with DETACHED HEAD - avoids "branch already used" errors
+    if ! git worktree add --detach "$workspace" "$commit_sha" 2>&1 | tee -a "$worker_dir/worker.log"; then
+        log_error "setup_worktree: failed to create detached worktree"
+        return 1
+    fi
 
     if [ ! -d "$workspace" ]; then
-        log_error "setup_worktree: failed to create worktree at $workspace"
+        log_error "setup_worktree: workspace directory not created at $workspace"
         return 1
+    fi
+
+    # Create task-specific branch in worktree (avoids branch contention)
+    if [ -n "$task_id" ]; then
+        local branch_name
+        branch_name="task/${task_id}-$(date +%s)"
+        log_debug "Creating task branch: $branch_name"
+        if ! (cd "$workspace" && git checkout -b "$branch_name" 2>&1) | tee -a "$worker_dir/worker.log"; then
+            log_warn "setup_worktree: failed to create branch $branch_name, continuing with detached HEAD"
+        fi
     fi
 
     # Setup environment for workspace boundary enforcement

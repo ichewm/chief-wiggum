@@ -23,6 +23,7 @@ agent_required_paths() {
 
 # Source dependencies
 agent_source_core
+source "$WIGGUM_HOME/lib/git/git-operations.sh"
 
 # Main entry point
 agent_run() {
@@ -63,10 +64,7 @@ agent_run() {
     log "Merging origin/main into current branch..."
 
     # Set git identity for merge commits
-    export GIT_AUTHOR_NAME="Ralph Wiggum"
-    export GIT_AUTHOR_EMAIL="ralph@wiggum.cc"
-    export GIT_COMMITTER_NAME="Ralph Wiggum"
-    export GIT_COMMITTER_EMAIL="ralph@wiggum.cc"
+    git_set_identity
 
     # Attempt to merge origin/main
     local merge_output merge_exit=0

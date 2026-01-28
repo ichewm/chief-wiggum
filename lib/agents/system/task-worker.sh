@@ -126,10 +126,7 @@ _commit_subagent_changes() {
     local commit_msg="chore($agent_name): automated changes"
 
     # Set git author/committer identity
-    export GIT_AUTHOR_NAME="Ralph Wiggum"
-    export GIT_AUTHOR_EMAIL="ralph@wiggum.cc"
-    export GIT_COMMITTER_NAME="Ralph Wiggum"
-    export GIT_COMMITTER_EMAIL="ralph@wiggum.cc"
+    git_set_identity
 
     if git commit -m "$commit_msg" >/dev/null 2>&1; then
         log "Committed $agent_name changes"

@@ -6,8 +6,29 @@
 set -euo pipefail
 
 source "$WIGGUM_HOME/lib/core/logger.sh"
+source "$WIGGUM_HOME/lib/core/defaults.sh"
 source "$WIGGUM_HOME/lib/utils/calculate-cost.sh"
 source "$WIGGUM_HOME/lib/worker/git-state.sh"
+
+# =============================================================================
+# GIT IDENTITY HELPER
+# =============================================================================
+
+# Set git author/committer identity from centralized config
+# Loads config if not already loaded, then exports GIT_* environment variables
+#
+# Usage: Call before any git commit/merge operation
+git_set_identity() {
+    # Load config if not already loaded
+    if [ -z "${WIGGUM_GIT_AUTHOR_NAME:-}" ]; then
+        load_git_config
+    fi
+
+    export GIT_AUTHOR_NAME="$WIGGUM_GIT_AUTHOR_NAME"
+    export GIT_AUTHOR_EMAIL="$WIGGUM_GIT_AUTHOR_EMAIL"
+    export GIT_COMMITTER_NAME="$WIGGUM_GIT_AUTHOR_NAME"
+    export GIT_COMMITTER_EMAIL="$WIGGUM_GIT_AUTHOR_EMAIL"
+}
 
 # =============================================================================
 # READ-ONLY AGENT GIT SAFETY
@@ -55,10 +76,7 @@ git_safety_checkpoint() {
         # Check if there are staged changes to commit
         if ! git diff --staged --quiet; then
             # Set git identity for checkpoint commit
-            export GIT_AUTHOR_NAME="Ralph Wiggum"
-            export GIT_AUTHOR_EMAIL="ralph@wiggum.cc"
-            export GIT_COMMITTER_NAME="Ralph Wiggum"
-            export GIT_COMMITTER_EMAIL="ralph@wiggum.cc"
+            git_set_identity
 
             # Create checkpoint commit
             if git commit --no-gpg-sign -m "chore: checkpoint before read-only agent" >/dev/null 2>&1; then
@@ -188,10 +206,7 @@ Priority: ${task_priority}
 Completed by Ralph Wiggum autonomous worker."
 
         # Set git author/committer identity for this commit
-        export GIT_AUTHOR_NAME="Ralph Wiggum"
-        export GIT_AUTHOR_EMAIL="ralph@wiggum.cc"
-        export GIT_COMMITTER_NAME="Ralph Wiggum"
-        export GIT_COMMITTER_EMAIL="ralph@wiggum.cc"
+        git_set_identity
 
         if ! git commit --no-gpg-sign -m "$commit_msg" 2>&1; then
             log_error "Failed to create commit"

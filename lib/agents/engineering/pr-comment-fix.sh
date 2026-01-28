@@ -32,6 +32,7 @@ agent_source_ralph
 
 # Source git state tracking
 source "$WIGGUM_HOME/lib/worker/git-state.sh"
+source "$WIGGUM_HOME/lib/git/git-operations.sh"
 
 # Load review config on source
 load_review_config
@@ -405,10 +406,7 @@ Automated fixes for PR review feedback.
 See comment-status.md for details on addressed items."
 
     # Set git author/committer identity
-    export GIT_AUTHOR_NAME="Ralph Wiggum"
-    export GIT_AUTHOR_EMAIL="ralph@wiggum.cc"
-    export GIT_COMMITTER_NAME="Ralph Wiggum"
-    export GIT_COMMITTER_EMAIL="ralph@wiggum.cc"
+    git_set_identity
 
     if ! git commit --no-gpg-sign -m "$commit_msg" 2>&1; then
         log_error "Failed to create commit"

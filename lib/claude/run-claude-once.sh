@@ -5,6 +5,7 @@ set -euo pipefail
 
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
+source "$WIGGUM_HOME/lib/claude/retry-strategy.sh"
 
 run_agent_once() {
     local workspace="$1"
@@ -68,17 +69,17 @@ run_agent_once() {
         log_debug "Auto-generated log file: $output_file"
     fi
 
-    # Run claude and capture output
+    # Run claude with retry and capture output
     if [ -n "$output_file" ]; then
         local exit_code=0
-        "run_claude" "${cmd_args[@]}" > "$output_file" 2>&1 || exit_code=$?
+        run_claude_with_retry "${cmd_args[@]}" > "$output_file" 2>&1 || exit_code=$?
         log_debug "Agent completed (exit_code: $exit_code, output: $output_file)"
         _run_once_completed_normally=true
         return $exit_code
     else
         # No WIGGUM_LOG_DIR set - output goes to stdout only (not recommended)
         local exit_code=0
-        "run_claude" "${cmd_args[@]}" 2>&1 || exit_code=$?
+        run_claude_with_retry "${cmd_args[@]}" 2>&1 || exit_code=$?
         _run_once_completed_normally=true
         return $exit_code
     fi
@@ -157,17 +158,17 @@ run_agent_once_with_session() {
         log_debug "Auto-generated log file: $output_file"
     fi
 
-    # Run claude and capture output
+    # Run claude with retry and capture output
     if [ -n "$output_file" ]; then
         local exit_code=0
-        "run_claude" "${cmd_args[@]}" > "$output_file" 2>&1 || exit_code=$?
+        run_claude_with_retry "${cmd_args[@]}" > "$output_file" 2>&1 || exit_code=$?
         log_debug "Agent completed with session (exit_code: $exit_code, output: $output_file)"
         _run_once_with_session_completed_normally=true
         return $exit_code
     else
         # No output file - output goes to stdout only (not recommended)
         local exit_code=0
-        "run_claude" "${cmd_args[@]}" 2>&1 || exit_code=$?
+        run_claude_with_retry "${cmd_args[@]}" 2>&1 || exit_code=$?
         _run_once_with_session_completed_normally=true
         return $exit_code
     fi

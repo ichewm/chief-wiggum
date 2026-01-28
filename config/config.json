@@ -1,4 +1,14 @@
 {
+  "git": {
+    "author_name": "Ralph Wiggum",
+    "author_email": "ralph@wiggum.cc"
+  },
+  "claude": {
+    "max_retries": 3,
+    "initial_backoff_seconds": 5,
+    "max_backoff_seconds": 60,
+    "backoff_multiplier": 2
+  },
   "workers": {
     "max_iterations": 50,
     "sleep_seconds": 2
@@ -15,7 +25,7 @@
     "logs_dir": "logs"
   },
   "rate_limit": {
-    "threshold_prompts": 2400,
+    "threshold_prompts": 22000,
     "threshold_boundary": 1769349244
   },
   "review": {

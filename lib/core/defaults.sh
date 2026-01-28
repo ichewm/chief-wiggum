@@ -104,3 +104,18 @@ load_rate_limit_config() {
     WIGGUM_RATE_LIMIT_THRESHOLD="${WIGGUM_RATE_LIMIT_THRESHOLD:-900}"
     export WIGGUM_RATE_LIMIT_THRESHOLD
 }
+
+# Load git identity config from config.json (with env var overrides)
+# Sets WIGGUM_GIT_AUTHOR_NAME and WIGGUM_GIT_AUTHOR_EMAIL
+load_git_config() {
+    local config_file="$WIGGUM_HOME/config/config.json"
+    if [ -f "$config_file" ]; then
+        WIGGUM_GIT_AUTHOR_NAME="${WIGGUM_GIT_AUTHOR_NAME:-$(jq -r '.git.author_name // "Ralph Wiggum"' "$config_file" 2>/dev/null)}"
+        WIGGUM_GIT_AUTHOR_EMAIL="${WIGGUM_GIT_AUTHOR_EMAIL:-$(jq -r '.git.author_email // "ralph@wiggum.cc"' "$config_file" 2>/dev/null)}"
+    fi
+    # Fallback defaults if config doesn't exist or parsing fails
+    WIGGUM_GIT_AUTHOR_NAME="${WIGGUM_GIT_AUTHOR_NAME:-Ralph Wiggum}"
+    WIGGUM_GIT_AUTHOR_EMAIL="${WIGGUM_GIT_AUTHOR_EMAIL:-ralph@wiggum.cc}"
+    export WIGGUM_GIT_AUTHOR_NAME
+    export WIGGUM_GIT_AUTHOR_EMAIL
+}

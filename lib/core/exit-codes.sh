@@ -70,6 +70,9 @@ export EXIT_AGENT_VIOLATION=61         # Workspace boundary violation detected
 export EXIT_AGENT_TIMEOUT=62           # Agent exceeded timeout_seconds
 export EXIT_AGENT_MAX_ITERATIONS=63    # Agent hit max_iterations limit
 
+# === Claude service errors (70-79) ===
+export EXIT_CLAUDE_SERVICE_ERROR=72    # Transient Claude API/service error (retryable)
+
 # === Signal exit codes (standard: 128 + signal number) ===
 export EXIT_SIGINT=130   # 128 + 2 (SIGINT)
 export EXIT_SIGTERM=143  # 128 + 15 (SIGTERM)
