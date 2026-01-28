@@ -32,6 +32,7 @@ _validate_wiggum_home() {
 _validate_wiggum_home "$WIGGUM_HOME"
 
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
+source "$WIGGUM_HOME/lib/core/verbose-flags.sh"
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/file-lock.sh"
 source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
@@ -79,7 +80,10 @@ Options:
   --pipeline NAME   Pipeline config to use (from config/pipelines/ or .ralph/pipelines/)
   --worker-dir DIR  Use existing worker directory instead of creating new one.
                     Useful for running a different pipeline on an existing worker.
-  -q, --quiet       Suppress output (for use by orchestrator)
+  -v, --verbose     Verbose output (same as default)
+  -vv               Debug output (detailed diagnostics)
+  -vvv              Trace output (very detailed tracing)
+  -q, --quiet       Quiet mode (warnings and errors only)
   -f, --foreground  Run in foreground (blocking). Default is to daemonize.
   -h, --help        Show this help message
 
@@ -267,6 +271,15 @@ do_start() {
 
 # Main
 main() {
+    # Parse verbose flags first
+    parse_verbose_flags "$@"
+    set -- "${WIGGUM_REMAINING_ARGS[@]}"
+
+    # Map LOG_LEVEL=WARN to QUIET_MODE for backward compatibility
+    if [[ "${LOG_LEVEL:-}" == "WARN" ]]; then
+        QUIET_MODE=true
+    fi
+
     local task_id_arg=""
 
     while [[ $# -gt 0 ]]; do
@@ -314,10 +327,6 @@ main() {
                 fi
                 WORKER_DIR="$2"
                 shift 2
-                ;;
-            -q|--quiet)
-                QUIET_MODE=true
-                shift
                 ;;
             -f|--foreground)
                 FOREGROUND_MODE=true

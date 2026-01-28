@@ -5,6 +5,7 @@ set -euo pipefail
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
+source "$WIGGUM_HOME/lib/core/verbose-flags.sh"
 
 show_help() {
     cat << EOF
@@ -14,6 +15,12 @@ Usage: wiggum util <subcommand> [options]
 
 Subcommands:
   convert-log         Convert JSONL iteration logs to markdown
+
+Global Options:
+  -v, --verbose       Verbose output (same as default)
+  -vv                 Debug output (detailed diagnostics)
+  -vvv                Trace output (very detailed tracing)
+  -q, --quiet         Quiet mode (warnings and errors only)
 
 Run 'wiggum util <subcommand> --help' for details on each subcommand.
 
@@ -183,6 +190,10 @@ cmd_convert_log() {
 }
 
 # --- dispatch ---
+
+# Parse verbose flags first
+parse_verbose_flags "$@"
+set -- "${WIGGUM_REMAINING_ARGS[@]}"
 
 if [ $# -eq 0 ]; then
     show_help

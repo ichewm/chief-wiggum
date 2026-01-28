@@ -18,11 +18,15 @@ source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
 source "$WIGGUM_HOME/lib/scheduler/conflict-queue.sh"
 source "$WIGGUM_HOME/lib/scheduler/batch-coordination.sh"
+source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 
 # Check for tasks needing fixes and spawn fix workers
 #
 # Reads from .tasks-needing-fix.txt (populated by wiggum-review sync),
 # checks git state for needs_fix status, and spawns fix workers up to limit.
+#
+# Tasks are sorted by dependency depth (descending) so that tasks which
+# unblock the most downstream work are fixed first.
 #
 # Args:
 #   ralph_dir   - Ralph directory path
@@ -32,6 +36,7 @@ source "$WIGGUM_HOME/lib/scheduler/batch-coordination.sh"
 # Requires:
 #   - pool_* functions from worker-pool.sh
 #   - git_state_* functions from git-state.sh
+#   - get_dependency_depth from task-parser.sh
 #   - WIGGUM_HOME environment variable
 spawn_fix_workers() {
     local ralph_dir="$1"
@@ -39,6 +44,7 @@ spawn_fix_workers() {
     local limit="$3"
 
     local tasks_needing_fix="$ralph_dir/.tasks-needing-fix.txt"
+    local kanban_file="$ralph_dir/kanban.md"
 
     if [ ! -s "$tasks_needing_fix" ]; then
         return 0
@@ -57,7 +63,28 @@ spawn_fix_workers() {
 
     log "Checking for tasks needing PR comment fixes..."
 
-    while read -r task_id; do
+    # Sort tasks by dependency depth (descending) - tasks that unblock more work go first
+    local -a sorted_tasks=()
+    if [ -f "$kanban_file" ]; then
+        local -a task_scores=()
+        while read -r task_id; do
+            [ -z "$task_id" ] && continue
+            local dep_depth
+            dep_depth=$(get_dependency_depth "$kanban_file" "$task_id" 2>/dev/null || echo "0")
+            task_scores+=("$dep_depth|$task_id")
+        done < "$tasks_needing_fix"
+
+        # Sort by depth descending (higher depth first = unblocks more tasks)
+        while IFS= read -r entry; do
+            [ -n "$entry" ] || continue
+            sorted_tasks+=("${entry#*|}")
+        done < <(printf '%s\n' "${task_scores[@]}" | sort -t'|' -k1 -rn)
+    else
+        # Fallback: use original order if no kanban
+        mapfile -t sorted_tasks < "$tasks_needing_fix"
+    fi
+
+    for task_id in "${sorted_tasks[@]}"; do
         [ -z "$task_id" ] && continue
 
         # Re-check capacity inside loop
@@ -118,7 +145,7 @@ spawn_fix_workers() {
                 git_state_set "$worker_dir" "needs_fix" "priority-workers.spawn_fix_workers" "Agent failed to start"
             fi
         fi
-    done < "$tasks_needing_fix"
+    done
 
     # Clear the tasks needing fix file after processing
     : > "$tasks_needing_fix"

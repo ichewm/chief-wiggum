@@ -31,34 +31,40 @@ teardown() {
 # _log_level_value() Tests
 # =============================================================================
 
+test_log_level_value_trace() {
+    local val
+    val=$(_log_level_value "TRACE")
+    assert_equals "0" "$val" "TRACE should have value 0"
+}
+
 test_log_level_value_debug() {
     local val
     val=$(_log_level_value "DEBUG")
-    assert_equals "0" "$val" "DEBUG should have value 0"
+    assert_equals "1" "$val" "DEBUG should have value 1"
 }
 
 test_log_level_value_info() {
     local val
     val=$(_log_level_value "INFO")
-    assert_equals "1" "$val" "INFO should have value 1"
+    assert_equals "2" "$val" "INFO should have value 2"
 }
 
 test_log_level_value_warn() {
     local val
     val=$(_log_level_value "WARN")
-    assert_equals "2" "$val" "WARN should have value 2"
+    assert_equals "3" "$val" "WARN should have value 3"
 }
 
 test_log_level_value_error() {
     local val
     val=$(_log_level_value "ERROR")
-    assert_equals "3" "$val" "ERROR should have value 3"
+    assert_equals "4" "$val" "ERROR should have value 4"
 }
 
 test_log_level_value_unknown_defaults_to_info() {
     local val
     val=$(_log_level_value "UNKNOWN")
-    assert_equals "1" "$val" "Unknown level should default to INFO (1)"
+    assert_equals "2" "$val" "Unknown level should default to INFO (2)"
 }
 
 # =============================================================================
@@ -197,6 +203,30 @@ test_log_debug_enabled_with_log_level() {
 }
 
 # =============================================================================
+# log_trace() Tests
+# =============================================================================
+
+test_log_trace_filtered_by_default() {
+    local output
+    output=$(log_trace "trace message" 2>&1)
+    assert_equals "" "$output" "log_trace() should produce no output at default level"
+}
+
+test_log_trace_filtered_at_debug_level() {
+    export LOG_LEVEL=DEBUG
+    local output
+    output=$(log_trace "trace message" 2>&1)
+    assert_equals "" "$output" "log_trace() should not output at DEBUG level"
+}
+
+test_log_trace_enabled_with_log_level() {
+    export LOG_LEVEL=TRACE
+    local output
+    output=$(log_trace "trace message" 2>&1)
+    assert_output_contains "$output" "TRACE:" "log_trace() should output when LOG_LEVEL=TRACE"
+}
+
+# =============================================================================
 # LOG_FILE Tests
 # =============================================================================
 
@@ -215,13 +245,15 @@ test_log_file_appends() {
 test_log_file_includes_all_levels() {
     local log_file="$TEST_DIR/all_levels.log"
     export LOG_FILE="$log_file"
-    export LOG_LEVEL=DEBUG
+    export LOG_LEVEL=TRACE
 
+    log_trace "trace msg" 2>/dev/null
     log_debug "debug msg" 2>/dev/null
     log_info "info msg" 2>/dev/null
     log_warn "warn msg" 2>/dev/null
     log_error "error msg" 2>/dev/null
 
+    assert_file_contains "$log_file" "TRACE:" "Log file should contain TRACE"
     assert_file_contains "$log_file" "DEBUG:" "Log file should contain DEBUG"
     assert_file_contains "$log_file" "INFO:" "Log file should contain INFO"
     assert_file_contains "$log_file" "WARN:" "Log file should contain WARN"
@@ -233,6 +265,7 @@ test_log_file_includes_all_levels() {
 # =============================================================================
 
 # _log_level_value tests
+run_test test_log_level_value_trace
 run_test test_log_level_value_debug
 run_test test_log_level_value_info
 run_test test_log_level_value_warn
@@ -258,6 +291,11 @@ run_test test_log_error_to_stderr
 run_test test_log_debug_filtered_by_default
 run_test test_log_debug_enabled_with_debug_flag
 run_test test_log_debug_enabled_with_log_level
+
+# log_trace tests
+run_test test_log_trace_filtered_by_default
+run_test test_log_trace_filtered_at_debug_level
+run_test test_log_trace_enabled_with_log_level
 
 # LOG_FILE tests
 run_test test_log_file_appends

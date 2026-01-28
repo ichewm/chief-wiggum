@@ -45,6 +45,7 @@ source "$WIGGUM_HOME/lib/core/file-lock.sh"
 source "$WIGGUM_HOME/lib/worker/git-state.sh"
 source "$WIGGUM_HOME/lib/scheduler/conflict-queue.sh"
 source "$WIGGUM_HOME/lib/scheduler/conflict-registry.sh"
+source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 
 # State file path
 _pr_merge_state_file() {
@@ -1108,6 +1109,9 @@ _find_mis_greedy() {
 # Calculate priority score for tiebreaking within independent set
 # Used to order PRs within a merge batch
 #
+# Prioritizes PRs that unblock the most downstream tasks (dependency chain),
+# then by simplicity (fewer files, fewer conflicts).
+#
 # Args:
 #   ralph_dir - Ralph directory path
 #   task_id   - Task identifier
@@ -1120,16 +1124,28 @@ _calculate_merge_priority() {
     local state_file
     state_file=$(_pr_merge_state_file "$ralph_dir")
 
-    # Fewer files = simpler PR = merge first
+    local kanban_file="$ralph_dir/kanban.md"
+
+    # More blocked tasks = higher priority (unblock more work)
+    # This is the MOST important factor - tasks that unblock others should merge first
+    local dep_depth=0
+    if [ -f "$kanban_file" ]; then
+        dep_depth=$(get_dependency_depth "$kanban_file" "$task_id" 2>/dev/null || echo "0")
+    fi
+
+    # Fewer files = simpler PR = merge first (tiebreaker)
     local files_count
     files_count=$(jq -r --arg t "$task_id" '.prs[$t].files_modified | length' "$state_file")
 
-    # Fewer conflicts = less likely to cause issues
+    # Fewer conflicts = less likely to cause issues (tiebreaker)
     local conflict_count
     conflict_count=$(jq -r --arg t "$task_id" '.conflict_graph[$t] // [] | length' "$state_file")
 
     # Score: higher = merge first
+    # Dependency depth is weighted heavily (100 points per blocked task)
+    # This ensures tasks that unblock others are prioritized
     local score=1000
+    ((score += dep_depth * 100)) || true
     ((score -= files_count * 10)) || true
     ((score -= conflict_count * 50)) || true
 

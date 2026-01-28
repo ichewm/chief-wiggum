@@ -5,6 +5,7 @@ set -euo pipefail
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
+source "$WIGGUM_HOME/lib/core/verbose-flags.sh"
 source "$WIGGUM_HOME/lib/core/logger.sh"
 
 # Validation error tracking
@@ -35,8 +36,11 @@ Subcommands:
   sort              Validate and sort kanban tasks by status and task ID
 
 Options:
-  -f, --file FILE   Validate a specific kanban file (default: .ralph/kanban.md)
+  -v, --verbose     Verbose output (same as default)
+  -vv               Debug output (detailed diagnostics)
+  -vvv              Trace output (very detailed tracing)
   -q, --quiet       Only output errors, no success message
+  -f, --file FILE   Validate a specific kanban file (default: .ralph/kanban.md)
   -h, --help        Show this help message
 
 Validates:
@@ -537,9 +541,18 @@ sort_kanban() {
 }
 
 main() {
+    # Parse verbose flags first
+    parse_verbose_flags "$@"
+    set -- "${WIGGUM_REMAINING_ARGS[@]}"
+
     local kanban_file="$RALPH_DIR/kanban.md"
     local quiet=false
     local do_sort=false
+
+    # Map LOG_LEVEL=WARN to quiet for backward compatibility
+    if [[ "${LOG_LEVEL:-}" == "WARN" ]]; then
+        quiet=true
+    fi
 
     # Check for sort subcommand first
     if [[ "${1:-}" == "sort" ]]; then
@@ -557,10 +570,6 @@ main() {
                 fi
                 kanban_file="$2"
                 shift 2
-                ;;
-            -q|--quiet)
-                quiet=true
-                shift
                 ;;
             -h|--help)
                 show_help

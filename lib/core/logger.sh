@@ -2,6 +2,7 @@
 # Logging utilities for Chief Wiggum
 #
 # Log Levels (in order of severity):
+#   TRACE - Very detailed tracing information (LOG_LEVEL=TRACE)
 #   DEBUG - Detailed diagnostic information (only when DEBUG=1 or LOG_LEVEL=DEBUG)
 #   INFO  - General operational messages (default level)
 #   WARN  - Warning conditions that should be reviewed
@@ -9,18 +10,19 @@
 #
 # Environment variables:
 #   LOG_FILE  - Optional file to append all logs to (in addition to stdout/stderr)
-#   LOG_LEVEL - Minimum level to output: DEBUG, INFO, WARN, ERROR (default: INFO)
+#   LOG_LEVEL - Minimum level to output: TRACE, DEBUG, INFO, WARN, ERROR (default: INFO)
 #   DEBUG     - If set to 1, equivalent to LOG_LEVEL=DEBUG (legacy compatibility)
 set -euo pipefail
 
 # Log level numeric values for comparison
 _log_level_value() {
     case "$1" in
-        DEBUG) echo 0 ;;
-        INFO)  echo 1 ;;
-        WARN)  echo 2 ;;
-        ERROR) echo 3 ;;
-        *)     echo 1 ;;  # default to INFO
+        TRACE) echo 0 ;;
+        DEBUG) echo 1 ;;
+        INFO)  echo 2 ;;
+        WARN)  echo 3 ;;
+        ERROR) echo 4 ;;
+        *)     echo 2 ;;  # default to INFO
     esac
 }
 
@@ -106,6 +108,11 @@ log_error() {
 # Log at DEBUG level (to stderr, only when DEBUG=1 or LOG_LEVEL=DEBUG)
 log_debug() {
     _log_output "DEBUG" "$1" 2
+}
+
+# Log at TRACE level (to stderr, only when LOG_LEVEL=TRACE)
+log_trace() {
+    _log_output "TRACE" "$1" 2
 }
 
 # Redact sensitive patterns from log output

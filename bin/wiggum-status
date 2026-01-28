@@ -5,6 +5,7 @@ set -euo pipefail
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
+source "$WIGGUM_HOME/lib/core/verbose-flags.sh"
 source "$WIGGUM_HOME/lib/worker/worker-lifecycle.sh"
 source "$WIGGUM_HOME/lib/utils/calculate-cost.sh"
 
@@ -15,6 +16,10 @@ wiggum status - Show status of workers
 Usage: wiggum status [options]
 
 Options:
+  -v, --verbose       Verbose output (same as default)
+  -vv                 Debug output (detailed diagnostics)
+  -vvv                Trace output (very detailed tracing)
+  -q, --quiet         Quiet mode (warnings and errors only)
   -h, --help          Show this help message
 
 Description:
@@ -29,6 +34,10 @@ Examples:
 
 EOF
 }
+
+# Parse verbose flags first
+parse_verbose_flags "$@"
+set -- "${WIGGUM_REMAINING_ARGS[@]}"
 
 # Parse options
 while [[ $# -gt 0 ]]; do

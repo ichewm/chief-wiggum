@@ -14,6 +14,7 @@ RALPH_DIR="${RALPH_DIR:-$PROJECT_DIR/.ralph}"
 
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
+source "$WIGGUM_HOME/lib/core/verbose-flags.sh"
 source "$WIGGUM_HOME/lib/worker/worker-lifecycle.sh"
 
 show_help() {
@@ -33,7 +34,11 @@ Worker ID Resolution:
   - worker-TASK-030-1891712  (full ID)
 
 Options:
-  -h, --help    Show this help message
+  -v, --verbose   Verbose output (same as default)
+  -vv             Debug output (detailed diagnostics)
+  -vvv            Trace output (very detailed tracing)
+  -q, --quiet     Quiet mode (warnings and errors only)
+  -h, --help      Show this help message
 
 Examples:
   wiggum stop                 # Stop all workers
@@ -80,6 +85,10 @@ stop_orchestrator() {
 
 # Main
 main() {
+    # Parse verbose flags first
+    parse_verbose_flags "$@"
+    set -- "${WIGGUM_REMAINING_ARGS[@]}"
+
     if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
         show_help
         exit $EXIT_OK

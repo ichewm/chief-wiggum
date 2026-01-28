@@ -5,12 +5,13 @@ set -euo pipefail
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
 
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
+source "$WIGGUM_HOME/lib/core/verbose-flags.sh"
 
 show_help() {
     cat << EOF
 Chief Wiggum - Autonomous Worker Orchestration
 
-Usage: wiggum <command> [options]
+Usage: wiggum [flags] <command> [options]
 
 Commands:
   init                Initialize .ralph/ directory in current project
@@ -39,6 +40,12 @@ Utilities:
 
 Run Options:
   --max-workers N     Maximum concurrent workers (default: 4)
+
+Global Flags:
+  -v, --verbose       Verbose output (same as default)
+  -vv                 Debug output (detailed diagnostics)
+  -vvv                Trace output (very detailed tracing)
+  -q, --quiet         Quiet mode (warnings and errors only)
 
 Examples:
   wiggum init                   # Initialize project
@@ -76,6 +83,11 @@ EOF
 }
 
 main() {
+    # Parse verbose flags first (before command)
+    # This sets LOG_LEVEL and removes verbose flags from args
+    parse_verbose_flags "$@"
+    set -- "${WIGGUM_REMAINING_ARGS[@]}"
+
     # Require a command
     if [ $# -eq 0 ]; then
         echo "Error: No command specified"

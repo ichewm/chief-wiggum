@@ -11,6 +11,7 @@ PROJECT_DIR="$(pwd)"
 RALPH_DIR="${RALPH_DIR:-$PROJECT_DIR/.ralph}"
 
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
+source "$WIGGUM_HOME/lib/core/verbose-flags.sh"
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 source "$WIGGUM_HOME/lib/worker/agent-registry.sh"
@@ -43,7 +44,11 @@ Task ID Resolution:
   - TASK-030           (full task ID)
 
 Options:
-  -h, --help    Show this help message
+  -v, --verbose   Verbose output (same as default)
+  -vv             Debug output (detailed diagnostics)
+  -vvv            Trace output (very detailed tracing)
+  -q, --quiet     Quiet mode (warnings and errors only)
+  -h, --help      Show this help message
 
 Examples:
   wiggum plan TASK-030     # Create plan for TASK-030
@@ -134,6 +139,10 @@ do_plan() {
 
 # Main
 main() {
+    # Parse verbose flags first
+    parse_verbose_flags "$@"
+    set -- "${WIGGUM_REMAINING_ARGS[@]}"
+
     # Handle help
     if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
         show_help

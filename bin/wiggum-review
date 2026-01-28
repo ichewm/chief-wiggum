@@ -8,6 +8,7 @@ RALPH_DIR="${RALPH_DIR:-$PROJECT_DIR/.ralph}"
 
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
+source "$WIGGUM_HOME/lib/core/verbose-flags.sh"
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/file-lock.sh"
 source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
@@ -45,11 +46,15 @@ Commands:
   task <pattern> pr         Create PR for worker branch
 
 Options:
-  -h, --help        Show this help message
+  -v, --verbose     Verbose output (same as default)
+  -vv               Debug output (detailed diagnostics)
+  -vvv              Trace output (very detailed tracing)
+  -q, --quiet       Quiet mode (warnings and errors only)
   --auto-merge      Auto-merge without confirmation (use with caution)
   --squash          Squash commits when merging
   --rebase          Rebase instead of merge
   --no-fetch        Skip fetch/merge from main (for resolve command)
+  -h, --help        Show this help message
 
 Task Pattern Examples:
   TASK-030                  Single task
@@ -823,6 +828,10 @@ cmd_task_pr() {
         return 1
     fi
 }
+
+# Parse verbose flags first
+parse_verbose_flags "$@"
+set -- "${WIGGUM_REMAINING_ARGS[@]}"
 
 # Parse arguments
 AUTO_MERGE=false

@@ -13,6 +13,7 @@ RALPH_DIR="${RALPH_DIR:-$PROJECT_DIR/.ralph}"
 
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
+source "$WIGGUM_HOME/lib/core/verbose-flags.sh"
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 source "$WIGGUM_HOME/lib/utils/audit-logger.sh"
@@ -102,7 +103,10 @@ Options:
   --pipeline NAME Pipeline config to use (from config/pipelines/ or config/)
   -f              Force resume, clearing any workspace violation status.
                   Use this after manually resolving violations.
-  -q, --quiet     Suppress output (for use by orchestrator)
+  -v, --verbose   Verbose output (same as default)
+  -vv             Debug output (detailed diagnostics)
+  -vvv            Trace output (very detailed tracing)
+  -q, --quiet     Quiet mode (warnings and errors only)
   -h, --help      Show this help message
 
 Resume Logic:
@@ -420,6 +424,15 @@ do_resume() {
 
 # Main
 main() {
+    # Parse verbose flags first
+    parse_verbose_flags "$@"
+    set -- "${WIGGUM_REMAINING_ARGS[@]}"
+
+    # Map LOG_LEVEL=WARN to QUIET_MODE for backward compatibility
+    if [[ "${LOG_LEVEL:-}" == "WARN" ]]; then
+        QUIET_MODE=true
+    fi
+
     local force_mode=false
     local target=""
 
@@ -432,10 +445,6 @@ main() {
                 ;;
             -f)
                 force_mode=true
-                shift
-                ;;
-            -q|--quiet)
-                QUIET_MODE=true
                 shift
                 ;;
             --max-iters)
