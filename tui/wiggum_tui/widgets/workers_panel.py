@@ -133,7 +133,11 @@ class WorkersPanel(Widget):
 
     def _load_workers(self) -> None:
         """Load workers from .ralph/workers directory."""
-        self._workers_list = scan_workers(self.ralph_dir)
+        # Use shared worker service if available, otherwise fall back to direct scan
+        try:
+            self._workers_list = self.app.worker_service.get_workers()
+        except AttributeError:
+            self._workers_list = scan_workers(self.ralph_dir)
 
     def _populate_table(self, table: DataTable, preserve_cursor: bool = False) -> None:
         """Populate the table with worker data."""

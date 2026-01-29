@@ -10,6 +10,19 @@ from .models import Worker, WorkerStatus
 # Pattern: worker-TASK-XXX-TIMESTAMP
 WORKER_PATTERN = re.compile(r"^worker-([A-Za-z]{2,10}-\d{1,4})-(\d+)$")
 
+# Cache for completed/failed workers: worker_dir_name -> Worker
+# These workers' state never changes, so we can skip re-scanning them.
+_completed_workers_cache: dict[str, Worker] = {}
+
+
+def clear_completed_workers_cache() -> None:
+    """Clear the completed workers cache.
+
+    This is primarily used for testing to ensure a clean state between tests.
+    """
+    global _completed_workers_cache
+    _completed_workers_cache.clear()
+
 
 def is_process_running(pid: int) -> bool:
     """Check if a process is running."""
@@ -136,13 +149,15 @@ def scan_workers(ralph_dir: Path) -> list[Worker]:
     Returns:
         List of Worker objects, sorted by timestamp (newest first).
     """
+    global _completed_workers_cache
+
     workers_dir = ralph_dir / "workers"
     workers: list[Worker] = []
 
     if not workers_dir.is_dir():
         return workers
 
-    # First pass: collect all worker directories and their PIDs
+    # First pass: collect worker directories, using cache for completed workers
     worker_entries: list[tuple[Path, str, int, int | None]] = []  # (dir, task_id, timestamp, pid)
     all_pids: list[int] = []
 
@@ -155,6 +170,14 @@ def scan_workers(ralph_dir: Path) -> list[Worker]:
         # Parse worker ID
         match = WORKER_PATTERN.match(entry.name)
         if not match:
+            continue
+
+        # Use full path as cache key to avoid conflicts across different ralph directories
+        cache_key = str(entry.resolve())
+
+        # Check if this worker is already cached as completed/failed
+        if cache_key in _completed_workers_cache:
+            workers.append(_completed_workers_cache[cache_key])
             continue
 
         task_id, ts_str = match.groups()
@@ -211,19 +234,25 @@ def scan_workers(ralph_dir: Path) -> list[Worker]:
             except OSError:
                 pass
 
-        workers.append(
-            Worker(
-                id=entry.name,
-                task_id=task_id,
-                timestamp=timestamp,
-                pid=pid,
-                status=status,
-                prd_path=str(prd_path),
-                log_path=str(log_path),
-                workspace_path=str(workspace_path),
-                pr_url=pr_url,
-            )
+        worker = Worker(
+            id=entry.name,
+            task_id=task_id,
+            timestamp=timestamp,
+            pid=pid,
+            status=status,
+            prd_path=str(prd_path),
+            log_path=str(log_path),
+            workspace_path=str(workspace_path),
+            pr_url=pr_url,
         )
+
+        # Cache completed/failed workers since their state never changes
+        # Use full path as cache key to avoid conflicts
+        cache_key = str(entry.resolve())
+        if status in (WorkerStatus.COMPLETED, WorkerStatus.FAILED):
+            _completed_workers_cache[cache_key] = worker
+
+        workers.append(worker)
 
     # Sort by timestamp descending (newest first)
     workers.sort(key=lambda w: w.timestamp, reverse=True)

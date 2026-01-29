@@ -466,7 +466,14 @@ class KanbanPanel(Widget):
 
     def _load_tasks(self) -> None:
         """Load tasks from kanban.md with running status."""
-        self._tasks_list = parse_kanban_with_status(self.kanban_path, self.ralph_dir)
+        # Use shared worker service if available
+        try:
+            worker_service = self.app.worker_service
+        except AttributeError:
+            worker_service = None
+        self._tasks_list = parse_kanban_with_status(
+            self.kanban_path, self.ralph_dir, worker_service=worker_service
+        )
 
     def _get_focused_task_id(self) -> str | None:
         """Get the task ID of the currently focused card."""

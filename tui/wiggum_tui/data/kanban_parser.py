@@ -1,9 +1,16 @@
 """Kanban parser - ported from TypeScript."""
 
+from __future__ import annotations
+
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
+
 from .models import Task, TaskStatus
 from .worker_scanner import get_task_running_status
+
+if TYPE_CHECKING:
+    from .worker_status_service import WorkerStatusService
 
 
 STATUS_MAP = {
@@ -149,12 +156,18 @@ def get_task_counts(tasks: list[Task]) -> dict[str, int]:
     }
 
 
-def parse_kanban_with_status(file_path: Path, ralph_dir: Path) -> list[Task]:
+def parse_kanban_with_status(
+    file_path: Path,
+    ralph_dir: Path,
+    worker_service: WorkerStatusService | None = None,
+) -> list[Task]:
     """Parse kanban.md and enrich in-progress tasks with running status.
 
     Args:
         file_path: Path to kanban.md file.
         ralph_dir: Path to .ralph directory for worker status.
+        worker_service: Optional shared worker service for cached status lookup.
+            If not provided, will call get_task_running_status directly.
 
     Returns:
         List of Task objects with is_running and start_time populated
@@ -169,7 +182,10 @@ def parse_kanban_with_status(file_path: Path, ralph_dir: Path) -> list[Task]:
         return tasks
 
     # Get running status for all in-progress tasks at once
-    running_status = get_task_running_status(ralph_dir, in_progress_ids)
+    if worker_service is not None:
+        running_status = worker_service.get_task_running_status(in_progress_ids)
+    else:
+        running_status = get_task_running_status(ralph_dir, in_progress_ids)
 
     # Enrich tasks with running status
     for task in tasks:

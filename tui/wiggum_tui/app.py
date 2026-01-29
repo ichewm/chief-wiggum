@@ -16,6 +16,7 @@ from .widgets.metrics_panel import MetricsPanel
 from .widgets.conversation_panel import ConversationPanel
 from .widgets.plan_panel import PlanPanel
 from .data.watcher import RalphWatcher
+from .data.worker_status_service import WorkerStatusService
 
 
 class WiggumHeader(Static):
@@ -74,6 +75,8 @@ class WiggumApp(App):
         super().__init__()
         self.ralph_dir = ralph_dir
         self.watcher = RalphWatcher(ralph_dir)
+        self.worker_service = WorkerStatusService(ralph_dir)
+        self._active_tab: str = "kanban"
 
     def compose(self) -> ComposeResult:
         yield WiggumHeader(self.ralph_dir)
@@ -106,8 +109,8 @@ class WiggumApp(App):
         # Set up header update timer
         self.set_interval(1, self._update_header)
 
-        # Set up 1-second auto-refresh timer for all panels
-        self.set_interval(1, self._auto_refresh_all)
+        # Set up 1-second auto-refresh timer for active panel only
+        self.set_interval(1, self._refresh_active_panel)
 
     def on_unmount(self) -> None:
         """Stop file watcher on unmount."""
@@ -153,32 +156,29 @@ class WiggumApp(App):
         except Exception:
             pass
 
-    def _auto_refresh_all(self) -> None:
-        """Auto-refresh all panels every second."""
+    def _refresh_active_panel(self) -> None:
+        """Auto-refresh only the currently visible panel every second."""
         try:
-            self.query_one(KanbanPanel).refresh_data()
+            if self._active_tab == "kanban":
+                self.query_one(KanbanPanel).refresh_data()
+            elif self._active_tab == "workers":
+                self.query_one(WorkersPanel).refresh_data()
+            elif self._active_tab == "logs":
+                self.query_one(LogsPanel).refresh_data()
+            elif self._active_tab == "metrics":
+                self.query_one(MetricsPanel).refresh_data()
+            elif self._active_tab == "conversations":
+                self.query_one(ConversationPanel).refresh_data()
+            elif self._active_tab == "plans":
+                self.query_one(PlanPanel).refresh_data()
         except Exception:
             pass
-        try:
-            self.query_one(WorkersPanel).refresh_data()
-        except Exception:
-            pass
-        try:
-            self.query_one(LogsPanel).refresh_data()
-        except Exception:
-            pass
-        try:
-            self.query_one(MetricsPanel).refresh_data()
-        except Exception:
-            pass
-        try:
-            self.query_one(ConversationPanel).refresh_data()
-        except Exception:
-            pass
-        try:
-            self.query_one(PlanPanel).refresh_data()
-        except Exception:
-            pass
+
+    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        """Handle tab changes - track active tab and refresh newly visible panel."""
+        self._active_tab = event.tab.id or "kanban"
+        # Refresh the newly active panel immediately
+        self._refresh_active_panel()
 
     TAB_ORDER = ["kanban", "workers", "logs", "conversations", "plans", "metrics"]
 

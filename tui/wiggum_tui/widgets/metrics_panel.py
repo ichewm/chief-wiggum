@@ -11,6 +11,13 @@ from ..data.worker_scanner import scan_workers
 from ..data.models import WorkerStatus
 
 
+# Cache for aggregate metrics: ralph_dir_path -> (max_mtime, AggregateMetrics)
+_metrics_cache: dict[str, tuple[float, "AggregateMetrics"]] = {}
+
+# Cache for individual worker metrics: worker_dir_path -> (mtime, WorkerLogMetrics)
+_worker_metrics_cache: dict[str, tuple[float, "WorkerLogMetrics"]] = {}
+
+
 @dataclass
 class WorkerLogMetrics:
     """Metrics parsed from a single worker's log file."""
@@ -43,6 +50,57 @@ class AggregateMetrics:
     worker_summaries: list[WorkerLogMetrics] = field(default_factory=list)
 
 
+def get_workers_logs_max_mtime(ralph_dir: Path) -> float:
+    """Get the maximum modification time of all worker logs directories.
+
+    Uses directory mtime rather than individual files for efficiency.
+
+    Args:
+        ralph_dir: Path to .ralph directory.
+
+    Returns:
+        Maximum mtime of any logs directory, or 0 if none found.
+    """
+    workers_dir = ralph_dir / "workers"
+    if not workers_dir.is_dir():
+        return 0.0
+
+    max_mtime = 0.0
+    try:
+        for worker_dir in workers_dir.iterdir():
+            if not worker_dir.name.startswith("worker-") or not worker_dir.is_dir():
+                continue
+            logs_dir = worker_dir / "logs"
+            if logs_dir.is_dir():
+                try:
+                    mtime = logs_dir.stat().st_mtime
+                    if mtime > max_mtime:
+                        max_mtime = mtime
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return max_mtime
+
+
+def get_worker_logs_mtime(worker_dir: Path) -> float:
+    """Get the modification time of a worker's logs directory.
+
+    Args:
+        worker_dir: Path to worker directory.
+
+    Returns:
+        Mtime of the logs directory, or 0 if not found.
+    """
+    logs_dir = worker_dir / "logs"
+    if logs_dir.is_dir():
+        try:
+            return logs_dir.stat().st_mtime
+        except OSError:
+            pass
+    return 0.0
+
+
 def parse_log_metrics(log_file: Path) -> list[dict]:
     """Parse a log file to find all JSON result entries."""
     results = []
@@ -63,8 +121,78 @@ def parse_log_metrics(log_file: Path) -> list[dict]:
     return results
 
 
-def aggregate_worker_metrics(ralph_dir: Path) -> AggregateMetrics:
-    """Aggregate metrics from all worker logs."""
+def _parse_worker_logs(worker_dir: Path, worker_id: str, task_id: str, status: str) -> WorkerLogMetrics:
+    """Parse logs for a single worker.
+
+    Args:
+        worker_dir: Path to worker directory.
+        worker_id: Worker ID.
+        task_id: Task ID.
+        status: Worker status string.
+
+    Returns:
+        WorkerLogMetrics for this worker.
+    """
+    global _worker_metrics_cache
+
+    cache_key = str(worker_dir.resolve())
+    current_mtime = get_worker_logs_mtime(worker_dir)
+
+    # Check per-worker cache
+    if cache_key in _worker_metrics_cache:
+        cached_mtime, cached_metrics = _worker_metrics_cache[cache_key]
+        if cached_mtime >= current_mtime:
+            # Update status in case it changed (running -> completed)
+            cached_metrics.status = status
+            return cached_metrics
+
+    worker_metrics = WorkerLogMetrics(
+        worker_id=worker_id,
+        task_id=task_id,
+        status=status,
+    )
+
+    logs_dir = worker_dir / "logs"
+    if logs_dir.is_dir():
+        # Use **/*.log to find logs in nested subdirectories
+        for log_file in logs_dir.glob("**/*.log"):
+            for result in parse_log_metrics(log_file):
+                worker_metrics.num_turns += result.get("num_turns", 0)
+                worker_metrics.total_cost_usd += result.get("total_cost_usd", 0.0)
+                worker_metrics.duration_ms += result.get("duration_ms", 0)
+                usage = result.get("usage", {})
+                worker_metrics.input_tokens += usage.get("input_tokens", 0)
+                worker_metrics.output_tokens += usage.get("output_tokens", 0)
+                worker_metrics.cache_creation_tokens += usage.get("cache_creation_input_tokens", 0)
+                worker_metrics.cache_read_tokens += usage.get("cache_read_input_tokens", 0)
+
+    # Cache the result
+    _worker_metrics_cache[cache_key] = (current_mtime, worker_metrics)
+
+    return worker_metrics
+
+
+def aggregate_worker_metrics(ralph_dir: Path, use_cache: bool = True) -> AggregateMetrics:
+    """Aggregate metrics from all worker logs.
+
+    Args:
+        ralph_dir: Path to .ralph directory.
+        use_cache: If True, use cached result if logs haven't changed.
+
+    Returns:
+        AggregateMetrics with totals from all workers.
+    """
+    global _metrics_cache
+
+    cache_key = str(ralph_dir.resolve())
+    current_mtime = get_workers_logs_max_mtime(ralph_dir)
+
+    # Check top-level cache
+    if use_cache and cache_key in _metrics_cache:
+        cached_mtime, cached_metrics = _metrics_cache[cache_key]
+        if cached_mtime >= current_mtime:
+            return cached_metrics
+
     metrics = AggregateMetrics()
     workers = scan_workers(ralph_dir)
     metrics.total_workers = len(workers)
@@ -78,26 +206,11 @@ def aggregate_worker_metrics(ralph_dir: Path) -> AggregateMetrics:
             metrics.failed_workers += 1
 
         worker_dir = ralph_dir / "workers" / worker.id
-        logs_dir = worker_dir / "logs"
 
-        worker_metrics = WorkerLogMetrics(
-            worker_id=worker.id,
-            task_id=worker.task_id,
-            status=worker.status.value,
+        # Use per-worker caching for log parsing
+        worker_metrics = _parse_worker_logs(
+            worker_dir, worker.id, worker.task_id, worker.status.value
         )
-
-        if logs_dir.is_dir():
-            # Use **/*.log to find logs in nested subdirectories
-            for log_file in logs_dir.glob("**/*.log"):
-                for result in parse_log_metrics(log_file):
-                    worker_metrics.num_turns += result.get("num_turns", 0)
-                    worker_metrics.total_cost_usd += result.get("total_cost_usd", 0.0)
-                    worker_metrics.duration_ms += result.get("duration_ms", 0)
-                    usage = result.get("usage", {})
-                    worker_metrics.input_tokens += usage.get("input_tokens", 0)
-                    worker_metrics.output_tokens += usage.get("output_tokens", 0)
-                    worker_metrics.cache_creation_tokens += usage.get("cache_creation_input_tokens", 0)
-                    worker_metrics.cache_read_tokens += usage.get("cache_read_input_tokens", 0)
 
         metrics.total_turns += worker_metrics.num_turns
         metrics.total_cost_usd += worker_metrics.total_cost_usd
@@ -111,6 +224,10 @@ def aggregate_worker_metrics(ralph_dir: Path) -> AggregateMetrics:
             metrics.worker_summaries.append(worker_metrics)
 
     metrics.worker_summaries.sort(key=lambda x: x.total_cost_usd, reverse=True)
+
+    # Cache the result
+    _metrics_cache[cache_key] = (current_mtime, metrics)
+
     return metrics
 
 
