@@ -230,7 +230,9 @@ setup_worktree_from_branch() {
 #   task_id      - The task ID for push verification
 #
 # Returns: 0 on success
-# Note: Only removes worktree if task is COMPLETE and verified pushed
+# Note: Only removes worktree if task is COMPLETE, verified pushed, AND no open PR.
+#       If a PR exists, the worktree is preserved for potential PR comment fixes.
+#       Worktree cleanup for PRs happens in merge-manager when the PR is merged.
 cleanup_worktree() {
     local project_dir="$1"
     local worker_dir="$2"
@@ -252,10 +254,26 @@ cleanup_worktree() {
 
     local can_cleanup=false
 
-    # Only cleanup on successful completion with verified push
+    # Only cleanup on successful completion with verified push AND no open PR
+    # If a PR exists, the worktree must be preserved for potential PR comment fixes
+    # The worktree will be cleaned up by merge-manager when the PR is merged
     if [ "$final_status" = "COMPLETE" ]; then
-        # Use shared library to verify push status
-        if git_verify_pushed "$workspace" "$task_id"; then
+        # Check if there's an open PR for this task
+        local has_open_pr=false
+        if [ -f "$worker_dir/pr_url.txt" ]; then
+            local pr_url
+            pr_url=$(cat "$worker_dir/pr_url.txt")
+            if [ -n "$pr_url" ] && [ "$pr_url" != "N/A" ]; then
+                has_open_pr=true
+            fi
+        fi
+
+        if [ "$has_open_pr" = true ]; then
+            # PR exists - preserve worktree for potential comment fixes
+            log "Preserving worktree for PR review cycle: $workspace"
+            can_cleanup=false
+        elif git_verify_pushed "$workspace" "$task_id"; then
+            # No PR, but changes pushed (direct commit) - safe to clean up
             can_cleanup=true
         fi
     fi
@@ -263,8 +281,8 @@ cleanup_worktree() {
     if [ "$can_cleanup" = true ]; then
         log_debug "Removing git worktree"
         git worktree remove "$workspace" --force 2>&1 | tee -a "$worker_dir/worker.log" || true
-    else
-        log "Preserving worktree for debugging: $workspace"
+    elif [ "$final_status" != "COMPLETE" ]; then
+        log "Preserving worktree for debugging (status: $final_status): $workspace"
     fi
 
     return 0

@@ -7,20 +7,47 @@ cd "$(dirname "$0")/.."
 echo "=== Shellcheck Lint ==="
 echo ""
 
-echo "Checking bin scripts..."
-find bin -type f -executable -exec shellcheck --severity=warning {} +
+# Exclude SC1091 (not following sourced files) since we don't use -x
+SC_OPTS=(--severity=warning -e SC1091)
 
-echo "Checking lib scripts..."
-find lib -name "*.sh" -type f -exec shellcheck --severity=warning {} +
+errors=0
+checked=0
 
-echo "Checking test scripts..."
-find tests -name "*.sh" -type f -exec shellcheck --severity=warning {} +
+check_files() {
+    local label="$1"
+    shift
+    local count=0
 
-echo "Checking hooks scripts..."
-find hooks -name "*.sh" -type f -exec shellcheck --severity=warning {} +
+    echo -n "Checking $label... "
 
-echo "Checking root scripts..."
-shellcheck --severity=warning install.sh install-symlink.sh
+    for f in "$@"; do
+        [ -f "$f" ] || continue
+        ((++checked))
+        ((++count))
+        if ! shellcheck "${SC_OPTS[@]}" "$f"; then
+            ((++errors))
+        fi
+    done
+
+    echo "$count files"
+}
+
+# Use explicit finds to avoid glob/quoting issues
+mapfile -t bin_files < <(find bin -type f -executable 2>/dev/null)
+mapfile -t lib_files < <(find lib -name "*.sh" -type f 2>/dev/null)
+mapfile -t test_files < <(find tests -name "*.sh" -type f 2>/dev/null)
+mapfile -t hook_files < <(find hooks -name "*.sh" -type f 2>/dev/null)
+
+check_files "bin scripts" "${bin_files[@]}"
+check_files "lib scripts" "${lib_files[@]}"
+check_files "test scripts" "${test_files[@]}"
+[ ${#hook_files[@]} -gt 0 ] && check_files "hooks scripts" "${hook_files[@]}"
+check_files "root scripts" install.sh install-symlink.sh
 
 echo ""
-echo "All shellcheck checks passed!"
+if [ $errors -gt 0 ]; then
+    echo "Shellcheck found issues in $errors of $checked files"
+    exit 1
+fi
+
+echo "All $checked files passed shellcheck!"
