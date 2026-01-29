@@ -450,7 +450,14 @@ usage_tracker_write_shared() {
 rate_limit_check() {
     local ralph_dir="$1"
     local usage_file="$ralph_dir/claude-usage.json"
-    local threshold="${WIGGUM_RATE_LIMIT_THRESHOLD:-900}"
+    local config_file="${WIGGUM_HOME}/config/config.json"
+
+    # Read threshold from config, env var, or use default
+    local threshold="${WIGGUM_RATE_LIMIT_THRESHOLD:-}"
+    if [ -z "$threshold" ] && [ -f "$config_file" ]; then
+        threshold=$(jq -r '.rate_limit.threshold_prompts // empty' "$config_file" 2>/dev/null)
+    fi
+    threshold="${threshold:-900}"
 
     if [ ! -f "$usage_file" ]; then
         return 1  # No data = not rate limited

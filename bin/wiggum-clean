@@ -16,6 +16,7 @@ wiggum clean - Clean up workspaces, logs, or reset kanban tasks
 
 Usage: wiggum clean [options] <target>
        wiggum clean logs [all|done|<pattern>]
+       wiggum clean archive [all|done|<pattern>]
        wiggum clean kanban [all|<task-id>]
        wiggum clean batch [all|stale|<batch-id>]
 
@@ -29,6 +30,11 @@ Log Targets (removes entire worker directory including logs):
   logs all            Remove entire worker directories of finished [x] tasks
   logs done           Remove entire directories of workers with merged PRs
   logs <pattern>      Remove entire worker directory matching pattern
+
+Archive Targets (moves worker directory to .ralph/history/workers/):
+  archive all         Archive worker directories of finished [x] tasks
+  archive done        Archive directories of workers with merged PRs
+  archive <pattern>   Archive worker directory matching pattern
 
 Kanban Targets:
   kanban all          Reset resettable tasks (in-progress, pending approval, failed)
@@ -53,11 +59,11 @@ Examples:
   wiggum clean done           # Clean workspaces of workers with merged PRs
   wiggum clean logs all       # Remove entire worker directories of finished tasks
   wiggum clean logs TASK-001  # Remove entire worker directory of TASK-001
+  wiggum clean archive all    # Archive worker directories to .ralph/history/
+  wiggum clean archive 001    # Archive specific worker to history
   wiggum clean -y all         # Clean workspaces without confirmation
   wiggum clean kanban all     # Reset all resettable tasks in kanban
-  wiggum clean kanban 030     # Reset TASK-030 if it's resettable
   wiggum clean batch stale    # Clean stale batch state (recommended)
-  wiggum clean batch all      # Clean all batch coordination state
 
 EOF
 }
@@ -126,6 +132,39 @@ clean_worker_full() {
         log "Removing worker directory: $worker_name"
         rm -rf "$worker_dir"
     fi
+}
+
+# Archive worker directory to .ralph/history/workers/
+archive_worker() {
+    local worker_name="$1"
+    local worker_dir="$RALPH_DIR/workers/$worker_name"
+    local history_dir="$RALPH_DIR/history/workers"
+
+    # Remove workspace first (worktree)
+    if [ -d "$worker_dir/workspace" ]; then
+        log "Removing worktree: $worker_dir/workspace"
+        git worktree remove "$worker_dir/workspace" --force 2>/dev/null || true
+    fi
+
+    if [ -d "$worker_dir" ]; then
+        # Ensure history directory exists
+        mkdir -p "$history_dir"
+
+        log "Archiving worker: $worker_name -> .ralph/history/workers/"
+        mv "$worker_dir" "$history_dir/"
+    fi
+}
+
+# Archive workers (move to history)
+do_archive() {
+    local workers=("$@")
+
+    for worker in "${workers[@]}"; do
+        archive_worker "$worker"
+    done
+
+    git worktree prune 2>/dev/null
+    log "Archived ${#workers[@]} worker(s) to .ralph/history/workers/"
 }
 
 # Resolve patterns to worker directories
@@ -592,6 +631,7 @@ TARGET=""
 KANBAN_TARGET=""
 BATCH_TARGET=""
 LOGS_TARGET=""
+ARCHIVE_TARGET=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -y|--yes)
@@ -628,6 +668,14 @@ while [[ $# -gt 0 ]]; do
             shift
             [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]] && {
                 LOGS_TARGET="$1"
+                shift
+            }
+            ;;
+        archive)
+            TARGET="archive"
+            shift
+            [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]] && {
+                ARCHIVE_TARGET="$1"
                 shift
             }
             ;;
@@ -739,6 +787,62 @@ if [ "$TARGET" = "logs" ]; then
     }
 
     do_clean_full "${workers_array[@]}"
+    exit $EXIT_OK
+fi
+
+# Handle archive subcommand (move to history)
+if [ "$TARGET" = "archive" ]; then
+    [ -z "$ARCHIVE_TARGET" ] && {
+        echo "No archive target specified. Use 'wiggum clean archive all', 'wiggum clean archive done', or 'wiggum clean archive <pattern>'."
+        show_help
+        exit $EXIT_USAGE
+    }
+
+    # Determine workers for archiving
+    if [ "$ARCHIVE_TARGET" = "all" ]; then
+        workers_to_archive=$(find_workers_for_finished_tasks)
+        [ -z "$workers_to_archive" ] && {
+            echo "No workers found for finished [x] tasks."
+            exit $EXIT_OK
+        }
+    elif [ "$ARCHIVE_TARGET" = "done" ]; then
+        echo "Checking PR status for all workers (this may take a moment)..."
+        workers_to_archive=$(find_workers_with_merged_prs)
+    else
+        workers_to_archive=$(resolve_patterns "$ARCHIVE_TARGET") || exit $EXIT_CLEAN_PATTERN_NOT_FOUND
+    fi
+
+    [ -z "$workers_to_archive" ] && {
+        echo "No workers to archive."
+        exit $EXIT_OK
+    }
+
+    mapfile -t workers_array <<< "$workers_to_archive"
+
+    # Check for running workers
+    running_workers=()
+    for worker in "${workers_array[@]}"; do
+        is_worker_running "$RALPH_DIR/workers/$worker" && running_workers+=("$worker")
+    done
+
+    [ ${#running_workers[@]} -gt 0 ] && {
+        echo "ERROR: Cannot archive running workers. Stop them first with 'wiggum stop <id>'."
+        echo ""
+        echo "Running workers:"
+        printf '  %s\n' "${running_workers[@]}"
+        exit $EXIT_CLEAN_WORKERS_RUNNING
+    }
+
+    echo "The following workers will be archived to .ralph/history/workers/:"
+    printf '  %s\n' "${workers_array[@]}"
+    echo ""
+
+    confirm "Proceed with archiving?" || {
+        echo "Aborted."
+        exit $EXIT_OK
+    }
+
+    do_archive "${workers_array[@]}"
     exit $EXIT_OK
 fi
 
