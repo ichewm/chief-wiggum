@@ -403,6 +403,61 @@ orch_cleanup_resolve_workers() {
     pool_cleanup_finished "resolve" "$timeout" "_resolve_completion" "_resolve_timeout"
 }
 
+# Process orphaned fix_completed/needs_merge workers
+#
+# Scans for workers stuck in fix_completed or needs_merge states with no
+# running agent. These can occur when the orchestrator restarts and workers
+# complete outside the pool cleanup callbacks, or when inline merge attempts
+# are missed.
+#
+# For fix_completed: runs the completion handler to transition to needs_merge,
+# then attempts merge.
+# For needs_merge: attempts merge directly.
+#
+# Globals:
+#   RALPH_DIR - Required (via scheduler context)
+#
+# Returns: 0 always (errors are logged per-worker)
+orch_process_pending_merges() {
+    local ralph_dir="${RALPH_DIR:-}"
+    [ -n "$ralph_dir" ] || return 1
+    [ -d "$ralph_dir/workers" ] || return 0
+
+    for worker_dir in "$ralph_dir/workers"/worker-*; do
+        [ -d "$worker_dir" ] || continue
+
+        local state
+        state=$(git_state_get "$worker_dir")
+
+        local worker_id task_id
+        worker_id=$(basename "$worker_dir")
+        task_id=$(get_task_id_from_worker "$worker_id")
+
+        # Skip if agent is still running
+        if [ -f "$worker_dir/agent.pid" ]; then
+            local pid
+            pid=$(cat "$worker_dir/agent.pid" 2>/dev/null || true)
+            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                continue
+            fi
+        fi
+
+        case "$state" in
+            fix_completed)
+                # Orphaned fix_completed - run completion handler to transition
+                if handle_fix_worker_completion "$worker_dir" "$task_id"; then
+                    if git_state_is "$worker_dir" "needs_merge"; then
+                        attempt_pr_merge "$worker_dir" "$task_id" "$ralph_dir" || true
+                    fi
+                fi
+                ;;
+            needs_merge)
+                attempt_pr_merge "$worker_dir" "$task_id" "$ralph_dir" || true
+                ;;
+        esac
+    done
+}
+
 # Clean up all finished workers (main, fix, resolve)
 #
 # Consolidated cleanup function that handles all worker types.
@@ -427,6 +482,9 @@ orch_cleanup_all_workers() {
 
     # Clean up resolve workers
     orch_cleanup_resolve_workers "$resolve_timeout"
+
+    # Process orphaned fix_completed/needs_merge workers
+    orch_process_pending_merges
 }
 
 # Spawn workers for ready tasks

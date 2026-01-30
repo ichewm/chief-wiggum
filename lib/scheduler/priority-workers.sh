@@ -1079,7 +1079,18 @@ handle_resolve_worker_completion() {
 handle_fix_worker_timeout() {
     local worker_dir="$1"
     local task_id="$2"
-    local timeout="${3:-1800}"
+    local timeout="${3:-3600}"
+
+    # Don't clobber terminal/completed states - the fix may have finished
+    # before the timeout fired
+    local current_state
+    current_state=$(git_state_get "$worker_dir")
+    case "$current_state" in
+        fix_completed|needs_merge|merged|resolved)
+            log "Fix worker for $task_id timed out but state is already $current_state - treating as completed"
+            return 0
+            ;;
+    esac
 
     log_warn "Fix worker for $task_id timed out after ${timeout}s"
     git_state_set "$worker_dir" "failed" "priority-workers" "Fix worker timed out after ${timeout}s"
@@ -1094,7 +1105,18 @@ handle_fix_worker_timeout() {
 handle_resolve_worker_timeout() {
     local worker_dir="$1"
     local task_id="$2"
-    local timeout="${3:-1800}"
+    local timeout="${3:-3600}"
+
+    # Don't clobber terminal/completed states - the resolve may have finished
+    # before the timeout fired
+    local current_state
+    current_state=$(git_state_get "$worker_dir")
+    case "$current_state" in
+        resolved|needs_merge|merged)
+            log "Resolve worker for $task_id timed out but state is already $current_state - treating as completed"
+            return 0
+            ;;
+    esac
 
     log_warn "Resolve worker for $task_id timed out after ${timeout}s"
     git_state_set "$worker_dir" "failed" "priority-workers" "Resolve worker timed out after ${timeout}s"

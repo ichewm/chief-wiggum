@@ -86,6 +86,11 @@ svc_orch_cleanup_all_workers() {
     orch_cleanup_all_workers "$@"
 }
 
+# Process orphaned fix_completed/needs_merge workers
+svc_orch_process_pending_merges() {
+    orch_process_pending_merges "$@"
+}
+
 # Display orchestrator status on scheduling events
 svc_orch_display_status() {
     orch_display_status "$@"
