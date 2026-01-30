@@ -161,6 +161,121 @@ _build_extra_fields() {
 }
 
 # =============================================================================
+# Internal: Kanban Task Enumeration
+# =============================================================================
+
+# List all task IDs in the kanban file
+#
+# Args:
+#   kanban_file - Path to kanban.md
+#
+# Returns: newline-separated task IDs on stdout
+_list_all_kanban_task_ids() {
+    local kanban_file="$1"
+
+    awk '/^- \[.\] \*\*\[[A-Za-z]{2,10}-[0-9]{1,4}\]\*\*/ {
+        match($0, /\*\*\[[A-Za-z]{2,10}-[0-9]{1,4}\]\*\*/)
+        print substr($0, RSTART+3, RLENGTH-6)
+    }' "$kanban_file"
+}
+
+# Parse kanban task fields into a JSON object
+#
+# Args:
+#   kanban_file - Path to kanban.md
+#   task_id     - Task ID to extract
+#
+# Returns: JSON object on stdout with brief, description, priority,
+#          dependencies, status fields. Empty string if task not found.
+_parse_kanban_task_fields() {
+    local kanban_file="$1"
+    local task_id="$2"
+
+    awk -v tid="$task_id" '
+    BEGIN { found = 0; brief = ""; desc = ""; pri = "MEDIUM"; deps = "none"; status = " " }
+
+    # Match the task line
+    $0 ~ "^- \\[.\\] \\*\\*\\[" tid "\\]\\*\\*" {
+        found = 1
+        # Extract status char
+        match($0, /\[.\]/)
+        status = substr($0, RSTART+1, 1)
+        # Extract brief: everything after **[TASK-ID]**
+        match($0, /\*\*\[[A-Za-z]{2,10}-[0-9]{1,4}\]\*\*/)
+        if (RSTART > 0) {
+            brief = substr($0, RSTART + RLENGTH)
+            gsub(/^[[:space:]]+/, "", brief)
+            gsub(/[[:space:]]+$/, "", brief)
+        }
+        next
+    }
+
+    # Inside the found task, parse indented fields
+    found && /^  - Description:/ {
+        sub(/^  - Description:[[:space:]]*/, "")
+        desc = $0
+        next
+    }
+    found && /^  - Priority:/ {
+        sub(/^  - Priority:[[:space:]]*/, "")
+        gsub(/[[:space:]]+$/, "")
+        pri = $0
+        next
+    }
+    found && /^  - Dependencies:/ {
+        sub(/^  - Dependencies:[[:space:]]*/, "")
+        gsub(/[[:space:]]+$/, "")
+        deps = $0
+        next
+    }
+
+    # Next task or section ends the current task
+    found && /^- \[/ { found = 0 }
+    found && /^## / { found = 0 }
+
+    END {
+        if (brief != "" || desc != "") {
+            printf "{\"brief\":\"%s\",\"description\":\"%s\",\"priority\":\"%s\",\"dependencies\":\"%s\",\"status\":\"%s\"}", brief, desc, pri, deps, status
+        }
+    }
+    ' "$kanban_file"
+}
+
+# Get task IDs present in kanban but not tracked in sync state
+#
+# Args:
+#   kanban_file - Path to kanban.md
+#   ralph_dir   - Path to .ralph directory
+#
+# Returns: newline-separated untracked task IDs on stdout
+_get_untracked_task_ids() {
+    local kanban_file="$1"
+    local ralph_dir="$2"
+
+    local all_task_ids tracked_task_ids
+
+    all_task_ids=$(_list_all_kanban_task_ids "$kanban_file")
+    [ -n "$all_task_ids" ] || return 0
+
+    # Build set of tracked task IDs from state file
+    tracked_task_ids=$(github_sync_state_list_issues "$ralph_dir" | while IFS= read -r issue_num; do
+        [ -n "$issue_num" ] || continue
+        local entry
+        entry=$(github_sync_state_get_issue "$ralph_dir" "$issue_num")
+        [ "$entry" != "null" ] && echo "$entry" | jq -r '.task_id // empty'
+    done)
+
+    # Output task IDs not in tracked set
+    local task_id
+    while IFS= read -r task_id; do
+        [ -n "$task_id" ] || continue
+        if ! echo "$tracked_task_ids" | grep -qxF "$task_id"; then
+            echo "$task_id"
+        fi
+    done <<< "$all_task_ids"
+}
+
+# =============================================================================
 # Down Sync (GitHub -> Local)
 # =============================================================================
 
@@ -488,6 +603,206 @@ github_issue_sync_up() {
     fi
 
     log "Up-sync: synced=$synced unchanged=$unchanged"
+}
+
+# =============================================================================
+# Up Sync: Create Issues for Untracked Tasks
+# =============================================================================
+
+# Build a GitHub issue body from kanban task fields
+#
+# Args:
+#   description  - Task description
+#   priority     - Priority string (e.g., "HIGH")
+#   dependencies - Dependency string (e.g., "TASK-001, TASK-002" or "none")
+#
+# Returns: formatted body text on stdout
+_build_issue_body() {
+    local description="$1"
+    local priority="${2:-MEDIUM}"
+    local dependencies="${3:-none}"
+
+    local body=""
+    [ -n "$description" ] && body="$description"$'\n\n'
+    body="${body}Priority: $priority"$'\n'
+    body="${body}Dependencies: $dependencies"
+    echo "$body"
+}
+
+# Get the priority label name for a priority string
+#
+# Args:
+#   priority - Priority string (e.g., "HIGH")
+#
+# Returns: label name on stdout (e.g., "priority:high"), or empty
+_get_priority_label() {
+    local priority="$1"
+
+    echo "$GITHUB_SYNC_PRIORITY_LABELS" | \
+        jq -r --arg pri "$priority" \
+        'to_entries[] | select(.value == $pri) | .key // empty' 2>/dev/null || true
+}
+
+# Create GitHub issues for untracked kanban tasks and sync them
+#
+# Args:
+#   ralph_dir    - Path to .ralph directory
+#   task_filter  - Specific task ID or "all"
+#   dry_run      - "true" to only show planned changes
+#   skip_confirm - "true" to skip confirmation prompt
+#
+# Returns: 0 on success, 1 on failure
+github_issue_sync_up_create() {
+    local ralph_dir="$1"
+    local task_filter="$2"
+    local dry_run="${3:-false}"
+    local skip_confirm="${4:-false}"
+
+    local kanban_file="$ralph_dir/kanban.md"
+    if [ ! -f "$kanban_file" ]; then
+        log_error "Kanban file not found: $kanban_file"
+        return 1
+    fi
+
+    # Ensure sync state exists
+    github_sync_state_init "$ralph_dir"
+
+    # Determine which tasks to process
+    local untracked_ids
+    if [ "$task_filter" = "all" ]; then
+        untracked_ids=$(_get_untracked_task_ids "$kanban_file" "$ralph_dir")
+    else
+        # Verify specific task exists in kanban
+        if ! _kanban_task_exists "$kanban_file" "$task_filter"; then
+            log_error "Task $task_filter not found in kanban"
+            return 1
+        fi
+        # Check if already tracked
+        local tracked_ids
+        tracked_ids=$(_get_untracked_task_ids "$kanban_file" "$ralph_dir")
+        if [ -n "$tracked_ids" ] && echo "$tracked_ids" | grep -qxF "$task_filter"; then
+            untracked_ids="$task_filter"
+        else
+            echo "Task $task_filter is already tracked by a GitHub issue."
+            return 0
+        fi
+    fi
+
+    if [ -z "$untracked_ids" ]; then
+        echo "No untracked tasks to create issues for."
+        return 0
+    fi
+
+    # Count tasks
+    local task_count
+    task_count=$(echo "$untracked_ids" | wc -l | tr -d ' ')
+
+    # Dry-run mode: show what would be created
+    if [ "$dry_run" = "true" ]; then
+        echo "[dry-run] Would create GitHub issues for $task_count untracked task(s):"
+        local tid
+        while IFS= read -r tid; do
+            [ -n "$tid" ] || continue
+            local fields
+            fields=$(_parse_kanban_task_fields "$kanban_file" "$tid")
+            if [ -n "$fields" ]; then
+                local brief priority
+                brief=$(echo "$fields" | jq -r '.brief // ""')
+                priority=$(echo "$fields" | jq -r '.priority // "MEDIUM"')
+                echo "  $tid: $brief (Priority: $priority)"
+            else
+                echo "  $tid: (could not parse fields)"
+            fi
+        done <<< "$untracked_ids"
+        return 0
+    fi
+
+    # Confirmation prompt
+    if [ "$skip_confirm" != "true" ]; then
+        if [ "$task_filter" = "all" ]; then
+            printf 'Create GitHub issues for %d untracked task(s)? [y/N] ' "$task_count"
+        else
+            printf 'Create GitHub issue for %s? [y/N] ' "$task_filter"
+        fi
+        local answer
+        read -r answer
+        case "$answer" in
+            [yY]|[yY][eE][sS]) ;;
+            *)
+                echo "Aborted."
+                return 0
+                ;;
+        esac
+    fi
+
+    # Create issues
+    local created=0
+    local failed=0
+    local task_id
+    while IFS= read -r task_id; do
+        [ -n "$task_id" ] || continue
+
+        local fields
+        fields=$(_parse_kanban_task_fields "$kanban_file" "$task_id")
+        if [ -z "$fields" ]; then
+            log_warn "Could not parse fields for $task_id - skipping"
+            ((++failed))
+            continue
+        fi
+
+        local brief description priority dependencies status
+        brief=$(echo "$fields" | jq -r '.brief // ""')
+        description=$(echo "$fields" | jq -r '.description // ""')
+        priority=$(echo "$fields" | jq -r '.priority // "MEDIUM"')
+        dependencies=$(echo "$fields" | jq -r '.dependencies // "none"')
+        status=$(echo "$fields" | jq -r '.status // " "')
+
+        # Build issue body
+        local body
+        body=$(_build_issue_body "$description" "$priority" "$dependencies")
+
+        # Determine priority label
+        local priority_label
+        priority_label=$(_get_priority_label "$priority")
+
+        # Create the issue
+        local issue_number
+        if issue_number=$(github_issue_create "$task_id" "$brief" "$body" "$priority_label"); then
+            echo "Created issue #$issue_number for $task_id"
+
+            # Add state entry
+            local desc_hash entry
+            desc_hash=$(github_sync_hash_content "$description")
+            entry=$(github_sync_state_create_entry "$task_id" "" "$status" "open" "$desc_hash")
+            github_sync_state_set_issue "$ralph_dir" "$issue_number" "$entry"
+
+            # Apply current status label if not pending
+            if [ "$status" != " " ]; then
+                local status_label
+                status_label=$(github_sync_get_status_label "$status")
+                if [ -n "$status_label" ]; then
+                    github_issue_add_label "$issue_number" "$status_label"
+                fi
+                # Close if status warrants it
+                if github_sync_should_close "$status"; then
+                    github_issue_close "$issue_number"
+                fi
+            fi
+
+            ((++created))
+        else
+            log_error "Failed to create issue for $task_id"
+            ((++failed))
+        fi
+    done <<< "$untracked_ids"
+
+    log "Sync up create: created=$created failed=$failed"
+
+    # Run normal up-sync for all tracked issues (including newly created)
+    if [ "$created" -gt 0 ]; then
+        log_debug "Running up-sync for newly created issues..."
+        github_issue_sync_up "$ralph_dir" "false"
+    fi
 }
 
 # =============================================================================

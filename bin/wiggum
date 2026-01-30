@@ -38,7 +38,7 @@ Cleanup & Review:
 Utilities:
   util convert-log    Convert JSONL iteration logs to markdown
   service             Manage orchestrator services (list, status, run, stop)
-  github-sync         Sync GitHub issues with local kanban
+  gh                  Sync GitHub issues with local kanban
 
 Run Options:
   --max-workers N     Maximum concurrent workers (default: 4)
@@ -148,8 +148,8 @@ main() {
         service)
             exec "$WIGGUM_HOME/bin/wiggum-service" "$@"
             ;;
-        github-sync)
-            exec "$WIGGUM_HOME/bin/wiggum-github-sync" "$@"
+        gh)
+            exec "$WIGGUM_HOME/bin/wiggum-gh" "$@"
             ;;
         -h|--help|help)
             show_help

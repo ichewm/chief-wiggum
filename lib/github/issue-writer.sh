@@ -143,6 +143,61 @@ github_issue_post_pr_link() {
 }
 
 # =============================================================================
+# Issue Creation
+# =============================================================================
+
+# Create a new GitHub issue for a kanban task
+#
+# Args:
+#   task_id - Kanban task ID (e.g., "TASK-001")
+#   brief   - Short task summary for title
+#   body    - Issue body text (description, fields, etc.)
+#   labels  - Space-separated label names (optional, beyond gate label)
+#
+# Returns: issue number on stdout, 1 on failure
+github_issue_create() {
+    local task_id="$1"
+    local brief="$2"
+    local body="${3:-}"
+    shift 3
+    local labels=("$@")
+
+    local title="[$task_id] $brief"
+
+    # Build label args — always include gate label
+    local label_args=()
+    label_args+=(--label "${GITHUB_SYNC_LABEL_FILTER:-wiggum}")
+    local label
+    for label in "${labels[@]}"; do
+        [ -n "$label" ] && label_args+=(--label "$label")
+    done
+
+    local result exit_code=0
+    result=$(timeout "${WIGGUM_GH_TIMEOUT:-30}" gh issue create \
+        --title "$title" \
+        --body "$body" \
+        "${label_args[@]}" \
+        2>&1) || exit_code=$?
+
+    if [ "$exit_code" -ne 0 ]; then
+        log_error "Failed to create GitHub issue for $task_id (exit: $exit_code)"
+        log_debug "Output: $result"
+        return 1
+    fi
+
+    # gh issue create outputs the issue URL; extract number from it
+    local issue_number
+    issue_number=$(echo "$result" | grep -oE '/issues/[0-9]+' | grep -oE '[0-9]+' | tail -1)
+
+    if [ -z "$issue_number" ]; then
+        log_error "Could not parse issue number from gh output: $result"
+        return 1
+    fi
+
+    echo "$issue_number"
+}
+
+# =============================================================================
 # Issue State Management
 # =============================================================================
 

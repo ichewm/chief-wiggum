@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# wiggum-github-sync - CLI for GitHub issue sync
+# wiggum-gh - CLI for GitHub issue sync
 #
 # Usage:
-#   wiggum github-sync              Full sync cycle (down + up)
-#   wiggum github-sync down         Pull issues -> kanban only
-#   wiggum github-sync up           Push kanban -> GitHub only
-#   wiggum github-sync status       Show sync state summary
-#   wiggum github-sync --dry-run    Show planned changes without writing
+#   wiggum gh                         Full sync cycle (down + up)
+#   wiggum gh down                    Pull issues -> kanban only
+#   wiggum gh up                      Push kanban -> GitHub only
+#   wiggum gh sync up <TASK-ID|all>   Create GitHub issues for untracked tasks
+#   wiggum gh status                  Show sync state summary
+#   wiggum gh --dry-run               Show planned changes without writing
 set -euo pipefail
 
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
@@ -20,26 +21,31 @@ source "$WIGGUM_HOME/lib/github/issue-sync.sh"
 
 show_help() {
     cat << EOF
-wiggum github-sync - Sync GitHub issues with local kanban
+wiggum gh - Sync GitHub issues with local kanban
 
-Usage: wiggum github-sync [command] [options]
+Usage: wiggum gh [command] [options]
 
 Commands:
-  (none)    Full sync cycle (down + up)
-  down      Pull GitHub issues to local kanban only
-  up        Push local kanban status to GitHub only
-  status    Show sync state summary
+  (none)                       Full sync cycle (down + up)
+  down                         Pull GitHub issues to local kanban only
+  up                           Push local kanban status to GitHub only
+  sync up <TASK-ID|all> [-y]   Create GitHub issues for untracked kanban tasks
+  status                       Show sync state summary
 
 Options:
   --dry-run    Show planned changes without writing
+  -y           Skip confirmation prompt (for sync up)
   -h, --help   Show this help
 
 Examples:
-  wiggum github-sync              # Full sync
-  wiggum github-sync down         # Import new issues
-  wiggum github-sync up           # Push status changes
-  wiggum github-sync --dry-run    # Preview changes
-  wiggum github-sync status       # Show state
+  wiggum gh                         # Full sync
+  wiggum gh down                    # Import new issues
+  wiggum gh up                      # Push status changes
+  wiggum gh sync up TASK-333        # Create issue for one task
+  wiggum gh sync up all             # Create issues for all untracked
+  wiggum gh sync up all -y          # Skip confirmation
+  wiggum gh --dry-run               # Preview changes
+  wiggum gh status                  # Show state
 
 Configuration:
   Set in .ralph/config.json or config/config.json under github.issue_sync.
@@ -62,6 +68,8 @@ main() {
 
     local command=""
     local dry_run="false"
+    local skip_confirm="false"
+    local sync_target=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -73,6 +81,29 @@ main() {
             --dry-run)
                 dry_run="true"
                 shift
+                ;;
+            -y)
+                skip_confirm="true"
+                shift
+                ;;
+            sync)
+                # Handle "sync up <target>"
+                shift
+                if [[ $# -gt 0 ]] && [[ "$1" == "up" ]]; then
+                    command="sync-up"
+                    shift
+                    if [[ $# -gt 0 ]] && [[ "$1" != -* ]]; then
+                        sync_target="$1"
+                        shift
+                    else
+                        echo "Error: 'sync up' requires a task ID or 'all'" >&2
+                        echo "Usage: wiggum gh sync up <TASK-ID|all> [-y]" >&2
+                        exit $EXIT_USAGE
+                    fi
+                else
+                    echo "Error: Unknown sync subcommand. Use 'sync up <TASK-ID|all>'" >&2
+                    exit $EXIT_USAGE
+                fi
                 ;;
             down|up|status)
                 command="$1"
@@ -110,7 +141,7 @@ main() {
 
     # Dispatch command
     case "${command:-}" in
-        ""|down|up)
+        ""|down|up|sync-up)
             if [ "$dry_run" = "true" ]; then
                 echo "=== Dry Run Mode ==="
                 echo ""
@@ -128,6 +159,9 @@ main() {
             ;;
         up)
             github_issue_sync_up "$RALPH_DIR" "$dry_run"
+            ;;
+        sync-up)
+            github_issue_sync_up_create "$RALPH_DIR" "$sync_target" "$dry_run" "$skip_confirm"
             ;;
         status)
             github_issue_sync_status "$RALPH_DIR"

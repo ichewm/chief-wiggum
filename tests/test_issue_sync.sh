@@ -16,6 +16,7 @@ source "$WIGGUM_HOME/lib/github/issue-config.sh"
 source "$WIGGUM_HOME/lib/github/issue-state.sh"
 source "$WIGGUM_HOME/lib/github/issue-parser.sh"
 source "$WIGGUM_HOME/lib/github/issue-writer.sh"
+source "$WIGGUM_HOME/lib/github/issue-sync.sh"
 
 # Suppress log output in tests
 LOG_LEVEL=ERROR
@@ -283,6 +284,222 @@ test_writer_status_name_mapping() {
 }
 
 # =============================================================================
+# Kanban Task Enumeration (for sync up create)
+# =============================================================================
+
+test_list_all_kanban_task_ids() {
+    local kanban="$TEST_DIR/.ralph/kanban.md"
+    local result
+    result=$(_list_all_kanban_task_ids "$kanban")
+
+    assert_output_contains "$result" "EXIST-1" "Should list EXIST-1"
+    assert_output_contains "$result" "EXIST-2" "Should list EXIST-2"
+}
+
+test_parse_kanban_task_fields() {
+    local kanban="$TEST_DIR/.ralph/kanban.md"
+    local result
+    result=$(_parse_kanban_task_fields "$kanban" "EXIST-1")
+
+    assert_not_empty "$result" "Should return non-empty JSON"
+
+    local brief priority status
+    brief=$(echo "$result" | jq -r '.brief')
+    priority=$(echo "$result" | jq -r '.priority')
+    status=$(echo "$result" | jq -r '.status')
+
+    assert_equals "Existing pending task" "$brief" "Should extract brief"
+    assert_equals "LOW" "$priority" "Should extract priority"
+    assert_equals " " "$status" "Should extract pending status"
+}
+
+test_parse_kanban_task_fields_in_progress() {
+    local kanban="$TEST_DIR/.ralph/kanban.md"
+    local result
+    result=$(_parse_kanban_task_fields "$kanban" "EXIST-2")
+
+    local status priority
+    status=$(echo "$result" | jq -r '.status')
+    priority=$(echo "$result" | jq -r '.priority')
+
+    assert_equals "=" "$status" "Should extract in-progress status"
+    assert_equals "HIGH" "$priority" "Should extract priority"
+}
+
+test_parse_kanban_task_fields_not_found() {
+    local kanban="$TEST_DIR/.ralph/kanban.md"
+    local result
+    result=$(_parse_kanban_task_fields "$kanban" "NONEXIST-99")
+
+    assert_equals "" "$result" "Should return empty for non-existent task"
+}
+
+test_get_untracked_task_ids_all_untracked() {
+    local ralph_dir="$TEST_DIR/.ralph"
+    local kanban="$ralph_dir/kanban.md"
+
+    github_sync_state_init "$ralph_dir"
+
+    local result
+    result=$(_get_untracked_task_ids "$kanban" "$ralph_dir")
+
+    assert_output_contains "$result" "EXIST-1" "EXIST-1 should be untracked"
+    assert_output_contains "$result" "EXIST-2" "EXIST-2 should be untracked"
+}
+
+test_get_untracked_task_ids_some_tracked() {
+    local ralph_dir="$TEST_DIR/.ralph"
+    local kanban="$ralph_dir/kanban.md"
+
+    github_sync_state_init "$ralph_dir"
+
+    # Track EXIST-1
+    local entry
+    entry=$(github_sync_state_create_entry "EXIST-1" "" " " "open" "sha256:abc")
+    github_sync_state_set_issue "$ralph_dir" "10" "$entry"
+
+    local result
+    result=$(_get_untracked_task_ids "$kanban" "$ralph_dir")
+
+    assert_output_not_contains "$result" "EXIST-1" "EXIST-1 should be tracked"
+    assert_output_contains "$result" "EXIST-2" "EXIST-2 should still be untracked"
+}
+
+# =============================================================================
+# Issue Creation (github_issue_create)
+# =============================================================================
+
+test_issue_create_mock() {
+    local kanban="$TEST_DIR/.ralph/kanban.md"
+    local ralph_dir="$TEST_DIR/.ralph"
+
+    # Create mock gh that outputs a URL
+    cat > "$MOCK_BIN/gh" << 'MOCK'
+#!/usr/bin/env bash
+if [[ "$1" == "issue" && "$2" == "create" ]]; then
+    echo "https://github.com/test/repo/issues/42"
+    exit 0
+fi
+exit 1
+MOCK
+    chmod +x "$MOCK_BIN/gh"
+
+    # Create mock timeout that just runs the command
+    cat > "$MOCK_BIN/timeout" << 'MOCK'
+#!/usr/bin/env bash
+shift  # skip timeout value
+"$@"
+MOCK
+    chmod +x "$MOCK_BIN/timeout"
+
+    local old_path="$PATH"
+    export PATH="$MOCK_BIN:$PATH"
+
+    local issue_num
+    issue_num=$(github_issue_create "TEST-1" "Test task" "Task body" "priority:high")
+
+    export PATH="$old_path"
+
+    assert_equals "42" "$issue_num" "Should extract issue number from URL"
+}
+
+# =============================================================================
+# Sync Up Create (dry run + flow)
+# =============================================================================
+
+test_sync_up_create_dry_run() {
+    local ralph_dir="$TEST_DIR/.ralph"
+    local kanban="$ralph_dir/kanban.md"
+
+    github_sync_state_init "$ralph_dir"
+
+    local output
+    output=$(github_issue_sync_up_create "$ralph_dir" "all" "true" "true" 2>&1)
+
+    assert_output_contains "$output" "dry-run" "Should show dry-run marker"
+    assert_output_contains "$output" "EXIST-1" "Should list EXIST-1"
+    assert_output_contains "$output" "EXIST-2" "Should list EXIST-2"
+}
+
+test_sync_up_create_dry_run_single() {
+    local ralph_dir="$TEST_DIR/.ralph"
+    local kanban="$ralph_dir/kanban.md"
+
+    github_sync_state_init "$ralph_dir"
+
+    local output
+    output=$(github_issue_sync_up_create "$ralph_dir" "EXIST-1" "true" "true" 2>&1)
+
+    assert_output_contains "$output" "dry-run" "Should show dry-run marker"
+    assert_output_contains "$output" "EXIST-1" "Should list EXIST-1"
+}
+
+test_sync_up_create_nonexistent_task() {
+    local ralph_dir="$TEST_DIR/.ralph"
+
+    github_sync_state_init "$ralph_dir"
+
+    local exit_code=0
+    github_issue_sync_up_create "$ralph_dir" "FAKE-999" "false" "true" 2>/dev/null || exit_code=$?
+
+    assert_equals "1" "$exit_code" "Should fail for non-existent task"
+}
+
+test_sync_up_create_already_tracked() {
+    local ralph_dir="$TEST_DIR/.ralph"
+    local kanban="$ralph_dir/kanban.md"
+
+    github_sync_state_init "$ralph_dir"
+
+    # Track EXIST-1
+    local entry
+    entry=$(github_sync_state_create_entry "EXIST-1" "" " " "open" "sha256:abc")
+    github_sync_state_set_issue "$ralph_dir" "10" "$entry"
+
+    local output
+    output=$(github_issue_sync_up_create "$ralph_dir" "EXIST-1" "false" "true" 2>&1)
+
+    assert_output_contains "$output" "already tracked" "Should report already tracked"
+}
+
+test_sync_up_create_no_untracked() {
+    local ralph_dir="$TEST_DIR/.ralph"
+    local kanban="$ralph_dir/kanban.md"
+
+    github_sync_state_init "$ralph_dir"
+
+    # Track both tasks
+    local entry1 entry2
+    entry1=$(github_sync_state_create_entry "EXIST-1" "" " " "open" "sha256:abc")
+    github_sync_state_set_issue "$ralph_dir" "10" "$entry1"
+    entry2=$(github_sync_state_create_entry "EXIST-2" "" "=" "open" "sha256:def")
+    github_sync_state_set_issue "$ralph_dir" "11" "$entry2"
+
+    local output
+    output=$(github_issue_sync_up_create "$ralph_dir" "all" "false" "true" 2>&1)
+
+    assert_output_contains "$output" "No untracked tasks" "Should report no untracked tasks"
+}
+
+test_build_issue_body() {
+    local body
+    body=$(_build_issue_body "Some description" "HIGH" "TASK-001, TASK-002")
+
+    assert_output_contains "$body" "Some description" "Should contain description"
+    assert_output_contains "$body" "Priority: HIGH" "Should contain priority"
+    assert_output_contains "$body" "Dependencies: TASK-001, TASK-002" "Should contain dependencies"
+}
+
+test_get_priority_label() {
+    local label
+    label=$(_get_priority_label "HIGH")
+    assert_equals "priority:high" "$label" "Should map HIGH to priority:high"
+
+    label=$(_get_priority_label "CRITICAL")
+    assert_equals "priority:critical" "$label" "Should map CRITICAL to priority:critical"
+}
+
+# =============================================================================
 # Run all tests
 # =============================================================================
 run_test test_config_is_enabled
@@ -305,6 +522,20 @@ run_test test_update_kanban_task_fields
 run_test test_update_kanban_task_fields_not_found
 run_test test_state_full_lifecycle
 run_test test_writer_status_name_mapping
+run_test test_list_all_kanban_task_ids
+run_test test_parse_kanban_task_fields
+run_test test_parse_kanban_task_fields_in_progress
+run_test test_parse_kanban_task_fields_not_found
+run_test test_get_untracked_task_ids_all_untracked
+run_test test_get_untracked_task_ids_some_tracked
+run_test test_issue_create_mock
+run_test test_sync_up_create_dry_run
+run_test test_sync_up_create_dry_run_single
+run_test test_sync_up_create_nonexistent_task
+run_test test_sync_up_create_already_tracked
+run_test test_sync_up_create_no_untracked
+run_test test_build_issue_body
+run_test test_get_priority_label
 
 print_test_summary
 exit_with_test_result

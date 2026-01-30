@@ -212,11 +212,14 @@ Dependencies: GH-30
 ### Manual
 
 ```bash
-wiggum github-sync              # Full sync cycle (down + up)
-wiggum github-sync down         # Pull new issues into kanban
-wiggum github-sync up           # Push status changes to GitHub
-wiggum github-sync status       # Show sync state summary
-wiggum github-sync --dry-run    # Preview changes without writing
+wiggum gh                         # Full sync cycle (down + up)
+wiggum gh down                    # Pull new issues into kanban
+wiggum gh up                      # Push status changes to GitHub
+wiggum gh sync up TASK-333        # Create issue for untracked task
+wiggum gh sync up all             # Create issues for all untracked tasks
+wiggum gh sync up all -y          # Skip confirmation prompt
+wiggum gh status                  # Show sync state summary
+wiggum gh --dry-run               # Preview changes without writing
 ```
 
 ### Automatic
