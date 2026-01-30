@@ -12,6 +12,7 @@ from textual.message import Message
 from ..data.worker_scanner import scan_workers, get_worker_counts
 from ..data.models import Worker, WorkerStatus
 from ..actions.worker_control import stop_worker, kill_worker
+from .filter_sort_bar import FilterSortBar, SortOption, FilterOption
 
 
 def format_duration(seconds: int) -> str:
@@ -83,10 +84,27 @@ class WorkersPanel(Widget):
             super().__init__()
             self.worker = worker
 
+    SORT_OPTIONS = [
+        SortOption("Status", "status"),
+        SortOption("Task ID", "task_id"),
+        SortOption("Duration", "duration"),
+        SortOption("Agent", "agent"),
+        SortOption("Pipeline", "pipeline"),
+    ]
+
+    FILTER_OPTIONS = [
+        FilterOption("Running", "running", active=True),
+        FilterOption("Stopped", "stopped", active=True),
+        FilterOption("Completed", "completed", active=True),
+        FilterOption("Merged", "merged", active=True),
+        FilterOption("Failed", "failed", active=True),
+    ]
+
     def __init__(self, ralph_dir: Path) -> None:
         super().__init__()
         self.ralph_dir = ralph_dir
         self._workers_list: list[Worker] = []
+        self._filtered_workers: list[Worker] = []
         self._selected_worker: Worker | None = None
         self._last_data_hash: str = ""
 
@@ -104,23 +122,20 @@ class WorkersPanel(Widget):
 
     def compose(self) -> ComposeResult:
         self._load_workers()
+        self._filtered_workers = list(self._workers_list)
         counts = get_worker_counts(self._workers_list)
 
         yield Static(
-            f"[bold]Workers[/] │ "
-            f"[#a6e3a1]Running: {counts['running']}[/] │ "
-            f"[#89b4fa]Completed: {counts['completed']}[/] │ "
-            f"[#f38ba8]Failed: {counts['failed']}[/] │ "
-            f"Total: {counts['total']}",
+            self._build_header_text(counts),
             classes="workers-header",
         )
 
-        if not self._workers_list:
-            yield Static(
-                "No workers found. Run 'wiggum run' to start workers.",
-                classes="empty-message",
-            )
-            return
+        yield FilterSortBar(
+            sort_options=list(self.SORT_OPTIONS),
+            filter_options=[FilterOption(f.label, f.key, f.active) for f in self.FILTER_OPTIONS],
+            show_search=True,
+            id="workers-filter-bar",
+        )
 
         table = DataTable(id="workers-table")
         table.cursor_type = "row"
@@ -129,8 +144,6 @@ class WorkersPanel(Widget):
 
     def on_mount(self) -> None:
         """Set up the data table."""
-        if not self._workers_list:
-            return
         try:
             table = self.query_one("#workers-table", DataTable)
             table.add_columns("Status", "Worker ID", "Task", "PID", "Pipeline", "Step", "Agent", "Duration", "PR URL")
@@ -159,7 +172,12 @@ class WorkersPanel(Widget):
 
         table.clear()
         now_ts = int(time.time())
-        for worker in self._workers_list:
+        display_list = self._filtered_workers
+        for worker in display_list:
+            is_merged = worker.status == WorkerStatus.MERGED
+            dim_open = "[dim]" if is_merged else ""
+            dim_close = "[/]" if is_merged else ""
+
             status_style = self._get_status_style(worker.status)
             status_text = f"[{status_style}]{worker.status.value.upper()}[/]"
 
@@ -190,23 +208,131 @@ class WorkersPanel(Widget):
 
             table.add_row(
                 status_text,
-                worker_id,
-                worker.task_id,
-                pid_str,
-                pipeline_name,
-                step_id,
-                agent_short,
-                duration,
-                pr_url,
+                f"{dim_open}{worker_id}{dim_close}",
+                f"{dim_open}{worker.task_id}{dim_close}",
+                f"{dim_open}{pid_str}{dim_close}",
+                f"{dim_open}{pipeline_name}{dim_close}",
+                f"{dim_open}{step_id}{dim_close}",
+                f"{dim_open}{agent_short}{dim_close}",
+                f"{dim_open}{duration}{dim_close}",
+                f"{dim_open}{pr_url}{dim_close}",
                 key=worker.id,
             )
 
         # Restore cursor position by worker ID
         if cursor_worker_id:
-            for i, worker in enumerate(self._workers_list):
+            for i, worker in enumerate(display_list):
                 if worker.id == cursor_worker_id:
                     table.move_cursor(row=i)
                     break
+
+    def _build_header_text(self, counts: dict[str, int]) -> str:
+        """Build header text with worker counts."""
+        total = counts.get("total", 0)
+        running = counts.get("running", 0)
+        completed = counts.get("completed", 0)
+        merged = counts.get("merged", 0)
+        failed = counts.get("failed", 0)
+        filtered_count = len(self._filtered_workers)
+
+        text = (
+            f"[bold]Workers[/] │ "
+            f"[#a6e3a1]Running: {running}[/] │ "
+            f"[#89b4fa]Completed: {completed}[/] │ "
+            f"[#6c7086]Merged: {merged}[/] │ "
+            f"[#f38ba8]Failed: {failed}[/] │ "
+            f"Total: {total}"
+        )
+        if filtered_count != total:
+            text += f" │ [#f9e2af]Showing: {filtered_count}[/]"
+        return text
+
+    def _apply_filter_sort(
+        self,
+        workers: list[Worker],
+        search_query: str = "",
+        sort_key: str = "",
+        sort_ascending: bool = True,
+        active_filters: list[str] | None = None,
+    ) -> list[Worker]:
+        """Apply filter, sort, and search to the workers list.
+
+        Args:
+            workers: Full workers list.
+            search_query: Text to search in worker ID and task ID.
+            sort_key: Sort field key.
+            sort_ascending: Sort direction.
+            active_filters: List of active status filter keys.
+
+        Returns:
+            Filtered and sorted list.
+        """
+        result = list(workers)
+
+        # Apply status filter
+        if active_filters is not None:
+            result = [w for w in result if w.status.value in active_filters]
+
+        # Apply search
+        if search_query:
+            q = search_query.lower()
+            result = [
+                w for w in result
+                if q in w.id.lower() or q in w.task_id.lower()
+                or (w.pipeline_info and q in w.pipeline_info.agent_short.lower())
+            ]
+
+        # Apply sort
+        now_ts = int(time.time())
+        if sort_key == "status":
+            status_order = {
+                WorkerStatus.RUNNING: 0,
+                WorkerStatus.STOPPED: 1,
+                WorkerStatus.COMPLETED: 2,
+                WorkerStatus.MERGED: 3,
+                WorkerStatus.FAILED: 4,
+            }
+            result.sort(key=lambda w: status_order.get(w.status, 9), reverse=not sort_ascending)
+        elif sort_key == "task_id":
+            result.sort(key=lambda w: w.task_id, reverse=not sort_ascending)
+        elif sort_key == "duration":
+            result.sort(key=lambda w: now_ts - w.timestamp, reverse=not sort_ascending)
+        elif sort_key == "agent":
+            result.sort(
+                key=lambda w: (w.pipeline_info.agent_short if w.pipeline_info else ""),
+                reverse=not sort_ascending,
+            )
+        elif sort_key == "pipeline":
+            result.sort(
+                key=lambda w: (w.pipeline_info.pipeline_name if w.pipeline_info else ""),
+                reverse=not sort_ascending,
+            )
+
+        return result
+
+    def on_filter_sort_bar_changed(self, event: FilterSortBar.Changed) -> None:
+        """Handle filter/sort bar state changes."""
+        self._filtered_workers = self._apply_filter_sort(
+            self._workers_list,
+            search_query=event.search_query,
+            sort_key=event.sort_key,
+            sort_ascending=event.sort_ascending,
+            active_filters=event.active_filters,
+        )
+        # Update header to show filtered count
+        counts = get_worker_counts(self._workers_list)
+        try:
+            header = self.query_one(".workers-header", Static)
+            header.update(self._build_header_text(counts))
+        except Exception:
+            pass
+
+        # Update table
+        try:
+            table = self.query_one("#workers-table", DataTable)
+            self._populate_table(table, preserve_cursor=True)
+        except Exception:
+            pass
 
     def _get_status_style(self, status: WorkerStatus) -> str:
         """Get Rich style for a status."""
@@ -215,14 +341,15 @@ class WorkersPanel(Widget):
             WorkerStatus.STOPPED: "#7f849c",
             WorkerStatus.COMPLETED: "#89b4fa",
             WorkerStatus.FAILED: "#f38ba8",
+            WorkerStatus.MERGED: "#6c7086",
         }.get(status, "#7f849c")
 
     def _get_selected_worker(self) -> Worker | None:
         """Get the currently selected worker."""
         try:
             table = self.query_one("#workers-table", DataTable)
-            if table.cursor_row is not None and table.cursor_row < len(self._workers_list):
-                return self._workers_list[table.cursor_row]
+            if table.cursor_row is not None and table.cursor_row < len(self._filtered_workers):
+                return self._filtered_workers[table.cursor_row]
         except Exception:
             pass
         return None
@@ -304,8 +431,8 @@ class WorkersPanel(Widget):
         """Go to last row (vim G)."""
         try:
             table = self.query_one("#workers-table", DataTable)
-            if self._workers_list:
-                table.move_cursor(row=len(self._workers_list) - 1)
+            if self._filtered_workers:
+                table.move_cursor(row=len(self._filtered_workers) - 1)
         except Exception:
             pass
 
@@ -314,7 +441,7 @@ class WorkersPanel(Widget):
         try:
             table = self.query_one("#workers-table", DataTable)
             current = table.cursor_row or 0
-            new_row = min(current + 10, len(self._workers_list) - 1)
+            new_row = min(current + 10, max(0, len(self._filtered_workers) - 1))
             table.move_cursor(row=new_row)
         except Exception:
             pass
@@ -333,6 +460,19 @@ class WorkersPanel(Widget):
         """Refresh worker data and re-render."""
         self._load_workers()
 
+        # Re-apply current filter/sort settings
+        try:
+            bar = self.query_one("#workers-filter-bar", FilterSortBar)
+            self._filtered_workers = self._apply_filter_sort(
+                self._workers_list,
+                search_query=bar.search_query,
+                sort_key=bar.sort_key,
+                sort_ascending=bar.sort_ascending,
+                active_filters=bar.active_filters,
+            )
+        except Exception:
+            self._filtered_workers = list(self._workers_list)
+
         # Check if worker state (not duration) actually changed
         new_hash = self._compute_data_hash(self._workers_list)
         state_changed = new_hash != self._last_data_hash
@@ -344,13 +484,7 @@ class WorkersPanel(Widget):
             try:
                 counts = get_worker_counts(self._workers_list)
                 header = self.query_one(".workers-header", Static)
-                header.update(
-                    f"[bold]Workers[/] │ "
-                    f"[#a6e3a1]Running: {counts['running']}[/] │ "
-                    f"[#89b4fa]Completed: {counts['completed']}[/] │ "
-                    f"[#f38ba8]Failed: {counts['failed']}[/] │ "
-                    f"Total: {counts['total']}"
-                )
+                header.update(self._build_header_text(counts))
             except Exception:
                 pass
 

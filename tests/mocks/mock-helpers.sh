@@ -38,6 +38,7 @@ mock_setup() {
     unset MOCK_CLAUDE_RESPONSES_FILE
     unset MOCK_CLAUDE_TOOL_USE
     unset MOCK_CLAUDE_COST_USD
+    unset MOCK_CLAUDE_STDERR
     unset MOCK_SESSION_ID
 }
 
@@ -62,6 +63,7 @@ mock_teardown() {
     unset MOCK_CLAUDE_RESPONSES_FILE
     unset MOCK_CLAUDE_TOOL_USE
     unset MOCK_CLAUDE_COST_USD
+    unset MOCK_CLAUDE_STDERR
     unset MOCK_SESSION_ID
 }
 

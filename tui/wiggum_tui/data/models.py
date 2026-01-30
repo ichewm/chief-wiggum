@@ -23,6 +23,7 @@ class WorkerStatus(Enum):
     STOPPED = "stopped"
     COMPLETED = "completed"
     FAILED = "failed"
+    MERGED = "merged"
 
 
 class LogLevel(Enum):
@@ -69,6 +70,7 @@ class Task:
     is_running: bool | None = None  # None = not checked, True = process running, False = not running
     start_time: int | None = None  # Unix timestamp when worker started
     pipeline_info: PipelineInfo | None = None
+    scheduling_score: float | None = None  # Computed scheduling priority score
 
 
 @dataclass

@@ -213,4 +213,57 @@ def parse_kanban_with_status(
             if task.id in pipeline_info_map:
                 task.pipeline_info = pipeline_info_map[task.id]
 
+    # Compute scheduling scores for pending tasks
+    _compute_scheduling_scores(tasks, ralph_dir)
+
     return tasks
+
+
+def _compute_scheduling_scores(tasks: list[Task], ralph_dir: Path) -> None:
+    """Compute scheduling scores for PENDING tasks.
+
+    Score is based on:
+    - Base priority: CRITICAL=0, HIGH=10000, MEDIUM=20000, LOW=30000
+    - Plan bonus: -15000 if .ralph/plans/TASK-ID.md exists
+    - Dependency bonus: -7000 per task that depends on this one
+    - Floor at 0
+
+    Args:
+        tasks: List of tasks to compute scores for (modified in place).
+        ralph_dir: Path to .ralph directory.
+    """
+    priority_base = {
+        "CRITICAL": 0,
+        "HIGH": 10000,
+        "MEDIUM": 20000,
+        "LOW": 30000,
+    }
+
+    # Build dependency graph: count how many tasks depend on each task
+    dependent_count: dict[str, int] = {}
+    for task in tasks:
+        for dep in task.dependencies:
+            dep = dep.strip()
+            if dep:
+                dependent_count[dep] = dependent_count.get(dep, 0) + 1
+
+    plans_dir = ralph_dir / "plans"
+
+    for task in tasks:
+        if task.status != TaskStatus.PENDING:
+            continue
+
+        score = float(priority_base.get(task.priority, 20000))
+
+        # Plan bonus
+        if plans_dir.is_dir():
+            plan_path = plans_dir / f"{task.id}.md"
+            if plan_path.exists():
+                score -= 15000
+
+        # Dependency bonus: -7000 per task blocked by this one
+        blocked_count = dependent_count.get(task.id, 0)
+        score -= 7000 * blocked_count
+
+        # Floor at 0
+        task.scheduling_score = max(0.0, score)

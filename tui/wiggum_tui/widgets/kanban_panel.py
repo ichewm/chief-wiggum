@@ -12,6 +12,7 @@ from textual import events
 
 from ..data.kanban_parser import parse_kanban_with_status, group_tasks_by_status
 from ..data.models import Task, TaskStatus
+from ..messages import NavigateToTask
 
 
 def format_duration(start_timestamp: int) -> str:
@@ -31,7 +32,7 @@ def format_duration(start_timestamp: int) -> str:
         return f"{minutes}:{seconds:02d}"
 
 
-class TaskDetailModal(ModalScreen[None]):
+class TaskDetailModal(ModalScreen[tuple | None]):
     """Modal screen showing task details."""
 
     DEFAULT_CSS = """
@@ -130,11 +131,11 @@ class TaskDetailModal(ModalScreen[None]):
 
     def __init__(self, task: Task, ralph_dir: Path | None = None) -> None:
         super().__init__()
-        self._task = task
+        self._task_info = task
         self._ralph_dir = ralph_dir
 
     def compose(self) -> ComposeResult:
-        task = self._task
+        task = self._task_info
         status_class = f"status-{task.status.value}"
         priority_class = f"priority-{task.priority.lower()}"
 
@@ -182,13 +183,28 @@ class TaskDetailModal(ModalScreen[None]):
                 for item in task.acceptance_criteria:
                     yield Static(f"  • {item}", classes="detail-list-item")
 
-            yield Button("Close [Esc]", variant="primary")
+            # Navigation buttons
+            has_plan = False
+            if self._ralph_dir:
+                plan_path = self._ralph_dir / "plans" / f"{task.id}.md"
+                has_plan = plan_path.exists()
+
+            if has_plan:
+                yield Button("View Plan", id="btn-view-plan")
+            yield Button("View Conversations", id="btn-view-conversations")
+            yield Button("Close [Esc]", variant="primary", id="btn-close")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss()
+        button_id = event.button.id
+        if button_id == "btn-view-plan":
+            self.dismiss((self._task_info.id, "plans"))
+        elif button_id == "btn-view-conversations":
+            self.dismiss((self._task_info.id, "conversations"))
+        else:
+            self.dismiss(None)
 
     def action_close(self) -> None:
-        self.dismiss()
+        self.dismiss(None)
 
 
 class TaskCard(Static):
@@ -271,7 +287,7 @@ class TaskCard(Static):
             else:
                 first_line += " [bold #f38ba8]●[/]"
 
-        # For pending approval tasks with a running worker, show agent info
+        # For pending approval tasks with a running worker, show agent info with green dot
         if self._task_data.status == TaskStatus.PENDING_APPROVAL and self._task_data.is_running:
             pi = self._task_data.pipeline_info
             agent_label = pi.agent_short if pi else ""
@@ -279,9 +295,9 @@ class TaskCard(Static):
             if self._task_data.start_time:
                 duration = f" {format_duration(self._task_data.start_time)}"
             if agent_label:
-                first_line += f" [bold #cba6f7]● {agent_label}{duration}[/]"
+                first_line += f" [bold #a6e3a1]● {agent_label}{duration}[/]"
             else:
-                first_line += f" [bold #cba6f7]●{duration}[/]"
+                first_line += f" [bold #a6e3a1]●{duration}[/]"
 
         lines = [
             first_line,
@@ -289,15 +305,27 @@ class TaskCard(Static):
         ]
         return "\n".join(lines)
 
+    def _handle_modal_result(self, result: tuple | None) -> None:
+        """Handle modal dismiss result for cross-tab navigation."""
+        if result is not None:
+            task_id, target_tab = result
+            self.app.post_message(NavigateToTask(task_id, target_tab))
+
     def on_click(self) -> None:
         """Handle click to show task details."""
         ralph_dir = getattr(self.app, "ralph_dir", None)
-        self.app.push_screen(TaskDetailModal(self._task_data, ralph_dir=ralph_dir))
+        self.app.push_screen(
+            TaskDetailModal(self._task_data, ralph_dir=ralph_dir),
+            callback=self._handle_modal_result,
+        )
 
     def key_enter(self) -> None:
         """Handle Enter key to show task details."""
         ralph_dir = getattr(self.app, "ralph_dir", None)
-        self.app.push_screen(TaskDetailModal(self._task_data, ralph_dir=ralph_dir))
+        self.app.push_screen(
+            TaskDetailModal(self._task_data, ralph_dir=ralph_dir),
+            callback=self._handle_modal_result,
+        )
 
 
 class KanbanColumn(Widget):
@@ -347,10 +375,11 @@ class KanbanColumn(Widget):
     }
     """
 
-    def __init__(self, status: TaskStatus, tasks_list: list[Task]) -> None:
+    def __init__(self, status: TaskStatus, tasks_list: list[Task], header_suffix: str = "") -> None:
         super().__init__()
         self._status = status
         self._tasks_list = tasks_list
+        self._header_suffix = header_suffix
 
     COLUMN_EMOJI = {
         TaskStatus.PENDING: "📋",
@@ -365,8 +394,9 @@ class KanbanColumn(Widget):
         status_name = self._status.value.replace("_", " ").upper()
         header_class = f"column-header-{self._status.value}"
         emoji = self.COLUMN_EMOJI.get(self._status, "")
+        suffix = f" [#7f849c]{self._header_suffix}[/]" if self._header_suffix else ""
         yield Static(
-            f"[{header_class}]{emoji} {status_name} ({len(self._tasks_list)})[/]",
+            f"[{header_class}]{emoji} {status_name} ({len(self._tasks_list)}){suffix}[/]",
             classes="column-header",
         )
         with VerticalScroll(classes="column-content"):
@@ -402,6 +432,8 @@ class KanbanPanel(Widget):
     }
     """
 
+    PENDING_SORT_MODES = ["default", "priority", "score", "name"]
+
     BINDINGS = [
         # Vim-style navigation
         Binding("j", "next_card", "Next Card", show=False),
@@ -411,6 +443,7 @@ class KanbanPanel(Widget):
         Binding("g", "first_card", "First Card", show=False),
         Binding("G", "last_card", "Last Card", show=False),
         Binding("enter", "open_card", "Open Card", show=False),
+        Binding("p", "cycle_pending_sort", "Pending Sort", show=True),
     ]
 
     def __init__(self, ralph_dir: Path) -> None:
@@ -420,6 +453,7 @@ class KanbanPanel(Widget):
         self._tasks_list: list[Task] = []
         self._timer = None
         self._last_data_hash: str = ""
+        self._pending_sort_mode: int = 0  # index into PENDING_SORT_MODES
 
     def _compute_data_hash(self, tasks: list[Task]) -> str:
         """Compute a hash of task data for change detection."""
@@ -473,10 +507,21 @@ class KanbanPanel(Widget):
             )
             return
 
+        # Sort pending tasks based on current sort mode
+        pending_tasks = self._sort_pending_tasks(grouped[TaskStatus.PENDING])
+
+        # Sort pending approval: running tasks first
+        pa_tasks = sorted(
+            grouped[TaskStatus.PENDING_APPROVAL],
+            key=lambda t: (0 if t.is_running else 1),
+        )
+
+        pending_header = self._get_pending_column_header()
+
         yield Horizontal(
-            KanbanColumn(TaskStatus.PENDING, grouped[TaskStatus.PENDING]),
+            KanbanColumn(TaskStatus.PENDING, pending_tasks, header_suffix=pending_header),
             KanbanColumn(TaskStatus.IN_PROGRESS, grouped[TaskStatus.IN_PROGRESS]),
-            KanbanColumn(TaskStatus.PENDING_APPROVAL, grouped[TaskStatus.PENDING_APPROVAL]),
+            KanbanColumn(TaskStatus.PENDING_APPROVAL, pa_tasks),
             KanbanColumn(TaskStatus.COMPLETE, grouped[TaskStatus.COMPLETE]),
             KanbanColumn(TaskStatus.FAILED, grouped[TaskStatus.FAILED]),
             classes="kanban-board",
@@ -504,9 +549,19 @@ class KanbanPanel(Widget):
         return None
 
     def _restore_focus_by_task_id(self, task_id: str | None) -> None:
-        """Restore focus to a card with the given task ID."""
+        """Restore focus to a card with the given task ID.
+
+        Only restores focus if the kanban tab is currently active to avoid
+        stealing focus from other tabs during background refreshes.
+        """
         if not task_id:
             return
+        # Don't steal focus if kanban tab isn't active
+        try:
+            if getattr(self.app, "_active_tab", "kanban") != "kanban":
+                return
+        except Exception:
+            pass
         try:
             for card in self.query(TaskCard):
                 if card._task_data.id == task_id:
@@ -552,11 +607,22 @@ class KanbanPanel(Widget):
             pass
 
         if self._tasks_list:
+            # Sort pending tasks based on current sort mode
+            pending_tasks = self._sort_pending_tasks(grouped[TaskStatus.PENDING])
+
+            # Sort pending approval: running tasks first
+            pa_tasks = sorted(
+                grouped[TaskStatus.PENDING_APPROVAL],
+                key=lambda t: (0 if t.is_running else 1),
+            )
+
+            pending_header = self._get_pending_column_header()
+
             self.mount(
                 Horizontal(
-                    KanbanColumn(TaskStatus.PENDING, grouped[TaskStatus.PENDING]),
+                    KanbanColumn(TaskStatus.PENDING, pending_tasks, header_suffix=pending_header),
                     KanbanColumn(TaskStatus.IN_PROGRESS, grouped[TaskStatus.IN_PROGRESS]),
-                    KanbanColumn(TaskStatus.PENDING_APPROVAL, grouped[TaskStatus.PENDING_APPROVAL]),
+                    KanbanColumn(TaskStatus.PENDING_APPROVAL, pa_tasks),
                     KanbanColumn(TaskStatus.COMPLETE, grouped[TaskStatus.COMPLETE]),
                     KanbanColumn(TaskStatus.FAILED, grouped[TaskStatus.FAILED]),
                     classes="kanban-board",
@@ -564,6 +630,43 @@ class KanbanPanel(Widget):
             )
             # Restore focus to the previously focused card
             self._restore_focus_by_task_id(focused_task_id)
+
+    def _get_pending_column_header(self) -> str:
+        """Get header suffix for the pending column showing current sort mode."""
+        mode = self.PENDING_SORT_MODES[self._pending_sort_mode]
+        if mode == "default":
+            return ""
+        return f" [{mode}]"
+
+    def _sort_pending_tasks(self, tasks: list[Task]) -> list[Task]:
+        """Sort pending tasks based on current sort mode.
+
+        Args:
+            tasks: List of pending tasks to sort.
+
+        Returns:
+            Sorted list.
+        """
+        mode = self.PENDING_SORT_MODES[self._pending_sort_mode]
+        if mode == "default":
+            return tasks
+        elif mode == "priority":
+            priority_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+            return sorted(tasks, key=lambda t: priority_order.get(t.priority, 9))
+        elif mode == "score":
+            return sorted(tasks, key=lambda t: t.scheduling_score if t.scheduling_score is not None else 99999)
+        elif mode == "name":
+            return sorted(tasks, key=lambda t: t.title.lower())
+        return tasks
+
+    def action_cycle_pending_sort(self) -> None:
+        """Cycle through pending column sort modes."""
+        self._pending_sort_mode = (self._pending_sort_mode + 1) % len(self.PENDING_SORT_MODES)
+        mode_name = self.PENDING_SORT_MODES[self._pending_sort_mode].title()
+        self.app.notify(f"Pending sort: {mode_name}", timeout=2)
+        # Force a full refresh
+        self._last_data_hash = ""
+        self.refresh_data()
 
     def _get_all_cards(self) -> list[TaskCard]:
         """Get all TaskCard widgets in order."""

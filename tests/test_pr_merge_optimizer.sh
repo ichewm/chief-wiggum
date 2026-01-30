@@ -562,6 +562,66 @@ test_integration_merge_order_respects_conflicts() {
 }
 
 # =============================================================================
+# pr_merge_gather_all() — Fix Pipeline Gate Tests
+# =============================================================================
+
+# Helper to set git state on a mock worker
+_set_worker_git_state() {
+    local worker_dir="$1"
+    local state="$2"
+    jq --arg s "$state" '.current_state = $s' "$worker_dir/git-state.json" > "$worker_dir/git-state.json.tmp"
+    mv "$worker_dir/git-state.json.tmp" "$worker_dir/git-state.json"
+}
+
+test_gather_skips_worker_in_fixing_state() {
+    _create_mock_worker "TASK-001" 101 "" >/dev/null
+    _set_worker_git_state "$RALPH_DIR/workers/worker-TASK-001-1234567890" "fixing"
+
+    pr_merge_gather_all "$RALPH_DIR" "$PROJECT_DIR" 2>/dev/null
+
+    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local has_task
+    has_task=$(jq 'has("prs") and (.prs | has("TASK-001"))' "$state_file")
+    assert_equals "false" "$has_task" "Worker in 'fixing' state should be excluded from gather"
+}
+
+test_gather_skips_worker_in_needs_fix_state() {
+    _create_mock_worker "TASK-001" 101 "" >/dev/null
+    _set_worker_git_state "$RALPH_DIR/workers/worker-TASK-001-1234567890" "needs_fix"
+
+    pr_merge_gather_all "$RALPH_DIR" "$PROJECT_DIR" 2>/dev/null
+
+    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local has_task
+    has_task=$(jq 'has("prs") and (.prs | has("TASK-001"))' "$state_file")
+    assert_equals "false" "$has_task" "Worker in 'needs_fix' state should be excluded from gather"
+}
+
+test_gather_includes_worker_in_needs_merge_state() {
+    _create_mock_worker "TASK-001" 101 "" >/dev/null
+    _set_worker_git_state "$RALPH_DIR/workers/worker-TASK-001-1234567890" "needs_merge"
+
+    pr_merge_gather_all "$RALPH_DIR" "$PROJECT_DIR" 2>/dev/null
+
+    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local has_task
+    has_task=$(jq 'has("prs") and (.prs | has("TASK-001"))' "$state_file")
+    assert_equals "true" "$has_task" "Worker in 'needs_merge' state should be included in gather"
+}
+
+test_gather_includes_worker_with_no_git_state() {
+    _create_mock_worker "TASK-001" 101 "" >/dev/null
+    # _create_mock_worker sets current_state to "none" by default
+
+    pr_merge_gather_all "$RALPH_DIR" "$PROJECT_DIR" 2>/dev/null
+
+    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local has_task
+    has_task=$(jq 'has("prs") and (.prs | has("TASK-001"))' "$state_file")
+    assert_equals "true" "$has_task" "Worker with 'none' git state should be included in gather"
+}
+
+# =============================================================================
 # Run Tests
 # =============================================================================
 
@@ -586,6 +646,10 @@ run_test test_pr_merge_stats_empty
 run_test test_pr_merge_stats_with_data
 run_test test_integration_conflict_detection_and_categorization
 run_test test_integration_merge_order_respects_conflicts
+run_test test_gather_skips_worker_in_fixing_state
+run_test test_gather_skips_worker_in_needs_fix_state
+run_test test_gather_includes_worker_in_needs_merge_state
+run_test test_gather_includes_worker_with_no_git_state
 
 print_test_summary
 exit_with_test_result

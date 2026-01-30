@@ -18,6 +18,7 @@ from ..data.conversation_parser import (
 )
 from ..data.worker_scanner import scan_workers
 from ..data.models import Conversation, ConversationTurn, ToolCall
+from ..utils import format_relative_time
 
 import json
 
@@ -125,7 +126,7 @@ class ConversationPanel(Widget):
     }
 
     ConversationPanel Select {
-        width: 48;
+        width: 1fr;
         margin-top: -1;
     }
 
@@ -228,13 +229,14 @@ class ConversationPanel(Widget):
                     # Check if there are any log files (quick existence check)
                     has_logs = any(logs_dir.glob("*.log")) or any(logs_dir.glob("*/*.log"))
                     if has_logs:
-                        # Build label with pipeline info when available
+                        # Build label with pipeline info and relative time
                         pi = worker.pipeline_info
+                        rel_time = format_relative_time(worker.timestamp)
                         if pi and pi.step_id:
                             agent_label = pi.agent_short or pi.step_id
-                            label = f"{worker.task_id} - {agent_label} @ {pi.step_id} ({worker.status.value})"
+                            label = f"{worker.task_id} - {agent_label} @ {pi.step_id} ({worker.status.value}) [{rel_time}]"
                         else:
-                            label = f"{worker.task_id} - {worker.status.value}"
+                            label = f"{worker.task_id} - {worker.status.value} [{rel_time}]"
                         workers_with_mtime.append((worker.id, label, worker.timestamp))
                 except OSError:
                     continue
@@ -394,8 +396,14 @@ class ConversationPanel(Widget):
                     if result:
                         result_info = f" │ {result.num_turns} turns │ ${result.total_cost_usd:.2f}"
 
+                    # Extract epoch timestamp from log name for relative time
+                    rel_time_str = ""
+                    epoch_match = re.search(r'(\d{10})', current_log_name)
+                    if epoch_match:
+                        rel_time_str = f" [#7f849c]({format_relative_time(int(epoch_match.group(1)))})[/]"
+
                     log_node = tree.root.add(
-                        f"[#cba6f7]{current_log_name}[/]{result_info}",
+                        f"[#cba6f7]{current_log_name}[/]{rel_time_str}{result_info}",
                         expand=first_log,
                     )
                     first_log = False
@@ -708,6 +716,18 @@ class ConversationPanel(Widget):
             self._load_conversation(worker_id)
         except Exception:
             pass
+
+    def select_by_task_id(self, task_id: str) -> None:
+        """Select the most recent worker for a given task ID.
+
+        Args:
+            task_id: Task ID to find and select (e.g. "TASK-001").
+        """
+        # Find a worker whose ID contains this task_id
+        for worker_id, label in self._workers_list:
+            if task_id in worker_id or task_id in label:
+                self.select_worker(worker_id)
+                return
 
     def action_expand_all(self) -> None:
         """Expand all nodes in the tree."""

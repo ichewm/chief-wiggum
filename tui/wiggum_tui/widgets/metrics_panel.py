@@ -4,11 +4,13 @@ import json
 from pathlib import Path
 from dataclasses import dataclass, field
 from textual.app import ComposeResult
-from textual.widgets import Static
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Static, DataTable
 from textual.widget import Widget
 
 from ..data.worker_scanner import scan_workers
 from ..data.models import WorkerStatus
+from ..utils import format_relative_time
 
 
 # Cache for aggregate metrics: ralph_dir_path -> (max_mtime, AggregateMetrics)
@@ -40,6 +42,7 @@ class AggregateMetrics:
     running_workers: int = 0
     completed_workers: int = 0
     failed_workers: int = 0
+    merged_workers: int = 0
     total_turns: int = 0
     total_cost_usd: float = 0.0
     total_duration_ms: int = 0
@@ -204,6 +207,8 @@ def aggregate_worker_metrics(ralph_dir: Path, use_cache: bool = True) -> Aggrega
             metrics.completed_workers += 1
         elif worker.status == WorkerStatus.FAILED:
             metrics.failed_workers += 1
+        elif worker.status == WorkerStatus.MERGED:
+            metrics.merged_workers += 1
 
         worker_dir = ralph_dir / "workers" / worker.id
 
@@ -229,6 +234,140 @@ def aggregate_worker_metrics(ralph_dir: Path, use_cache: bool = True) -> Aggrega
     _metrics_cache[cache_key] = (current_mtime, metrics)
 
     return metrics
+
+
+def parse_git_state_summary(ralph_dir: Path) -> dict[str, int]:
+    """Scan worker git-state.json files and count by current_state.
+
+    Args:
+        ralph_dir: Path to .ralph directory.
+
+    Returns:
+        Dict mapping state name to count (e.g. {"merged": 5, "needs_fix": 2}).
+    """
+    counts: dict[str, int] = {}
+    workers_dir = ralph_dir / "workers"
+    if not workers_dir.is_dir():
+        return counts
+
+    for entry in workers_dir.iterdir():
+        if not entry.name.startswith("worker-") or not entry.is_dir():
+            continue
+        git_state_path = entry / "git-state.json"
+        if git_state_path.exists():
+            try:
+                data = json.loads(git_state_path.read_text())
+                state = data.get("current_state", "unknown")
+                counts[state] = counts.get(state, 0) + 1
+            except (json.JSONDecodeError, OSError):
+                continue
+
+    return counts
+
+
+def parse_pipeline_step_durations(ralph_dir: Path) -> dict[str, dict]:
+    """Aggregate durations per pipeline step from worker result files.
+
+    Args:
+        ralph_dir: Path to .ralph directory.
+
+    Returns:
+        Dict mapping step_id to {"count": N, "total_ms": M, "avg_ms": A}.
+    """
+    steps: dict[str, dict] = {}
+    workers_dir = ralph_dir / "workers"
+    if not workers_dir.is_dir():
+        return steps
+
+    for entry in workers_dir.iterdir():
+        if not entry.name.startswith("worker-") or not entry.is_dir():
+            continue
+
+        output_dir = entry / "output"
+        if not output_dir.is_dir():
+            continue
+
+        for step_dir in output_dir.iterdir():
+            if not step_dir.is_dir():
+                continue
+            step_id = step_dir.name
+
+            # Look for result files with duration info
+            for result_file in step_dir.glob("*.json"):
+                try:
+                    data = json.loads(result_file.read_text())
+                    duration = data.get("duration_ms", 0)
+                    if duration > 0:
+                        if step_id not in steps:
+                            steps[step_id] = {"count": 0, "total_ms": 0}
+                        steps[step_id]["count"] += 1
+                        steps[step_id]["total_ms"] += duration
+                except (json.JSONDecodeError, OSError):
+                    continue
+
+    # Compute averages
+    for step_id, info in steps.items():
+        if info["count"] > 0:
+            info["avg_ms"] = info["total_ms"] // info["count"]
+        else:
+            info["avg_ms"] = 0
+
+    return steps
+
+
+def parse_service_metrics(ralph_dir: Path) -> list[dict]:
+    """Parse .ralph/.service-metrics.jsonl for service health data.
+
+    Args:
+        ralph_dir: Path to .ralph directory.
+
+    Returns:
+        List of dicts with keys: service_id, runs, success_count, avg_duration_ms, last_run.
+    """
+    metrics_path = ralph_dir / ".service-metrics.jsonl"
+    if not metrics_path.exists():
+        return []
+
+    # Group by service_id
+    services: dict[str, dict] = {}
+    try:
+        for line in metrics_path.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                sid = data.get("service_id", "unknown")
+                if sid not in services:
+                    services[sid] = {
+                        "service_id": sid,
+                        "runs": 0,
+                        "success_count": 0,
+                        "total_duration_ms": 0,
+                        "last_run": "",
+                    }
+                services[sid]["runs"] += 1
+                if data.get("success", False):
+                    services[sid]["success_count"] += 1
+                services[sid]["total_duration_ms"] += data.get("duration_ms", 0)
+                services[sid]["last_run"] = data.get("timestamp", "")
+            except json.JSONDecodeError:
+                continue
+    except OSError:
+        pass
+
+    result = []
+    for info in services.values():
+        runs = info["runs"]
+        result.append({
+            "service_id": info["service_id"],
+            "runs": runs,
+            "success_pct": (info["success_count"] / runs * 100) if runs > 0 else 0.0,
+            "avg_duration_ms": info["total_duration_ms"] // max(1, runs),
+            "last_run": info["last_run"],
+        })
+    result.sort(key=lambda x: x["service_id"])
+    return result
 
 
 def fmt_tokens(count: int) -> str:
@@ -259,7 +398,33 @@ class MetricsPanel(Widget):
     MetricsPanel {
         height: 1fr;
         width: 100%;
-        padding: 1;
+        layout: vertical;
+    }
+
+    MetricsPanel .metrics-top {
+        height: auto;
+        width: 100%;
+    }
+
+    MetricsPanel .metrics-section {
+        width: 1fr;
+        height: auto;
+        padding: 0 1;
+        border: solid #45475a;
+        background: #181825;
+        margin: 0 0 0 0;
+    }
+
+    MetricsPanel .metrics-workers-table {
+        height: auto;
+        max-height: 50%;
+        border: solid #45475a;
+    }
+
+    MetricsPanel .metrics-services {
+        height: auto;
+        max-height: 30%;
+        border: solid #45475a;
     }
     """
 
@@ -272,68 +437,177 @@ class MetricsPanel(Widget):
     def _compute_data_hash(self, metrics: AggregateMetrics) -> str:
         return str((
             metrics.total_workers, metrics.completed_workers, metrics.failed_workers,
-            metrics.total_cost_usd, metrics.total_turns, metrics.input_tokens,
+            metrics.merged_workers, metrics.total_cost_usd, metrics.total_turns,
+            metrics.input_tokens,
         ))
 
-    def compose(self) -> ComposeResult:
-        self._load_metrics()
+    def _render_summary(self) -> str:
+        """Render summary section text."""
         m = self.metrics
-
-        total_tokens = m.input_tokens + m.output_tokens + m.cache_creation_tokens + m.cache_read_tokens
-
         success_rate = 0.0
-        if m.completed_workers + m.failed_workers > 0:
-            success_rate = m.completed_workers / (m.completed_workers + m.failed_workers) * 100
+        finished = m.completed_workers + m.merged_workers + m.failed_workers
+        if finished > 0:
+            success_rate = (m.completed_workers + m.merged_workers) / finished * 100
+        lines = [
+            "[bold #cba6f7]SUMMARY[/]",
+            (
+                f"[#7f849c]Workers:[/] [#a6e3a1]{m.total_workers}[/] "
+                f"([#a6e3a1]{m.running_workers}[/] run / [#89b4fa]{m.completed_workers}[/] done / "
+                f"[#f38ba8]{m.failed_workers}[/] fail)"
+            ),
+            (
+                f"[#7f849c]Merged:[/] [#6c7086]{m.merged_workers}[/] │ "
+                f"[#7f849c]Success:[/] [#a6e3a1]{success_rate:.0f}%[/]"
+            ),
+            (
+                f"[#7f849c]Cost:[/] [#a6e3a1]{fmt_cost(m.total_cost_usd)}[/] │ "
+                f"[#7f849c]Time:[/] [#a6e3a1]{fmt_duration(m.total_duration_ms)}[/]"
+            ),
+        ]
+        return "\n".join(lines)
 
-        # Build dashboard as rich text
-        lines = []
-        lines.append("[bold #cba6f7]═══ SUMMARY ═══[/]")
-        lines.append(
-            f"[#7f849c]Workers:[/] [#a6e3a1]{m.total_workers}[/] "
-            f"([#a6e3a1]{m.running_workers}[/] run / [#89b4fa]{m.completed_workers}[/] done / [#f38ba8]{m.failed_workers}[/] fail) │ "
-            f"[#7f849c]Success:[/] [#a6e3a1]{success_rate:.0f}%[/] │ "
-            f"[#7f849c]Time:[/] [#a6e3a1]{fmt_duration(m.total_duration_ms)}[/] │ "
-            f"[#7f849c]Cost:[/] [#a6e3a1]{fmt_cost(m.total_cost_usd)}[/]"
-        )
-        lines.append("")
-        lines.append("[bold #cba6f7]═══ TOKENS ═══[/]")
-        lines.append(
-            f"[#7f849c]Input:[/] [#a6e3a1]{fmt_tokens(m.input_tokens)}[/] │ "
-            f"[#7f849c]Output:[/] [#a6e3a1]{fmt_tokens(m.output_tokens)}[/] │ "
-            f"[#7f849c]Cache Create:[/] [#a6e3a1]{fmt_tokens(m.cache_creation_tokens)}[/] │ "
-            f"[#7f849c]Cache Read:[/] [#a6e3a1]{fmt_tokens(m.cache_read_tokens)}[/] │ "
-            f"[#7f849c]Total:[/] [#a6e3a1]{fmt_tokens(total_tokens)}[/]"
-        )
-        lines.append("")
-        lines.append("[bold #cba6f7]═══ CONVERSATION ═══[/]")
+    def _render_git_state(self) -> str:
+        """Render git state section text."""
+        lines = ["[bold #cba6f7]GIT STATE[/]"]
+        git_states = parse_git_state_summary(self.ralph_dir)
+        if git_states:
+            parts = [f"[#a6adc8]{state}:[/] [#a6e3a1]{count}[/]" for state, count in sorted(git_states.items())]
+            for i in range(0, len(parts), 3):
+                lines.append(" │ ".join(parts[i:i+3]))
+        else:
+            lines.append("[#7f849c]No git state data[/]")
+        return "\n".join(lines)
+
+    def _render_tokens(self) -> str:
+        """Render tokens section text."""
+        m = self.metrics
+        total_tokens = m.input_tokens + m.output_tokens + m.cache_creation_tokens + m.cache_read_tokens
+        lines = [
+            "[bold #cba6f7]TOKENS[/]",
+            (
+                f"[#7f849c]Input:[/] [#a6e3a1]{fmt_tokens(m.input_tokens)}[/] │ "
+                f"[#7f849c]Output:[/] [#a6e3a1]{fmt_tokens(m.output_tokens)}[/]"
+            ),
+            (
+                f"[#7f849c]Cache R:[/] [#a6e3a1]{fmt_tokens(m.cache_read_tokens)}[/] │ "
+                f"[#7f849c]Cache W:[/] [#a6e3a1]{fmt_tokens(m.cache_creation_tokens)}[/]"
+            ),
+            f"[#7f849c]Total:[/] [#a6e3a1]{fmt_tokens(total_tokens)}[/]",
+        ]
+        return "\n".join(lines)
+
+    def _render_pipeline_steps(self) -> str:
+        """Render pipeline steps section text."""
+        lines = ["[bold #cba6f7]PIPELINE STEPS (avg)[/]"]
+        step_durations = parse_pipeline_step_durations(self.ralph_dir)
+        if step_durations:
+            parts = [
+                f"[#a6adc8]{sid}:[/] [#a6e3a1]{fmt_duration(info['avg_ms'])}[/]"
+                for sid, info in sorted(step_durations.items())
+            ]
+            for i in range(0, len(parts), 3):
+                lines.append(" │ ".join(parts[i:i+3]))
+        else:
+            lines.append("[#7f849c]No pipeline step data[/]")
+        return "\n".join(lines)
+
+    def _render_conversation(self) -> str:
+        """Render conversation stats section text."""
+        m = self.metrics
+        total_tokens = m.input_tokens + m.output_tokens + m.cache_creation_tokens + m.cache_read_tokens
         avg_turns = m.total_turns / max(1, m.total_workers)
         avg_cost = m.total_cost_usd / max(1, m.total_workers)
         tokens_per_turn = total_tokens // max(1, m.total_turns) if m.total_turns > 0 else 0
-        lines.append(
-            f"[#7f849c]Turns:[/] [#a6e3a1]{m.total_turns}[/] ({avg_turns:.1f} avg) │ "
-            f"[#7f849c]Cost/Worker:[/] [#a6e3a1]{fmt_cost(avg_cost)}[/] │ "
-            f"[#7f849c]Tokens/Turn:[/] [#a6e3a1]{fmt_tokens(tokens_per_turn)}[/]"
-        )
+        lines = [
+            "[bold #cba6f7]CONVERSATION[/]",
+            (
+                f"[#7f849c]Turns:[/] [#a6e3a1]{m.total_turns}[/] ({avg_turns:.1f} avg) │ "
+                f"[#7f849c]Cost/Worker:[/] [#a6e3a1]{fmt_cost(avg_cost)}[/] │ "
+                f"[#7f849c]Tokens/Turn:[/] [#a6e3a1]{fmt_tokens(tokens_per_turn)}[/]"
+            ),
+        ]
+        return "\n".join(lines)
 
-        if m.worker_summaries:
-            lines.append("")
-            lines.append("[bold #cba6f7]═══ WORKERS BY COST ═══[/]")
-            for wm in m.worker_summaries[:15]:
-                status_color = {
-                    "running": "#a6e3a1",
-                    "completed": "#89b4fa",
-                    "failed": "#f38ba8",
-                    "stopped": "#7f849c",
-                }.get(wm.status, "#7f849c")
-                lines.append(
-                    f"[{status_color}]{wm.status:10}[/] │ "
-                    f"[#cba6f7]{wm.task_id[:30]:30}[/] │ "
-                    f"[#7f849c]{wm.num_turns:3} turns[/] │ "
-                    f"[#7f849c]{fmt_tokens(wm.input_tokens + wm.output_tokens):>8}[/] │ "
-                    f"[#a6e3a1]{fmt_cost(wm.total_cost_usd)}[/]"
-                )
+    def compose(self) -> ComposeResult:
+        self._load_metrics()
 
-        yield Static("\n".join(lines), markup=True)
+        # Top sections in a 2x2 grid
+        with Horizontal(classes="metrics-top"):
+            yield Static(self._render_summary(), markup=True, classes="metrics-section", id="metrics-summary")
+            yield Static(self._render_git_state(), markup=True, classes="metrics-section", id="metrics-git-state")
+
+        with Horizontal(classes="metrics-top"):
+            yield Static(self._render_tokens(), markup=True, classes="metrics-section", id="metrics-tokens")
+            yield Static(self._render_pipeline_steps(), markup=True, classes="metrics-section", id="metrics-pipeline")
+
+        yield Static(self._render_conversation(), markup=True, classes="metrics-section", id="metrics-conversation")
+
+        # Workers by cost table (always created, populated in on_mount)
+        table = DataTable(id="metrics-workers-table", classes="metrics-workers-table")
+        table.cursor_type = "row"
+        table.zebra_stripes = True
+        yield table
+
+        # Service health table (always created, populated in on_mount)
+        svc_table = DataTable(id="metrics-services-table", classes="metrics-services")
+        svc_table.cursor_type = "row"
+        yield svc_table
+
+    def on_mount(self) -> None:
+        """Populate data tables after mount."""
+        self._populate_workers_table()
+        self._populate_services_table()
+
+    def _populate_workers_table(self) -> None:
+        """Populate the workers-by-cost table."""
+        try:
+            table = self.query_one("#metrics-workers-table", DataTable)
+        except Exception:
+            return
+
+        if not table.columns:
+            table.add_columns("Status", "Task ID", "Turns", "Tokens", "Cost", "Duration")
+        table.clear()
+
+        for wm in self.metrics.worker_summaries[:20]:
+            status_color = {
+                "running": "#a6e3a1",
+                "completed": "#89b4fa",
+                "failed": "#f38ba8",
+                "stopped": "#7f849c",
+                "merged": "#6c7086",
+            }.get(wm.status, "#7f849c")
+
+            total_tokens = wm.input_tokens + wm.output_tokens
+            table.add_row(
+                f"[{status_color}]{wm.status}[/]",
+                wm.task_id[:30],
+                str(wm.num_turns),
+                fmt_tokens(total_tokens),
+                fmt_cost(wm.total_cost_usd),
+                fmt_duration(wm.duration_ms),
+            )
+
+    def _populate_services_table(self) -> None:
+        """Populate the service health table."""
+        try:
+            table = self.query_one("#metrics-services-table", DataTable)
+        except Exception:
+            return
+
+        if not table.columns:
+            table.add_columns("Service", "Runs", "Success%", "Avg Duration", "Last Run")
+        table.clear()
+
+        service_data = parse_service_metrics(self.ralph_dir)
+        for svc in service_data:
+            table.add_row(
+                svc["service_id"],
+                str(svc["runs"]),
+                f"{svc['success_pct']:.0f}%",
+                fmt_duration(svc["avg_duration_ms"]),
+                format_relative_time(int(svc["last_run"])) if svc["last_run"] else "-",
+            )
 
     def _load_metrics(self) -> None:
         self.metrics = aggregate_worker_metrics(self.ralph_dir)
@@ -344,6 +618,27 @@ class MetricsPanel(Widget):
         if new_hash == self._last_data_hash:
             return
         self._last_data_hash = new_hash
-        self.remove_children()
-        for widget in self.compose():
-            self.mount(widget)
+        # Update Static sections in place
+        try:
+            self.query_one("#metrics-summary", Static).update(self._render_summary())
+        except Exception:
+            pass
+        try:
+            self.query_one("#metrics-git-state", Static).update(self._render_git_state())
+        except Exception:
+            pass
+        try:
+            self.query_one("#metrics-tokens", Static).update(self._render_tokens())
+        except Exception:
+            pass
+        try:
+            self.query_one("#metrics-pipeline", Static).update(self._render_pipeline_steps())
+        except Exception:
+            pass
+        try:
+            self.query_one("#metrics-conversation", Static).update(self._render_conversation())
+        except Exception:
+            pass
+        # Re-populate data tables
+        self._populate_workers_table()
+        self._populate_services_table()

@@ -17,6 +17,7 @@ from .widgets.conversation_panel import ConversationPanel
 from .widgets.plan_panel import PlanPanel
 from .data.watcher import RalphWatcher
 from .data.worker_status_service import WorkerStatusService
+from .messages import NavigateToTask
 
 
 class WiggumHeader(Static):
@@ -176,7 +177,7 @@ class WiggumApp(App):
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         """Handle tab changes - track active tab and refresh newly visible panel."""
-        self._active_tab = event.tab.id or "kanban"
+        self._active_tab = event.pane.id or "kanban"
         # Refresh the newly active panel immediately
         self._refresh_active_panel()
 
@@ -243,6 +244,26 @@ class WiggumApp(App):
             pass
         try:
             self.query_one(PlanPanel).refresh_data()
+        except Exception:
+            pass
+
+    def on_navigate_to_task(self, message: NavigateToTask) -> None:
+        """Handle cross-tab navigation to a specific task."""
+        target = message.target_tab
+        task_id = message.task_id
+
+        # Switch to the target tab
+        tabbed = self.query_one(TabbedContent)
+        tabbed.active = target
+
+        # Tell the target panel to select the matching item
+        try:
+            if target == "plans":
+                panel = self.query_one(PlanPanel)
+                panel.select_by_task_id(task_id)
+            elif target == "conversations":
+                panel = self.query_one(ConversationPanel)
+                panel.select_by_task_id(task_id)
         except Exception:
             pass
 

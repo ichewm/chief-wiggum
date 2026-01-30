@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # retry-strategy.sh - Exponential backoff retry logic for Claude invocations
 #
-# Provides retry wrapper for transient Claude service errors (exit code 5).
+# Provides retry wrapper for transient Claude service errors (exit code 5)
+# and HTTP 429 rate-limit errors (which may surface as exit code 1).
 # Uses exponential backoff with configurable limits.
 set -euo pipefail
 
@@ -25,6 +26,10 @@ CLAUDE_BACKOFF_MULTIPLIER="${WIGGUM_CLAUDE_BACKOFF_MULTIPLIER:-2}"
 # 5 = Claude CLI error (API/service issues)
 # 124 = timeout (command timed out)
 _RETRYABLE_EXIT_CODES=(5 124)
+
+# Stderr patterns indicating an HTTP 429 / rate-limit error
+# (Claude CLI sometimes exits 1 instead of 5 for these)
+_RATE_LIMIT_PATTERNS=("429" "rate limit" "too many requests" "High concurrency")
 
 # =============================================================================
 # RETRY HELPER FUNCTIONS
@@ -57,6 +62,25 @@ _is_retryable_exit_code() {
     local code
     for code in "${_RETRYABLE_EXIT_CODES[@]}"; do
         if [ "$exit_code" -eq "$code" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Check if a stderr capture file contains rate-limit error indicators
+#
+# Args:
+#   stderr_file - Path to file containing captured stderr output
+#
+# Returns: 0 if rate-limit error detected, 1 if not
+_is_rate_limit_error() {
+    local stderr_file="$1"
+    [ -s "$stderr_file" ] || return 1
+
+    local pattern
+    for pattern in "${_RATE_LIMIT_PATTERNS[@]}"; do
+        if grep -qi "$pattern" "$stderr_file" 2>/dev/null; then
             return 0
         fi
     done
@@ -108,18 +132,40 @@ run_claude_with_retry() {
     local attempt=0
     local exit_code=0
 
+    # Temp file for capturing stderr to detect rate-limit errors
+    local _retry_stderr_file
+    _retry_stderr_file=$(mktemp)
+    # shellcheck disable=SC2064
+    trap "rm -f '$_retry_stderr_file'" RETURN
+
     while [ "$attempt" -le "$CLAUDE_MAX_RETRIES" ]; do
-        # Run claude
+        # Clear stderr capture between attempts
+        : > "$_retry_stderr_file"
+
+        # Run claude, capturing stderr for rate-limit detection
         exit_code=0
-        run_claude "$@" || exit_code=$?
+        run_claude "$@" 2>"$_retry_stderr_file" || exit_code=$?
+
+        # Replay captured stderr to the caller
+        if [ -s "$_retry_stderr_file" ]; then
+            cat "$_retry_stderr_file" >&2
+        fi
 
         # Success - return immediately
         if [ "$exit_code" -eq 0 ]; then
             return 0
         fi
 
-        # Check if retryable
-        if ! _is_retryable_exit_code "$exit_code"; then
+        # Check if retryable by exit code
+        local retryable=false
+        if _is_retryable_exit_code "$exit_code"; then
+            retryable=true
+        elif [ "$exit_code" -eq 1 ] && _is_rate_limit_error "$_retry_stderr_file"; then
+            log_warn "Detected rate-limit error in stderr (exit code 1) - treating as retryable"
+            retryable=true
+        fi
+
+        if [ "$retryable" != true ]; then
             log_debug "Claude failed with non-retryable exit code $exit_code"
             return "$exit_code"
         fi

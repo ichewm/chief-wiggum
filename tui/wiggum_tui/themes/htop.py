@@ -122,6 +122,10 @@ DataTable > .datatable--cursor {{
     color: {CATPPUCCIN["red"]};
 }}
 
+.status-merged {{
+    color: {CATPPUCCIN["overlay0"]};
+}}
+
 .status-pending {{
     color: {CATPPUCCIN["subtext0"]};
 }}

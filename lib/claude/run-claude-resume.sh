@@ -7,6 +7,7 @@ set -euo pipefail
 
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
+source "$WIGGUM_HOME/lib/claude/retry-strategy.sh"
 
 # Resume an existing Claude session with a new prompt
 #
@@ -52,7 +53,7 @@ run_agent_resume() {
 
     if [ -n "$output_file" ]; then
         local exit_code=0
-        "run_claude" --verbose \
+        run_claude_with_retry --verbose \
             --resume "$session_id" \
             --output-format stream-json \
             --max-turns "$max_turns" \
@@ -64,7 +65,7 @@ run_agent_resume() {
     else
         # No WIGGUM_LOG_DIR set - output goes to stdout only (not recommended)
         local exit_code=0
-        "run_claude" --resume "$session_id" \
+        run_claude_with_retry --resume "$session_id" \
             --max-turns "$max_turns" \
             --dangerously-skip-permissions \
             -p "$prompt" 2>&1 || exit_code=$?

@@ -282,6 +282,17 @@ def scan_workers(ralph_dir: Path) -> list[Worker]:
             elif prd_status == "failed":
                 status = WorkerStatus.FAILED
 
+        # Check for merged status via git-state.json
+        if status == WorkerStatus.COMPLETED:
+            git_state_path = entry / "git-state.json"
+            if git_state_path.exists():
+                try:
+                    git_state = json.loads(git_state_path.read_text())
+                    if git_state.get("current_state") == "merged":
+                        status = WorkerStatus.MERGED
+                except (json.JSONDecodeError, OSError):
+                    pass
+
         # For running workers, use agent.pid mtime (current agent start time)
         # For completed/stopped workers, use directory timestamp (original creation time)
         if status == WorkerStatus.RUNNING and pid_mtime is not None:
@@ -312,10 +323,10 @@ def scan_workers(ralph_dir: Path) -> list[Worker]:
             pipeline_info=read_pipeline_config(entry),
         )
 
-        # Cache completed/failed workers since their state never changes
+        # Cache completed/failed/merged workers since their state never changes
         # Use full path as cache key to avoid conflicts
         cache_key = str(entry.resolve())
-        if status in (WorkerStatus.COMPLETED, WorkerStatus.FAILED):
+        if status in (WorkerStatus.COMPLETED, WorkerStatus.FAILED, WorkerStatus.MERGED):
             _completed_workers_cache[cache_key] = worker
 
         workers.append(worker)
@@ -366,6 +377,7 @@ def get_worker_counts(workers: list[Worker]) -> dict[str, int]:
         "stopped": 0,
         "completed": 0,
         "failed": 0,
+        "merged": 0,
         "total": len(workers),
     }
     for worker in workers:

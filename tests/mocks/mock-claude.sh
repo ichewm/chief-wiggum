@@ -24,6 +24,7 @@
 #   MOCK_CLAUDE_TOOL_USE       - Simulate tool use blocks: "bash", "edit", "write", or
 #                                comma-separated list (e.g., "bash,edit")
 #   MOCK_CLAUDE_COST_USD       - Cost to report in result (default: "0.01")
+#   MOCK_CLAUDE_STDERR         - Text to emit on stderr before output (for testing retry)
 #   MOCK_SESSION_ID            - Override session ID (default: auto-generated)
 set -euo pipefail
 
@@ -772,6 +773,11 @@ main() {
     # Get response text (from sequential file or env var)
     local response
     response=$(_get_response_text)
+
+    # Emit configured stderr (for testing retry logic with rate-limit detection)
+    if [ -n "${MOCK_CLAUDE_STDERR:-}" ]; then
+        echo "$MOCK_CLAUDE_STDERR" >&2
+    fi
 
     # Generate output based on format
     case "$_parsed_output_format" in

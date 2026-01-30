@@ -31,6 +31,7 @@ source "$WIGGUM_HOME/lib/scheduler/conflict-queue.sh"
 source "$WIGGUM_HOME/lib/scheduler/conflict-registry.sh"
 source "$WIGGUM_HOME/lib/scheduler/pr-merge-optimizer.sh"
 source "$WIGGUM_HOME/lib/scheduler/orchestrator-functions.sh"
+source "$WIGGUM_HOME/lib/scheduler/terminal-header.sh"
 
 # Service-based scheduler (consolidated module includes core + state)
 source "$WIGGUM_HOME/lib/service/service-scheduler.sh"
@@ -883,6 +884,7 @@ _main_loop() {
 
         # Check if we're done
         if scheduler_is_complete; then
+            terminal_header_cleanup 2>/dev/null || true
             display_final_summary "$RALPH_DIR"
             break
         fi
@@ -989,6 +991,11 @@ _main_loop() {
         fi
 
         scheduler_update_aging
+
+        if [ "$SCHED_SCHEDULING_EVENT" = true ]; then
+            terminal_header_force_redraw
+        fi
+        terminal_header_refresh "$iteration" "$MAX_WORKERS"
 
         if [ "$SCHED_SCHEDULING_EVENT" = true ]; then
             local cyclic_ref
@@ -1178,6 +1185,7 @@ main() {
 
     # Setup trap to cleanup lock file on exit
     cleanup_orchestrator() {
+        terminal_header_cleanup 2>/dev/null || true
         if [ "${_ORCH_SHUTDOWN_REQUESTED:-false}" = false ]; then
             log "Cleaning up orchestrator lock"
             _ORCH_SHUTDOWN_REQUESTED=true
@@ -1188,6 +1196,7 @@ main() {
 
     # Handle INT and TERM signals - stop orchestration but leave workers running
     handle_shutdown_signal() {
+        terminal_header_cleanup 2>/dev/null || true
         log ""
         log "Shutdown signal received - stopping orchestrator"
         log "Active workers will continue running to completion"
@@ -1196,6 +1205,7 @@ main() {
         exit $EXIT_SIGINT
     }
     trap handle_shutdown_signal INT TERM
+    trap _terminal_header_on_resize WINCH
 
     if [ ! -f "$RALPH_DIR/kanban.md" ]; then
         log_error ".ralph/kanban.md not found. Create a kanban file first."
@@ -1312,6 +1322,9 @@ main() {
 
     # Resume any stopped WIP workers before starting new ones
     _schedule_resume_workers
+
+    # Initialize terminal header (after all startup output)
+    terminal_header_init "$MAX_WORKERS" "$mode_desc"
 
     # Run service-based main loop
     _main_loop

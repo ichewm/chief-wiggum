@@ -1,18 +1,26 @@
-"""Logs panel widget with filtering and real-time updates."""
+"""Logs panel widget with tree-based source selector and log viewer."""
 
+import re
 from pathlib import Path
 from textual.app import ComposeResult
 from textual.containers import Horizontal
-from textual.widgets import Static, RichLog, Select
+from textual.widgets import Static, RichLog, Input, Tree
+from textual.widgets.tree import TreeNode
 from textual.widget import Widget
 from textual.binding import Binding
 
-from ..data.log_reader import LogTailer, filter_by_level, read_log
-from ..data.models import LogLevel
+from ..data.log_reader import (
+    LogTailer,
+    filter_by_level,
+    read_log,
+    parse_activity_log,
+)
+from ..data.models import LogLevel, LogLine
+from ..data.worker_scanner import WORKER_PATTERN
 
 
 class LogsPanel(Widget):
-    """Logs panel showing log files with filtering."""
+    """Logs panel with tree-based source selector and log viewer."""
 
     DEFAULT_CSS = """
     LogsPanel {
@@ -27,8 +35,26 @@ class LogsPanel(Widget):
         padding: 0 1;
     }
 
-    LogsPanel .logs-controls {
-        height: 3;
+    LogsPanel .logs-body {
+        height: 1fr;
+        width: 100%;
+    }
+
+    LogsPanel .logs-tree {
+        width: 35;
+        height: 1fr;
+        border: solid #45475a;
+        background: #181825;
+    }
+
+    LogsPanel .logs-viewer-pane {
+        width: 1fr;
+        height: 1fr;
+        layout: vertical;
+    }
+
+    LogsPanel .logs-toolbar {
+        height: 1;
         background: #181825;
         padding: 0 1;
     }
@@ -39,14 +65,24 @@ class LogsPanel(Widget):
         border: solid #45475a;
     }
 
-    LogsPanel Select {
-        width: 20;
-        margin-right: 2;
+    LogsPanel Input {
+        width: 1fr;
+        height: 1;
+        border: none !important;
+        background: #313244;
+        padding: 0 1;
+        display: none;
+    }
+
+    LogsPanel Input.visible {
+        display: block;
+        background: #313244;
     }
     """
 
     BINDINGS = [
         Binding("f", "cycle_filter", "Filter"),
+        Binding("slash", "toggle_search", "Search /", priority=True),
         Binding("g", "goto_top", "Top"),
         Binding("G", "goto_bottom", "Bottom"),
         # Vim-style scrolling
@@ -56,11 +92,6 @@ class LogsPanel(Widget):
         Binding("ctrl+u", "half_page_up", "Half Page Up", show=False),
         Binding("ctrl+f", "page_down", "Page Down", show=False),
         Binding("ctrl+b", "page_up", "Page Up", show=False),
-    ]
-
-    LOG_SOURCES = [
-        ("combined", "Combined Logs"),
-        ("audit", "Audit Logs"),
     ]
 
     FILTER_LEVELS = [
@@ -73,56 +104,191 @@ class LogsPanel(Widget):
     def __init__(self, ralph_dir: Path) -> None:
         super().__init__()
         self.ralph_dir = ralph_dir
-        self.current_source = "combined"
         self.current_filter_idx = 0
         self.tailer: LogTailer | None = None
+        self._current_log_path: Path | None = None
+        self._current_is_activity: bool = False
+        self._search_visible: bool = False
+        self._search_query: str = ""
+        self._tree_sources: dict[str, Path] = {}  # node data key -> Path
+        self._last_sources_hash: str = ""
 
     def compose(self) -> ComposeResult:
+        filter_name = self.FILTER_LEVELS[self.current_filter_idx][1]
         yield Static(
-            "[bold]Logs[/] │ Source: Combined │ Filter: All",
+            f"[bold]Logs[/] │ Filter: {filter_name} │ [#585b70]/ search  f filter[/]",
             classes="logs-header",
             id="logs-header",
         )
 
-        with Horizontal(classes="logs-controls"):
-            yield Select(
-                [(label, value) for value, label in self.LOG_SOURCES],
-                value="combined",
-                id="source-select",
-            )
-            yield Select(
-                [
-                    (label, str(i))
-                    for i, (_, label) in enumerate(self.FILTER_LEVELS)
-                ],
-                value="0",
-                id="filter-select",
-            )
-
-        yield RichLog(id="log-viewer", highlight=True, markup=True)
+        with Horizontal(classes="logs-body"):
+            yield Tree("Sources", id="logs-source-tree", classes="logs-tree")
+            with Widget(classes="logs-viewer-pane"):
+                yield Input(
+                    placeholder="Press / to search logs...",
+                    id="logs-search-input",
+                )
+                yield RichLog(id="log-viewer", highlight=True, markup=True)
 
     def on_mount(self) -> None:
-        """Initialize log viewer."""
-        self._setup_tailer()
-        self._load_logs()
-        # Set up periodic refresh
+        """Initialize log viewer and populate source tree."""
+        self._populate_source_tree()
+        # Select first global log by default
+        self._select_log_source(self.ralph_dir / "logs" / "workers.log")
         self.set_interval(2, self._check_new_logs)
 
-    def _get_log_path(self) -> Path:
-        """Get path for current log source."""
-        if self.current_source == "combined":
-            return self.ralph_dir / "logs" / "workers.log"
-        elif self.current_source == "audit":
-            return self.ralph_dir / "logs" / "audit.log"
-        return self.ralph_dir / "logs" / "workers.log"
+    def _populate_source_tree(self) -> None:
+        """Populate the source tree with global logs and worker logs."""
+        try:
+            tree = self.query_one("#logs-source-tree", Tree)
+            tree.clear()
+            self._tree_sources.clear()
 
-    def _setup_tailer(self) -> None:
-        """Set up log tailer for current source."""
-        log_path = self._get_log_path()
-        self.tailer = LogTailer(log_path, max_buffer=1000)
+            # Global Logs
+            global_node = tree.root.add("[#89b4fa]Global Logs[/]", expand=True)
+
+            workers_log = self.ralph_dir / "logs" / "workers.log"
+            if workers_log.exists():
+                key = "global:workers.log"
+                self._tree_sources[key] = workers_log
+                global_node.add_leaf("[#cdd6f4]workers.log[/]", data=key)
+
+            audit_log = self.ralph_dir / "logs" / "audit.log"
+            if audit_log.exists():
+                key = "global:audit.log"
+                self._tree_sources[key] = audit_log
+                global_node.add_leaf("[#cdd6f4]audit.log[/]", data=key)
+
+            activity_log = self.ralph_dir / "activity.jsonl"
+            if activity_log.exists():
+                key = "global:activity.jsonl"
+                self._tree_sources[key] = activity_log
+                global_node.add_leaf("[#cdd6f4]activity.jsonl[/]", data=key)
+
+            # Workers
+            workers_dir = self.ralph_dir / "workers"
+            if workers_dir.is_dir():
+                workers_node = tree.root.add("[#89b4fa]Workers[/]", expand=True)
+
+                worker_dirs = []
+                for entry in workers_dir.iterdir():
+                    if not entry.name.startswith("worker-") or not entry.is_dir():
+                        continue
+                    match = WORKER_PATTERN.match(entry.name)
+                    if not match:
+                        continue
+                    task_id, ts_str = match.groups()
+                    try:
+                        timestamp = int(ts_str)
+                    except ValueError:
+                        timestamp = 0
+
+                    # Determine status
+                    has_pid = (entry / "agent.pid").exists()
+                    status = "running" if has_pid else "stopped"
+                    if not has_pid:
+                        prd_path = entry / "prd.md"
+                        if prd_path.exists():
+                            try:
+                                content = prd_path.read_text()
+                                if "- [*]" in content:
+                                    status = "failed"
+                                elif "- [ ]" not in content:
+                                    status = "completed"
+                            except OSError:
+                                pass
+
+                    worker_dirs.append((entry, task_id, timestamp, status))
+
+                # Sort by timestamp descending (newest first)
+                worker_dirs.sort(key=lambda x: x[2], reverse=True)
+
+                for entry, task_id, timestamp, status in worker_dirs:
+                    status_color = {
+                        "running": "#a6e3a1",
+                        "stopped": "#7f849c",
+                        "completed": "#89b4fa",
+                        "failed": "#f38ba8",
+                    }.get(status, "#7f849c")
+
+                    worker_node = workers_node.add(
+                        f"[{status_color}]{task_id} ({status})[/]",
+                        expand=False,
+                    )
+
+                    # worker.log
+                    worker_log = entry / "worker.log"
+                    if worker_log.exists():
+                        key = f"worker:{entry.name}:worker.log"
+                        self._tree_sources[key] = worker_log
+                        worker_node.add_leaf("[#cdd6f4]worker.log[/]", data=key)
+
+                    # Nested log directories
+                    logs_dir = entry / "logs"
+                    if logs_dir.is_dir():
+                        for log_subdir in sorted(logs_dir.iterdir()):
+                            if log_subdir.is_dir():
+                                subdir_node = worker_node.add(
+                                    f"[#a6adc8]{log_subdir.name}/[/]",
+                                    expand=False,
+                                )
+                                for log_file in sorted(log_subdir.glob("*.log")):
+                                    key = f"worker:{entry.name}:{log_subdir.name}/{log_file.name}"
+                                    self._tree_sources[key] = log_file
+                                    subdir_node.add_leaf(
+                                        f"[#cdd6f4]{log_file.name}[/]",
+                                        data=key,
+                                    )
+
+            tree.root.expand()
+
+        except Exception:
+            pass
+
+    def _select_log_source(self, path: Path) -> None:
+        """Select a log source and display its content.
+
+        Args:
+            path: Path to the log file.
+        """
+        self._current_log_path = path
+        self._current_is_activity = path.name.endswith(".jsonl")
+
+        if self._current_is_activity:
+            self.tailer = None
+            self._load_activity_log()
+        else:
+            self.tailer = LogTailer(path, max_buffer=1000)
+            self._load_logs()
+
+        self._update_header()
+
+    def _load_activity_log(self) -> None:
+        """Load and display an activity JSONL log."""
+        if not self._current_log_path:
+            return
+        try:
+            log_viewer = self.query_one("#log-viewer", RichLog)
+            log_viewer.clear()
+
+            logs = parse_activity_log(self._current_log_path)
+
+            # Apply filter
+            min_level = self.FILTER_LEVELS[self.current_filter_idx][0]
+            if min_level:
+                logs = filter_by_level(logs, min_level)
+
+            # Apply search
+            if self._search_query:
+                logs = self._search_filter(logs)
+
+            for log in logs:
+                self._write_log_line(log_viewer, log)
+        except Exception:
+            pass
 
     def _load_logs(self) -> None:
-        """Load and display logs."""
+        """Load and display logs from the current tailer."""
         if not self.tailer:
             return
 
@@ -137,13 +303,22 @@ class LogsPanel(Widget):
             if min_level:
                 logs = filter_by_level(logs, min_level)
 
+            # Apply search
+            if self._search_query:
+                logs = self._search_filter(logs)
+
             for log in logs:
                 self._write_log_line(log_viewer, log)
 
         except Exception:
             pass
 
-    def _write_log_line(self, viewer: RichLog, log) -> None:
+    def _search_filter(self, logs: list[LogLine]) -> list[LogLine]:
+        """Filter logs by search query."""
+        q = self._search_query.lower()
+        return [log for log in logs if q in log.raw.lower()]
+
+    def _write_log_line(self, viewer: RichLog, log: LogLine) -> None:
         """Write a single log line with coloring."""
         if log.level:
             level_colors = {
@@ -164,6 +339,9 @@ class LogsPanel(Widget):
 
     def _check_new_logs(self) -> None:
         """Check for and display new log lines."""
+        if self._current_is_activity:
+            return  # Activity logs don't tail
+
         if not self.tailer:
             return
 
@@ -179,6 +357,10 @@ class LogsPanel(Widget):
             if min_level:
                 new_logs = filter_by_level(new_logs, min_level)
 
+            # Apply search
+            if self._search_query:
+                new_logs = self._search_filter(new_logs)
+
             for log in new_logs:
                 self._write_log_line(log_viewer, log)
 
@@ -188,38 +370,87 @@ class LogsPanel(Widget):
     def _update_header(self) -> None:
         """Update header with current settings."""
         try:
-            source_name = dict(self.LOG_SOURCES).get(self.current_source, "Unknown")
             filter_name = self.FILTER_LEVELS[self.current_filter_idx][1]
+            source_name = ""
+            if self._current_log_path:
+                source_name = self._current_log_path.name
 
             header = self.query_one("#logs-header", Static)
-            header.update(f"[bold]Logs[/] │ Source: {source_name} │ Filter: {filter_name}")
+            header.update(
+                f"[bold]Logs[/] │ Source: {source_name} │ Filter: {filter_name} │ "
+                f"[#585b70]/search  f-filter[/]"
+            )
         except Exception:
             pass
 
-    def on_select_changed(self, event: Select.Changed) -> None:
-        """Handle source/filter selection change."""
-        if event.select.id == "source-select":
-            self.current_source = str(event.value)
-            self._setup_tailer()
-            self._load_logs()
-            self._update_header()
-        elif event.select.id == "filter-select":
-            self.current_filter_idx = int(event.value)
-            self._load_logs()
-            self._update_header()
+    def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
+        """Handle tree node selection to switch log source."""
+        node = event.node
+        if node.data and isinstance(node.data, str) and node.data in self._tree_sources:
+            path = self._tree_sources[node.data]
+            self._select_log_source(path)
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Handle search input changes."""
+        if event.input.id == "logs-search-input":
+            self._search_query = event.value
+            # Reload logs with search filter
+            if self._current_is_activity:
+                self._load_activity_log()
+            else:
+                self._reload_with_filter()
+
+    def _reload_with_filter(self) -> None:
+        """Reload all buffered logs with current filter/search applied."""
+        if not self.tailer:
+            return
+        try:
+            log_viewer = self.query_one("#log-viewer", RichLog)
+            log_viewer.clear()
+
+            logs = self.tailer.get_all_lines()
+
+            min_level = self.FILTER_LEVELS[self.current_filter_idx][0]
+            if min_level:
+                logs = filter_by_level(logs, min_level)
+
+            if self._search_query:
+                logs = self._search_filter(logs)
+
+            for log in logs:
+                self._write_log_line(log_viewer, log)
+        except Exception:
+            pass
+
+    def action_toggle_search(self) -> None:
+        """Toggle search input visibility."""
+        try:
+            search_input = self.query_one("#logs-search-input", Input)
+            if self._search_visible:
+                self._search_visible = False
+                search_input.remove_class("visible")
+                search_input.value = ""
+                self._search_query = ""
+                # Reload without search
+                if self._current_is_activity:
+                    self._load_activity_log()
+                else:
+                    self._reload_with_filter()
+            else:
+                self._search_visible = True
+                search_input.add_class("visible")
+                search_input.focus()
+        except Exception:
+            pass
 
     def action_cycle_filter(self) -> None:
         """Cycle through filter levels."""
         self.current_filter_idx = (self.current_filter_idx + 1) % len(self.FILTER_LEVELS)
-
-        try:
-            select = self.query_one("#filter-select", Select)
-            select.value = str(self.current_filter_idx)
-        except Exception:
-            pass
-
-        self._load_logs()
         self._update_header()
+        if self._current_is_activity:
+            self._load_activity_log()
+        else:
+            self._reload_with_filter()
 
     def action_goto_top(self) -> None:
         """Scroll to top of logs."""
@@ -285,6 +516,27 @@ class LogsPanel(Widget):
         except Exception:
             pass
 
+    def _compute_sources_hash(self) -> str:
+        """Compute a hash of available log sources for change detection."""
+        sources = []
+        logs_dir = self.ralph_dir / "logs"
+        if logs_dir.is_dir():
+            sources.extend(sorted(f.name for f in logs_dir.iterdir() if f.is_file()))
+        activity = self.ralph_dir / "activity.jsonl"
+        if activity.exists():
+            sources.append("activity.jsonl")
+        workers_dir = self.ralph_dir / "workers"
+        if workers_dir.is_dir():
+            for entry in sorted(workers_dir.iterdir()):
+                if entry.name.startswith("worker-") and entry.is_dir():
+                    sources.append(entry.name)
+        return str(sources)
+
     def refresh_data(self) -> None:
         """Refresh log display."""
         self._check_new_logs()
+        # Only rebuild tree when sources change (new workers, new log files)
+        new_hash = self._compute_sources_hash()
+        if new_hash != self._last_sources_hash:
+            self._last_sources_hash = new_hash
+            self._populate_source_tree()

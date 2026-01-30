@@ -1,5 +1,6 @@
 """Log reader with parsing and tailing support."""
 
+import json
 import re
 from pathlib import Path
 from collections import deque
@@ -198,3 +199,131 @@ class LogTailer:
             List of all buffered log lines.
         """
         return list(self.buffer)
+
+
+def parse_activity_log(path: Path, max_lines: int = 500) -> list[LogLine]:
+    """Parse a NDJSON activity log file into LogLine objects.
+
+    Each line is a JSON object with at least an "event" field.
+    Formatted as: [timestamp] event: task_id details
+
+    Args:
+        path: Path to activity.jsonl file.
+        max_lines: Maximum number of lines to return.
+
+    Returns:
+        List of parsed LogLine objects.
+    """
+    if not path.exists():
+        return []
+
+    lines: list[LogLine] = []
+    try:
+        with open(path, "r") as f:
+            raw_lines = deque(f, maxlen=max_lines)
+
+        for raw_line in raw_lines:
+            raw_line = raw_line.strip()
+            if not raw_line:
+                continue
+            try:
+                data = json.loads(raw_line)
+                event = data.get("event", "unknown")
+                task_id = data.get("task_id", "")
+                timestamp = data.get("timestamp", "")
+
+                # Build a human-readable message
+                details_parts = []
+                if task_id:
+                    details_parts.append(task_id)
+                for key in ("agent", "step_id", "result", "message", "status"):
+                    if key in data:
+                        details_parts.append(f"{key}={data[key]}")
+                details = " ".join(details_parts)
+
+                # Map event types to log levels
+                level = LogLevel.INFO
+                if "error" in event.lower() or "fail" in event.lower():
+                    level = LogLevel.ERROR
+                elif "warn" in event.lower():
+                    level = LogLevel.WARN
+                elif "debug" in event.lower():
+                    level = LogLevel.DEBUG
+
+                lines.append(LogLine(
+                    raw=raw_line,
+                    timestamp=str(timestamp) if timestamp else None,
+                    level=level,
+                    message=f"{event}: {details}",
+                ))
+            except json.JSONDecodeError:
+                lines.append(LogLine(raw=raw_line, message=raw_line))
+    except OSError:
+        pass
+
+    return lines
+
+
+def discover_worker_log_sources(ralph_dir: Path) -> list[tuple[str, str, Path]]:
+    """Discover all log sources from worker directories.
+
+    Returns:
+        List of (task_id_with_status, worker_dir_name, log_path) tuples,
+        sorted by worker timestamp (newest first).
+    """
+    workers_dir = ralph_dir / "workers"
+    if not workers_dir.is_dir():
+        return []
+
+    sources: list[tuple[str, str, Path, int]] = []
+
+    for entry in sorted(workers_dir.iterdir(), reverse=True):
+        if not entry.name.startswith("worker-") or not entry.is_dir():
+            continue
+
+        # Extract task_id and timestamp from dir name
+        from .worker_scanner import WORKER_PATTERN
+        match = WORKER_PATTERN.match(entry.name)
+        if not match:
+            continue
+
+        task_id, ts_str = match.groups()
+        try:
+            timestamp = int(ts_str)
+        except ValueError:
+            timestamp = 0
+
+        # Determine status from agent.pid presence
+        has_pid = (entry / "agent.pid").exists()
+        status = "running" if has_pid else "stopped"
+
+        # Check for PRD status
+        prd_path = entry / "prd.md"
+        if not has_pid and prd_path.exists():
+            try:
+                content = prd_path.read_text()
+                if "- [*]" in content:
+                    status = "failed"
+                elif "- [ ]" not in content:
+                    status = "completed"
+            except OSError:
+                pass
+
+        label = f"{task_id} ({status})"
+
+        # Add worker.log
+        worker_log = entry / "worker.log"
+        if worker_log.exists():
+            sources.append((label, entry.name, worker_log, timestamp))
+
+        # Add nested log directories
+        logs_dir = entry / "logs"
+        if logs_dir.is_dir():
+            for log_subdir in sorted(logs_dir.iterdir()):
+                if log_subdir.is_dir():
+                    for log_file in sorted(log_subdir.glob("*.log")):
+                        rel = f"{log_subdir.name}/{log_file.name}"
+                        sources.append((label, rel, log_file, timestamp))
+
+    # Already sorted by directory order (newest first)
+    return [(s[0], s[1], s[2]) for s in sources]
