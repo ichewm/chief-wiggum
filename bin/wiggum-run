@@ -55,6 +55,7 @@ SIBLING_WIP_PENALTY=20000  # Fixed-point penalty when sibling is WIP (20000 = 2.
 PLAN_BONUS=15000           # Fixed-point bonus for tasks with plans (15000 = 1.5)
 DEP_BONUS_PER_TASK=7000    # Fixed-point bonus per task blocked (7000 = 0.7)
 WIGGUM_RUN_MODE="default"  # default | fix-only | merge-only
+declare -gA _PENDING_RESUMES=()  # Maps resume_pid → "worker_dir|task_id|worker_type"
 
 show_help() {
     cat << EOF
@@ -655,31 +656,58 @@ _schedule_resume_workers() {
         ) >> "$RALPH_DIR/logs/workers.log" 2>&1 &
         local resume_pid=$!
 
-        # Wait for wiggum-resume to complete before checking agent.pid.
+        # Track resume process for non-blocking polling in main loop.
         # Resume runs LLM analysis (resume-decide) before launching the worker
-        # subprocess, so agent.pid won't exist until after that analysis finishes.
-        # The previous approach of immediately polling for agent.pid with a 30s
-        # timeout failed because the LLM call alone can exceed 30 seconds.
+        # subprocess, so we cannot wait synchronously — it blocks 30+ seconds
+        # per worker and delays _main_loop startup.
+        _PENDING_RESUMES[$resume_pid]="$worker_dir|$task_id|$worker_type"
+        log "Resume process launched for $task_id (resume PID: $resume_pid)"
+    done <<< "$resumable"
+}
+
+# Poll background resume processes for completion
+#
+# Called each main-loop iteration. Checks if any wiggum-resume processes
+# launched by _schedule_resume_workers() have finished, and if so, registers
+# the resulting worker into the pool.
+_poll_pending_resumes() {
+    [ ${#_PENDING_RESUMES[@]} -gt 0 ] || return 0
+
+    local pid
+    for pid in "${!_PENDING_RESUMES[@]}"; do
+        # Still running? Skip.
+        if kill -0 "$pid" 2>/dev/null; then
+            continue
+        fi
+
+        # Process finished — get exit code
         local resume_exit=0
-        wait "$resume_pid" 2>/dev/null || resume_exit=$?
+        wait "$pid" 2>/dev/null || resume_exit=$?
+
+        # Parse metadata
+        local entry="${_PENDING_RESUMES[$pid]}"
+        unset '_PENDING_RESUMES[$pid]'
+        local worker_dir task_id worker_type
+        IFS='|' read -r worker_dir task_id worker_type <<< "$entry"
 
         if [ "$resume_exit" -ne 0 ]; then
             log_error "Resume command failed for $task_id (exit code: $resume_exit)"
             continue
         fi
 
-        # Track the worker — short wait since setsid subprocess was already launched
+        # Worker subprocess was launched by wiggum-resume — poll for its PID
         if wait_for_worker_pid "$worker_dir" "$PID_WAIT_TIMEOUT"; then
-            local pid
-            pid=$(cat "$worker_dir/agent.pid")
-            pool_add "$pid" "$worker_type" "$task_id"
+            local wpid
+            wpid=$(cat "$worker_dir/agent.pid")
+            pool_add "$wpid" "$worker_type" "$task_id"
             scheduler_mark_event
-            activity_log "worker.resumed" "$(basename "$worker_dir")" "$task_id" "pipeline_step=$current_step pid=$pid type=$worker_type"
-            log "Resumed worker for $task_id (PID: $pid, type: $worker_type)"
+            activity_log "worker.resumed" "$(basename "$worker_dir")" "$task_id" \
+                "pipeline_step=$(cat "$worker_dir/current_step" 2>/dev/null || echo unknown) pid=$wpid type=$worker_type"
+            log "Resumed worker for $task_id (PID: $wpid, type: $worker_type)"
         else
             log_error "Resume started but PID not created for $task_id"
         fi
-    done <<< "$resumable"
+    done
 }
 
 # Check if copilot has reviewed a PR
@@ -890,6 +918,9 @@ _main_loop() {
 
         # Ingest pool entries persisted by subshells before cleanup/orphan detection
         pool_ingest_pending "$RALPH_DIR"
+
+        # Poll background resume processes launched at startup
+        _poll_pending_resumes
 
         # Clean up finished workers FIRST - before services run
         # This ensures completion handlers run before services detect "stuck" workers
