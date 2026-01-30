@@ -41,7 +41,7 @@ github_sync_state_init() {
     local state_file
     state_file=$(_github_sync_state_file "$ralph_dir")
 
-    if [ ! -f "$state_file" ]; then
+    if [ ! -s "$state_file" ]; then
         echo '{"version":"2.0","last_down_sync_at":0,"last_up_sync_at":0,"issues":{}}' | \
             jq '.' > "$state_file"
     fi
@@ -58,7 +58,7 @@ github_sync_state_load() {
     local state_file
     state_file=$(_github_sync_state_file "$ralph_dir")
 
-    if [ -f "$state_file" ]; then
+    if [ -s "$state_file" ]; then
         cat "$state_file"
     else
         echo '{"version":"2.0","last_down_sync_at":0,"last_up_sync_at":0,"issues":{}}'
@@ -83,7 +83,7 @@ github_sync_state_save() {
     local tmp_file
     tmp_file=$(mktemp "${state_file}.XXXXXX")
 
-    if echo "$state_json" | jq '.' > "$tmp_file" 2>/dev/null; then
+    if echo "$state_json" | jq '.' > "$tmp_file" 2>/dev/null && [ -s "$tmp_file" ]; then
         mv "$tmp_file" "$state_file"
         return 0
     else
