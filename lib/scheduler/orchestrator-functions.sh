@@ -276,6 +276,9 @@ orch_spawn_multi_pr_planner() {
         task_ids=$(echo "$first_group" | jq '.task_ids')
 
         batch_id=$(conflict_queue_create_batch "$ralph_dir" "$task_ids")
+        local task_count
+        task_count=$(echo "$task_ids" | jq 'length')
+        log "Created conflict batch $batch_id with $task_count tasks"
     fi
 
     # Create planner worker directory
@@ -283,7 +286,12 @@ orch_spawn_multi_pr_planner() {
     mkdir -p "$planner_worker_dir/logs" "$planner_worker_dir/results"
 
     # Build batch file
-    conflict_queue_build_batch_file "$ralph_dir" "$batch_id" "$planner_worker_dir/conflict-batch.json"
+    if ! conflict_queue_build_batch_file "$ralph_dir" "$batch_id" "$planner_worker_dir/conflict-batch.json"; then
+        log_error "Failed to build batch file for $batch_id - marking batch as failed"
+        conflict_queue_update_batch_status "$ralph_dir" "$batch_id" "failed"
+        rm -rf "$planner_worker_dir"
+        return 1
+    fi
 
     # Update batch status
     conflict_queue_update_batch_status "$ralph_dir" "$batch_id" "planning"

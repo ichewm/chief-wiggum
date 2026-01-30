@@ -456,8 +456,10 @@ _check_completed_services() {
             if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
                 # Process has exited
                 # Check exit code from wait (if possible)
-                wait "$pid" 2>/dev/null
-                local exit_code=$?
+                # Guard with || true to prevent set -e from killing the scheduler
+                # when a service exits with non-zero
+                local exit_code=0
+                wait "$pid" 2>/dev/null || exit_code=$?
 
                 # Record metrics
                 local start_time duration_ms

@@ -273,6 +273,41 @@ function_name() {
 }
 ```
 
+### Functions That Return Values via stdout
+- **Never call `log()` or `log_info()` in functions that echo return values** — `log()` writes to stdout and contaminates values captured via `$()`. Move the log call to the caller after capturing the value.
+- `log_debug()`, `log_warn()`, and `log_error()` are safe (they use stderr).
+
+```bash
+# BAD - log() output captured into $result
+get_id() {
+    local id="batch-$(date +%s)"
+    echo "$id"
+    log "Created $id"   # BREAKS: contaminates stdout capture
+}
+result=$(get_id)        # result = "batch-123\n[...] INFO: Created batch-123"
+
+# GOOD - caller logs after capture
+get_id() {
+    local id="batch-$(date +%s)"
+    echo "$id"
+}
+result=$(get_id)
+log "Created $result"   # Safe: log after capture
+```
+
+### `set -e` and Background Process Exit Codes
+- **Always guard `wait` with `|| exit_code=$?`** — bare `wait "$pid"` returns the process exit code, which under `set -e` kills the calling script before the next line can capture it.
+
+```bash
+# BAD - set -e kills script if process exited non-zero
+wait "$pid" 2>/dev/null
+local exit_code=$?         # Never reached if wait returns non-zero
+
+# GOOD - || disables set -e for the wait
+local exit_code=0
+wait "$pid" 2>/dev/null || exit_code=$?
+```
+
 ### Shellcheck
 - Run `./tests/run-shellcheck.sh` before committing
 - All scripts must pass shellcheck

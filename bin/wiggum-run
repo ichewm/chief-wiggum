@@ -525,6 +525,9 @@ _check_and_spawn_multi_pr_planner() {
 
         # Create batch
         batch_id=$(conflict_queue_create_batch "$RALPH_DIR" "$task_ids")
+        local task_count
+        task_count=$(echo "$task_ids" | jq 'length')
+        log "Created conflict batch $batch_id with $task_count tasks"
     fi
 
     # Create planner worker directory

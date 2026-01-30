@@ -283,10 +283,7 @@ conflict_queue_create_batch() {
         mv "$queue_file.tmp" "$queue_file"
     ) 200>"$lock_file"
 
-    local task_count
-    task_count=$(echo "$task_ids" | jq 'length')
     echo "$batch_id"
-    log "Created conflict batch $batch_id with $task_count tasks"
 }
 
 # Update batch status
