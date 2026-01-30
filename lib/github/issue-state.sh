@@ -42,7 +42,7 @@ github_sync_state_init() {
     state_file=$(_github_sync_state_file "$ralph_dir")
 
     if [ ! -f "$state_file" ]; then
-        echo '{"version":"1.0","last_down_sync_at":0,"last_up_sync_at":0,"issues":{}}' | \
+        echo '{"version":"2.0","last_down_sync_at":0,"last_up_sync_at":0,"issues":{}}' | \
             jq '.' > "$state_file"
     fi
 }
@@ -61,7 +61,7 @@ github_sync_state_load() {
     if [ -f "$state_file" ]; then
         cat "$state_file"
     else
-        echo '{"version":"1.0","last_down_sync_at":0,"last_up_sync_at":0,"issues":{}}'
+        echo '{"version":"2.0","last_down_sync_at":0,"last_up_sync_at":0,"issues":{}}'
     fi
 }
 
@@ -92,66 +92,66 @@ github_sync_state_save() {
     fi
 }
 
-# Get a specific issue entry from state
+# Get a specific task entry from state
 #
 # Args:
-#   ralph_dir    - Path to .ralph directory
-#   issue_number - GitHub issue number (string)
+#   ralph_dir - Path to .ralph directory
+#   task_id   - Kanban task ID (e.g., "GH-42")
 #
 # Returns: JSON object on stdout, or "null" if not found
-github_sync_state_get_issue() {
+github_sync_state_get_task() {
     local ralph_dir="$1"
-    local issue_number="$2"
+    local task_id="$2"
 
     local state_file
     state_file=$(_github_sync_state_file "$ralph_dir")
 
     if [ -f "$state_file" ]; then
-        jq -r --arg num "$issue_number" '.issues[$num] // null' "$state_file" 2>/dev/null || echo "null"
+        jq -r --arg tid "$task_id" '.issues[$tid] // null' "$state_file" 2>/dev/null || echo "null"
     else
         echo "null"
     fi
 }
 
-# Update a specific issue entry in the state file
+# Update a specific task entry in the state file
 #
 # Args:
-#   ralph_dir    - Path to .ralph directory
-#   issue_number - GitHub issue number (string)
-#   issue_json   - JSON object for this issue
+#   ralph_dir  - Path to .ralph directory
+#   task_id    - Kanban task ID (e.g., "GH-42")
+#   task_json  - JSON object for this task
 #
 # Returns: 0 on success, 1 on failure
-github_sync_state_set_issue() {
+github_sync_state_set_task() {
     local ralph_dir="$1"
-    local issue_number="$2"
-    local issue_json="$3"
+    local task_id="$2"
+    local task_json="$3"
 
     local state
     state=$(github_sync_state_load "$ralph_dir")
 
     local updated
-    updated=$(echo "$state" | jq --arg num "$issue_number" --argjson data "$issue_json" \
-        '.issues[$num] = $data') || return 1
+    updated=$(echo "$state" | jq --arg tid "$task_id" --argjson data "$task_json" \
+        '.issues[$tid] = $data') || return 1
 
     github_sync_state_save "$ralph_dir" "$updated"
 }
 
-# Remove an issue entry from the state file
+# Remove a task entry from the state file
 #
 # Args:
-#   ralph_dir    - Path to .ralph directory
-#   issue_number - GitHub issue number (string)
+#   ralph_dir - Path to .ralph directory
+#   task_id   - Kanban task ID (e.g., "GH-42")
 #
 # Returns: 0 on success
-github_sync_state_remove_issue() {
+github_sync_state_remove_task() {
     local ralph_dir="$1"
-    local issue_number="$2"
+    local task_id="$2"
 
     local state
     state=$(github_sync_state_load "$ralph_dir")
 
     local updated
-    updated=$(echo "$state" | jq --arg num "$issue_number" 'del(.issues[$num])') || return 1
+    updated=$(echo "$state" | jq --arg tid "$task_id" 'del(.issues[$tid])') || return 1
 
     github_sync_state_save "$ralph_dir" "$updated"
 }
@@ -196,13 +196,13 @@ github_sync_state_set_up_sync_time() {
     github_sync_state_save "$ralph_dir" "$updated"
 }
 
-# Get all tracked issue numbers
+# Get all tracked task IDs
 #
 # Args:
 #   ralph_dir - Path to .ralph directory
 #
-# Returns: newline-separated issue numbers on stdout
-github_sync_state_list_issues() {
+# Returns: newline-separated task IDs on stdout
+github_sync_state_list_tasks() {
     local ralph_dir="$1"
 
     local state_file
@@ -213,31 +213,52 @@ github_sync_state_list_issues() {
     fi
 }
 
+# Find the task ID that tracks a given GitHub issue number
+#
+# Args:
+#   ralph_dir    - Path to .ralph directory
+#   issue_number - GitHub issue number (string)
+#
+# Returns: task ID on stdout, or empty string if not found
+github_sync_state_find_task_by_issue() {
+    local ralph_dir="$1"
+    local issue_number="$2"
+
+    local state_file
+    state_file=$(_github_sync_state_file "$ralph_dir")
+
+    if [ -f "$state_file" ]; then
+        jq -r --argjson num "$issue_number" \
+            '.issues | to_entries[] | select(.value.issue_number == $num) | .key' \
+            "$state_file" 2>/dev/null || true
+    fi
+}
+
 # Create a new issue state entry
 #
 # Args:
-#   task_id            - Kanban task ID (e.g., "GH-42")
+#   issue_number           - GitHub issue number (integer)
 #   last_remote_updated_at - ISO 8601 timestamp from GitHub
-#   last_synced_status  - Kanban status char (e.g., " ")
-#   last_remote_state   - GitHub issue state ("open" or "closed")
-#   description_hash    - SHA256 hash of description content
+#   last_synced_status     - Kanban status char (e.g., " ")
+#   last_remote_state      - GitHub issue state ("open" or "closed")
+#   description_hash       - SHA256 hash of description content
 #
 # Returns: JSON object on stdout
 github_sync_state_create_entry() {
-    local task_id="$1"
+    local issue_number="$1"
     local last_remote_updated_at="$2"
     local last_synced_status="$3"
     local last_remote_state="$4"
     local description_hash="$5"
 
     jq -n \
-        --arg tid "$task_id" \
+        --argjson num "$issue_number" \
         --arg updated "$last_remote_updated_at" \
         --arg status "$last_synced_status" \
         --arg state "$last_remote_state" \
         --arg hash "$description_hash" \
         '{
-            task_id: $tid,
+            issue_number: $num,
             last_remote_updated_at: $updated,
             last_synced_status: $status,
             last_remote_state: $state,

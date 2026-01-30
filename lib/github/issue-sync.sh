@@ -20,6 +20,7 @@ source "$WIGGUM_HOME/lib/github/issue-config.sh"
 source "$WIGGUM_HOME/lib/github/issue-state.sh"
 source "$WIGGUM_HOME/lib/github/issue-parser.sh"
 source "$WIGGUM_HOME/lib/github/issue-writer.sh"
+source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 
 # =============================================================================
 # Internal: GitHub API Helpers
@@ -278,13 +279,7 @@ _get_untracked_task_ids() {
     all_task_ids=$(_list_all_kanban_task_ids "$kanban_file")
     [ -n "$all_task_ids" ] || return 0
 
-    # Build set of tracked task IDs from state file
-    tracked_task_ids=$(github_sync_state_list_issues "$ralph_dir" | while IFS= read -r issue_num; do
-        [ -n "$issue_num" ] || continue
-        local entry
-        entry=$(github_sync_state_get_issue "$ralph_dir" "$issue_num")
-        [ "$entry" != "null" ] && echo "$entry" | jq -r '.task_id // empty'
-    done)
+    tracked_task_ids=$(github_sync_state_list_tasks "$ralph_dir")
 
     # Output task IDs not in tracked set
     local task_id
@@ -389,7 +384,7 @@ github_issue_sync_down() {
             if [ "$current_status" = " " ]; then
                 # Check if content changed (compare description hash)
                 local existing_entry
-                existing_entry=$(github_sync_state_get_issue "$ralph_dir" "$number")
+                existing_entry=$(github_sync_state_get_task "$ralph_dir" "$task_id")
                 local new_hash
                 new_hash=$(github_sync_hash_content "$description")
 
@@ -431,13 +426,13 @@ github_issue_sync_down() {
             ((++added))
         fi
 
-        # Update sync state for this issue
+        # Update sync state for this task
         if [ "$dry_run" != "true" ]; then
             local desc_hash
             desc_hash=$(github_sync_hash_content "$description")
             local entry
-            entry=$(github_sync_state_create_entry "$task_id" "$updated_at" " " "open" "$desc_hash")
-            github_sync_state_set_issue "$ralph_dir" "$number" "$entry"
+            entry=$(github_sync_state_create_entry "$number" "$updated_at" " " "open" "$desc_hash")
+            github_sync_state_set_task "$ralph_dir" "$task_id" "$entry"
         fi
     done
 
@@ -460,12 +455,12 @@ github_issue_sync_down() {
         closed_number=$(echo "$closed_json" | jq -r '.number')
 
         # Only process issues we're tracking
-        local tracked
-        tracked=$(github_sync_state_get_issue "$ralph_dir" "$closed_number")
-        [ "$tracked" != "null" ] || continue
-
         local tracked_task_id
-        tracked_task_id=$(echo "$tracked" | jq -r '.task_id')
+        tracked_task_id=$(github_sync_state_find_task_by_issue "$ralph_dir" "$closed_number")
+        [ -n "$tracked_task_id" ] || continue
+
+        local tracked
+        tracked=$(github_sync_state_get_task "$ralph_dir" "$tracked_task_id")
 
         # Get current kanban status
         local current_status=""
@@ -505,7 +500,7 @@ github_issue_sync_down() {
         if [ "$dry_run" != "true" ]; then
             local updated_entry
             updated_entry=$(echo "$tracked" | jq '.last_remote_state = "closed"')
-            github_sync_state_set_issue "$ralph_dir" "$closed_number" "$updated_entry"
+            github_sync_state_set_task "$ralph_dir" "$tracked_task_id" "$updated_entry"
         fi
     done
 
@@ -544,19 +539,19 @@ github_issue_sync_up() {
     local synced=0
     local unchanged=0
 
-    # Iterate over all tracked issues
-    local issue_numbers
-    issue_numbers=$(github_sync_state_list_issues "$ralph_dir")
+    # Iterate over all tracked tasks
+    local task_ids
+    task_ids=$(github_sync_state_list_tasks "$ralph_dir")
 
-    while IFS= read -r issue_number; do
-        [ -n "$issue_number" ] || continue
+    while IFS= read -r task_id; do
+        [ -n "$task_id" ] || continue
 
         local entry
-        entry=$(github_sync_state_get_issue "$ralph_dir" "$issue_number")
+        entry=$(github_sync_state_get_task "$ralph_dir" "$task_id")
         [ "$entry" != "null" ] || continue
 
-        local task_id last_synced_status last_remote_state pr_linked
-        task_id=$(echo "$entry" | jq -r '.task_id')
+        local issue_number last_synced_status last_remote_state pr_linked
+        issue_number=$(echo "$entry" | jq -r '.issue_number')
         last_synced_status=$(echo "$entry" | jq -r '.last_synced_status // " "')
         last_remote_state=$(echo "$entry" | jq -r '.last_remote_state // "open"')
         pr_linked=$(echo "$entry" | jq -r '.pr_linked // false')
@@ -612,11 +607,11 @@ github_issue_sync_up() {
                 '.last_synced_status = $status |
                  .last_remote_state = $state |
                  .pr_linked = ($linked == "true")')
-            github_sync_state_set_issue "$ralph_dir" "$issue_number" "$updated_entry"
+            github_sync_state_set_task "$ralph_dir" "$task_id" "$updated_entry"
         fi
 
         ((++synced))
-    done <<< "$issue_numbers"
+    done <<< "$task_ids"
 
     # Update up-sync timestamp
     if [ "$dry_run" != "true" ]; then
@@ -630,24 +625,22 @@ github_issue_sync_up() {
 # Up Sync: Create Issues for Untracked Tasks
 # =============================================================================
 
-# Build a GitHub issue body from kanban task fields
+# Build a GitHub issue body from the kanban task block
+#
+# Reuses extract_task() from task-parser.sh which handles all kanban
+# fields (Description, Priority, Dependencies, Scope, Out of Scope,
+# Acceptance Criteria) and formats them as markdown.
 #
 # Args:
-#   description  - Task description
-#   priority     - Priority string (e.g., "HIGH")
-#   dependencies - Dependency string (e.g., "TASK-001, TASK-002" or "none")
+#   kanban_file - Path to kanban.md
+#   task_id     - Task ID to extract
 #
 # Returns: formatted body text on stdout
 _build_issue_body() {
-    local description="$1"
-    local priority="${2:-MEDIUM}"
-    local dependencies="${3:-none}"
+    local kanban_file="$1"
+    local task_id="$2"
 
-    local body=""
-    [ -n "$description" ] && body="$description"$'\n\n'
-    body="${body}Priority: $priority"$'\n'
-    body="${body}Dependencies: $dependencies"
-    echo "$body"
+    extract_task "$task_id" "$kanban_file"
 }
 
 # Get the priority label name for a priority string
@@ -788,9 +781,9 @@ github_issue_sync_up_create() {
         dependencies=$(echo "$fields" | jq -r '.dependencies // "none"')
         status=$(echo "$fields" | jq -r '.status // " "')
 
-        # Build issue body
+        # Build issue body (full task block from kanban)
         local body
-        body=$(_build_issue_body "$description" "$priority" "$dependencies")
+        body=$(_build_issue_body "$kanban_file" "$task_id")
 
         # Determine priority label
         local priority_label
@@ -804,8 +797,8 @@ github_issue_sync_up_create() {
             # Add state entry
             local desc_hash entry
             desc_hash=$(github_sync_hash_content "$description")
-            entry=$(github_sync_state_create_entry "$task_id" "" "$status" "open" "$desc_hash")
-            github_sync_state_set_issue "$ralph_dir" "$issue_number" "$entry"
+            entry=$(github_sync_state_create_entry "$issue_number" "" "$status" "open" "$desc_hash")
+            github_sync_state_set_task "$ralph_dir" "$task_id" "$entry"
 
             # Apply current status label if not pending
             if [ "$status" != " " ]; then
@@ -920,6 +913,6 @@ github_issue_sync_status() {
     if [ "$issue_count" -gt 0 ]; then
         echo ""
         echo "  Tracked Issues:"
-        echo "$state" | jq -r '.issues | to_entries[] | "    #\(.key): \(.value.task_id) (status: \(.value.last_synced_status), remote: \(.value.last_remote_state))"'
+        echo "$state" | jq -r '.issues | to_entries[] | "    \(.key) → #\(.value.issue_number) (status: \(.value.last_synced_status), remote: \(.value.last_remote_state))"'
     fi
 }

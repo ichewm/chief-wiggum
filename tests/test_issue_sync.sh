@@ -219,17 +219,22 @@ test_state_full_lifecycle() {
     github_sync_state_init "$ralph_dir"
     assert_file_exists "$ralph_dir/github-sync-state.json" "State file should exist"
 
-    # Add issue
+    # Add task entry (keyed by task_id, entry contains issue_number)
     local entry
-    entry=$(github_sync_state_create_entry "GH-42" "2025-01-23T12:00:00Z" " " "open" "sha256:abc")
-    github_sync_state_set_issue "$ralph_dir" "42" "$entry"
+    entry=$(github_sync_state_create_entry 42 "2025-01-23T12:00:00Z" " " "open" "sha256:abc")
+    github_sync_state_set_task "$ralph_dir" "GH-42" "$entry"
 
-    # Verify
+    # Verify by task_id
     local retrieved
-    retrieved=$(github_sync_state_get_issue "$ralph_dir" "42")
-    local task_id
-    task_id=$(echo "$retrieved" | jq -r '.task_id')
-    assert_equals "GH-42" "$task_id" "Should retrieve stored issue"
+    retrieved=$(github_sync_state_get_task "$ralph_dir" "GH-42")
+    local issue_number
+    issue_number=$(echo "$retrieved" | jq -r '.issue_number')
+    assert_equals "42" "$issue_number" "Should retrieve stored issue number"
+
+    # Verify reverse lookup by issue number
+    local found_task
+    found_task=$(github_sync_state_find_task_by_issue "$ralph_dir" "42")
+    assert_equals "GH-42" "$found_task" "Should find task by issue number"
 
     # Update timestamps
     github_sync_state_set_down_sync_time "$ralph_dir" 1706000000
@@ -242,15 +247,15 @@ test_state_full_lifecycle() {
     assert_equals "1706000000" "$down_ts" "Should have down sync timestamp"
     assert_equals "1706000100" "$up_ts" "Should have up sync timestamp"
 
-    # List issues
-    local issues
-    issues=$(github_sync_state_list_issues "$ralph_dir")
-    assert_output_contains "$issues" "42" "Should list issue 42"
+    # List tasks
+    local tasks
+    tasks=$(github_sync_state_list_tasks "$ralph_dir")
+    assert_output_contains "$tasks" "GH-42" "Should list task GH-42"
 
     # Remove
-    github_sync_state_remove_issue "$ralph_dir" "42"
+    github_sync_state_remove_task "$ralph_dir" "GH-42"
     local after
-    after=$(github_sync_state_get_issue "$ralph_dir" "42")
+    after=$(github_sync_state_get_task "$ralph_dir" "GH-42")
     assert_equals "null" "$after" "Should be null after removal"
 }
 
@@ -355,8 +360,8 @@ test_get_untracked_task_ids_some_tracked() {
 
     # Track EXIST-1
     local entry
-    entry=$(github_sync_state_create_entry "EXIST-1" "" " " "open" "sha256:abc")
-    github_sync_state_set_issue "$ralph_dir" "10" "$entry"
+    entry=$(github_sync_state_create_entry 10 "" " " "open" "sha256:abc")
+    github_sync_state_set_task "$ralph_dir" "EXIST-1" "$entry"
 
     local result
     result=$(_get_untracked_task_ids "$kanban" "$ralph_dir")
@@ -453,8 +458,8 @@ test_sync_up_create_already_tracked() {
 
     # Track EXIST-1
     local entry
-    entry=$(github_sync_state_create_entry "EXIST-1" "" " " "open" "sha256:abc")
-    github_sync_state_set_issue "$ralph_dir" "10" "$entry"
+    entry=$(github_sync_state_create_entry 10 "" " " "open" "sha256:abc")
+    github_sync_state_set_task "$ralph_dir" "EXIST-1" "$entry"
 
     local output
     output=$(github_issue_sync_up_create "$ralph_dir" "EXIST-1" "false" "true" 2>&1)
@@ -470,10 +475,10 @@ test_sync_up_create_no_untracked() {
 
     # Track both tasks
     local entry1 entry2
-    entry1=$(github_sync_state_create_entry "EXIST-1" "" " " "open" "sha256:abc")
-    github_sync_state_set_issue "$ralph_dir" "10" "$entry1"
-    entry2=$(github_sync_state_create_entry "EXIST-2" "" "=" "open" "sha256:def")
-    github_sync_state_set_issue "$ralph_dir" "11" "$entry2"
+    entry1=$(github_sync_state_create_entry 10 "" " " "open" "sha256:abc")
+    github_sync_state_set_task "$ralph_dir" "EXIST-1" "$entry1"
+    entry2=$(github_sync_state_create_entry 11 "" "=" "open" "sha256:def")
+    github_sync_state_set_task "$ralph_dir" "EXIST-2" "$entry2"
 
     local output
     output=$(github_issue_sync_up_create "$ralph_dir" "all" "false" "true" 2>&1)
@@ -482,12 +487,29 @@ test_sync_up_create_no_untracked() {
 }
 
 test_build_issue_body() {
+    local kanban="$TEST_DIR/.ralph/kanban_body_test.md"
+    cat > "$kanban" << 'EOF'
+- [ ] **[BODY-1]** Some task title
+  - Description: Some description
+  - Priority: HIGH
+  - Dependencies: TASK-001, TASK-002
+  - Scope:
+    - Implement feature X
+    - Add tests
+  - Acceptance Criteria:
+    - Feature X works
+EOF
+
     local body
-    body=$(_build_issue_body "Some description" "HIGH" "TASK-001, TASK-002")
+    body=$(_build_issue_body "$kanban" "BODY-1")
 
     assert_output_contains "$body" "Some description" "Should contain description"
-    assert_output_contains "$body" "Priority: HIGH" "Should contain priority"
-    assert_output_contains "$body" "Dependencies: TASK-001, TASK-002" "Should contain dependencies"
+    assert_output_contains "$body" "Priority" "Should contain priority"
+    assert_output_contains "$body" "Dependencies" "Should contain dependencies"
+    assert_output_contains "$body" "Scope" "Should contain scope"
+    assert_output_contains "$body" "Implement feature X" "Should contain scope items"
+    assert_output_contains "$body" "Acceptance Criteria" "Should contain acceptance criteria"
+    assert_output_contains "$body" "Feature X works" "Should contain AC items"
 }
 
 test_get_priority_label() {
