@@ -17,6 +17,7 @@ setup() {
     TEST_DIR=$(mktemp -d)
     RALPH_DIR="$TEST_DIR/.ralph"
     mkdir -p "$RALPH_DIR/workers"
+    mkdir -p "$RALPH_DIR/orchestrator"
     pool_init
 }
 

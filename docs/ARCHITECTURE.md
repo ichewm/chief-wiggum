@@ -606,7 +606,7 @@ pr_merge_handle_remaining "$ralph_dir"
 
 ### State File
 
-The optimizer maintains state in `.ralph/pr-merge-state.json`:
+The optimizer maintains state in `.ralph/orchestrator/pr-merge-state.json`:
 
 ```json
 {
@@ -650,69 +650,103 @@ The optimizer is called periodically via the `pr-optimizer` service (every 900s 
 
 ```bash
 # View current optimizer state
-cat .ralph/pr-merge-state.json | jq .
+cat .ralph/orchestrator/pr-merge-state.json | jq .
 
 # Check conflict graph
-jq '.conflict_graph' .ralph/pr-merge-state.json
+jq '.conflict_graph' .ralph/orchestrator/pr-merge-state.json
 
 # See merge order
-jq '.merge_order' .ralph/pr-merge-state.json
+jq '.merge_order' .ralph/orchestrator/pr-merge-state.json
 
 # Check which PRs were merged
-jq '.merged_this_cycle' .ralph/pr-merge-state.json
+jq '.merged_this_cycle' .ralph/orchestrator/pr-merge-state.json
 ```
 
 ## Service Scheduler
 
-The service scheduler (`lib/service/`) provides a systemd-like approach to orchestrator responsibilities. Periodic tasks are defined as declarative "services" with configurable intervals.
+The service scheduler (`lib/service/`) drives the entire orchestrator loop. All logic from `wiggum-run` has been extracted into declarative service definitions in `config/services.json`. The orchestrator is a generic phase runner (~100 lines).
 
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│              SERVICE SCHEDULER                       │
-│  ┌───────────────────────────────────────────────┐  │
-│  │      config/services.json (declarative)       │  │
-│  └───────────────────────────────────────────────┘  │
-│                        │                            │
-│    ┌───────────┬───────┴───────┬───────────┐       │
-│    ▼           ▼               ▼           ▼       │
-│ pr-sync   pr-optimizer   task-spawner  worker-cleanup │
-│ (180s)      (900s)         (60s)        (60s)      │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                   SERVICE SCHEDULER                       │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │        config/services.json v2.0 (declarative)     │  │
+│  └────────────────────────────────────────────────────┘  │
+│                           │                              │
+│  STARTUP (once) ──────────┤                              │
+│    validate-kanban → init-scheduler → preflight-*        │
+│    → restore-workers → resume-workers → init-terminal    │
+│                           │                              │
+│  MAIN LOOP ───────────────┤                              │
+│    PRE (tick) ────────────┤                              │
+│      pool-ingest → resume-poll → worker-cleanup          │
+│    PERIODIC (interval) ───┤                              │
+│      pr-sync, fix-workers, resolve-workers, ...          │
+│    POST (tick) ───────────┤                              │
+│      completion-check → scheduler-tick → task-spawner    │
+│      → status-display → state-save                       │
+│                           │                              │
+│  SHUTDOWN (once) ─────────┘                              │
+│    final-state-save → terminal-cleanup → lock-cleanup    │
+└──────────────────────────────────────────────────────────┘
 ```
+
+### Phases
+
+| Phase | When | Execution | Services |
+|-------|------|-----------|----------|
+| `startup` | Once, before main loop | Sequential by `order` | Preflight checks, scheduler init, worker restore |
+| `pre` | Every tick (1s) | Sequential by `order` | Pool ingest, resume poll, worker cleanup |
+| `periodic` | Interval-based (async) | Existing scheduler | pr-sync, fix-workers, usage-tracker, etc. |
+| `post` | Every tick (1s) | Sequential by `order` | Scheduler tick, task spawn, status, state save |
+| `shutdown` | Once, on exit | Sequential (reverse) | Terminal cleanup, lock removal |
+
+Tick-phase services (`pre`/`post`) run synchronously via direct function call — they complete in <10ms (file I/O only). Periodic services run asynchronously via the existing interval-based scheduler.
 
 ### Modules
 
 | Module | Purpose |
 |--------|---------|
-| `lib/service/service-loader.sh` | Load and validate JSON configs |
+| `lib/service/service-loader.sh` | Load and validate JSON configs (v2.0 schema) |
 | `lib/service/service-state.sh` | Persist state across restarts |
-| `lib/service/service-scheduler.sh` | Timing and execution coordination |
+| `lib/service/service-scheduler.sh` | Phase runner + timing coordination |
 | `lib/service/service-runner.sh` | Execute services by type |
+| `lib/services/orchestrator-handlers.sh` | `svc_*` handler functions for all services |
+| `lib/scheduler/orchestrator-functions.sh` | Implementation functions called by handlers |
+| `lib/orchestrator/lifecycle.sh` | Validation, locking, signals |
+| `lib/orchestrator/arg-parser.sh` | CLI argument parsing |
+| `lib/orchestrator/migration.sh` | One-time path migration |
 
 ### Service Configuration
 
-Services are defined in `config/services.json`:
+Services are defined in `config/services.json` (v2.0):
 
 ```json
 {
-  "version": "1.0",
+  "version": "2.0",
   "defaults": {
     "timeout": 300,
-    "concurrency": { "max_instances": 1, "if_running": "skip" }
+    "restart_policy": { "on_failure": "skip", "max_retries": 2 }
   },
   "services": [
     {
-      "id": "pr-sync",
-      "description": "Sync PR statuses from GitHub",
-      "schedule": { "type": "interval", "interval": 180, "run_on_startup": true },
-      "execution": { "type": "function", "function": "orch_run_periodic_sync" }
+      "id": "validate-kanban",
+      "description": "Validate kanban.md format",
+      "phase": "startup",
+      "order": 10,
+      "required": true,
+      "schedule": { "type": "tick" },
+      "execution": { "type": "function", "function": "svc_orch_validate_kanban" }
     },
     {
-      "id": "task-spawner",
-      "schedule": { "type": "interval", "interval": 60 },
-      "execution": { "type": "function", "function": "orch_spawn_ready_tasks" }
+      "id": "pr-sync",
+      "description": "Sync PR statuses and detect new comments",
+      "phase": "periodic",
+      "order": 10,
+      "schedule": { "type": "interval", "interval": 180, "run_on_startup": true },
+      "execution": { "type": "command", "command": "wiggum-review sync" }
     }
   ]
 }
@@ -722,6 +756,7 @@ Services are defined in `config/services.json`:
 
 | Type | Description | Example |
 |------|-------------|---------|
+| `tick` | Run every loop iteration (1s) | `{"type": "tick"}` |
 | `interval` | Run at fixed intervals | `{"type": "interval", "interval": 60}` |
 | `event` | Run when triggered | `{"type": "event", "trigger": "worker.completed"}` |
 | `continuous` | Run continuously | `{"type": "continuous", "restart_delay": 5}` |
@@ -730,8 +765,26 @@ Services are defined in `config/services.json`:
 
 | Type | Description | Example |
 |------|-------------|---------|
-| `function` | Call a bash function | `{"type": "function", "function": "my_func"}` |
+| `function` | Call a bash function | `{"type": "function", "function": "svc_orch_pool_ingest"}` |
 | `command` | Run shell command | `{"type": "command", "command": "wiggum-review sync"}` |
+
+### Conditions
+
+Services can be conditional on environment variables:
+
+```json
+{
+  "id": "task-spawner",
+  "condition": { "env_equals": { "WIGGUM_RUN_MODE": "default" } }
+}
+```
+
+```json
+{
+  "id": "fix-workers",
+  "condition": { "env_not_equals": { "WIGGUM_RUN_MODE": "merge-only" } }
+}
+```
 
 ### Project Overrides
 
@@ -739,7 +792,7 @@ Override or add services per-project via `.ralph/services.json`:
 
 ```json
 {
-  "version": "1.0",
+  "version": "2.0",
   "services": [
     {
       "id": "pr-sync",
@@ -748,6 +801,7 @@ Override or add services per-project via `.ralph/services.json`:
     {
       "id": "custom-service",
       "enabled": true,
+      "phase": "periodic",
       "schedule": { "type": "interval", "interval": 120 },
       "execution": { "type": "command", "command": "./scripts/my-task.sh" }
     }
@@ -780,7 +834,7 @@ wiggum service config pr-sync
 
 ### State Persistence
 
-Service state is stored in `.ralph/.service-state.json`:
+Service state is stored in `.ralph/services/state.json`:
 
 ```json
 {
@@ -798,21 +852,11 @@ Service state is stored in `.ralph/.service-state.json`:
 
 State survives orchestrator restarts, allowing services to resume where they left off.
 
-### Comparison
-
-| Aspect | Counter-Based (Default) | Service-Based |
-|--------|------------------------|---------------|
-| Configuration | Hardcoded in wiggum-run | Declarative JSON |
-| Adding tasks | Modify core loop | Add to services.json |
-| Per-project intervals | Environment variables | .ralph/services.json |
-| Observability | Log inspection | `wiggum service status` |
-| State persistence | None | Automatic |
-
 ### Debugging
 
 ```bash
 # View service state
-cat .ralph/.service-state.json | jq .
+cat .ralph/services/state.json | jq .
 
 # Check which services are due
 wiggum service status --json | jq '.[] | select(.status != "running")'

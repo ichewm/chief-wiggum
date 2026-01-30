@@ -19,6 +19,16 @@
 #   orch_cleanup_fix_workers()         - Clean up fix workers
 #   orch_cleanup_resolve_workers()     - Clean up resolve workers
 #   orch_spawn_ready_tasks()           - Spawn workers for ready tasks
+#   spawn_worker()                     - Spawn worker via wiggum-start
+#   pre_worker_checks()               - Git pull and conflict checks
+#   _handle_main_worker_completion()   - Main worker completion callback
+#   _handle_fix_worker_completion()    - Fix worker completion callback
+#   _handle_fix_worker_timeout()       - Fix worker timeout callback
+#   _handle_resolve_worker_completion() - Resolve worker completion callback
+#   _handle_resolve_worker_timeout()   - Resolve worker timeout callback
+#   _spawn_next_batch_worker()         - Batch queue continuation
+#   _schedule_resume_workers()         - Resume stopped WIP workers
+#   _poll_pending_resumes()            - Poll background resume processes
 # =============================================================================
 
 # Prevent double-sourcing
@@ -66,7 +76,7 @@ orch_run_periodic_sync() {
         echo "$sync_output" | sed 's/^/  [sync] /'
 
         # Check for tasks needing fixes
-        local tasks_needing_fix="$ralph_dir/.tasks-needing-fix.txt"
+        local tasks_needing_fix="$ralph_dir/orchestrator/tasks-needing-fix.txt"
         if [ -s "$tasks_needing_fix" ]; then
             log "Tasks need comment fixes - will spawn fix workers"
         fi
@@ -786,4 +796,388 @@ orch_update_aging() {
     # scheduler_update_aging operates on in-memory state
     # This is a no-op in subshells.
     :
+}
+
+# =============================================================================
+# Worker Spawn and Lifecycle Functions
+#
+# Extracted from wiggum-run to keep the entry point minimal.
+# These functions are called by service handlers in orchestrator-handlers.sh.
+# =============================================================================
+
+# Tracks background resume processes: pid → "worker_dir|task_id|worker_type"
+declare -gA _PENDING_RESUMES=()
+
+# Spawn a worker for a task using wiggum-start
+# Sets: SPAWNED_WORKER_ID, SPAWNED_WORKER_PID (for caller to use)
+spawn_worker() {
+    local task_id="$1"
+
+    # Use wiggum-start to start the worker, capturing exit code
+    local start_output
+    local start_exit_code
+    start_output=$("$WIGGUM_HOME/bin/wiggum-start" "$task_id" \
+        --max-iters "$MAX_ITERATIONS" --max-turns "$MAX_TURNS" \
+        --agent-type "$AGENT_TYPE" 2>&1) || start_exit_code=$?
+    start_exit_code=${start_exit_code:-0}
+
+    # Handle specific exit codes
+    if [ "$start_exit_code" -eq "$EXIT_WORKER_ALREADY_EXISTS" ]; then
+        # Worker directory exists from previous run
+        # Exclude plan workers (worker-TASK-xxx-plan-*) - those are read-only planning sessions
+        local existing_dir
+        existing_dir=$(find_any_worker_by_task_id "$RALPH_DIR" "$task_id" | grep -v -- '-plan-' || true)
+        if [ -n "$existing_dir" ]; then
+            # Check if the worker process is still running
+            local stale_pid
+            stale_pid=$(cat "$existing_dir/agent.pid" 2>/dev/null || true)
+            if [ -n "$stale_pid" ] && kill -0 "$stale_pid" 2>/dev/null; then
+                # Process is still running, refuse to spawn duplicate
+                log_error "Worker for $task_id is still running (PID: $stale_pid)"
+                log_error "Use 'wiggum stop $task_id' or 'wiggum kill $task_id' first"
+                return 1
+            fi
+            # Process not running - check if it's resumable
+            if ! _is_terminal_failure "$existing_dir"; then
+                # Worker is resumable - let resume logic handle it
+                log "Worker for $task_id is resumable, skipping spawn"
+                return 1
+            fi
+            # Terminal failure - clean up and retry fresh
+            log "Cleaning up terminal-failure worker for $task_id: $(basename "$existing_dir")"
+            rm -rf "$existing_dir"
+            # Retry spawning - reset exit code first
+            start_exit_code=0
+            start_output=$("$WIGGUM_HOME/bin/wiggum-start" "$task_id" \
+                --max-iters "$MAX_ITERATIONS" --max-turns "$MAX_TURNS" \
+                --agent-type "$AGENT_TYPE" 2>&1) || start_exit_code=$?
+        fi
+    fi
+
+    # Check if spawn succeeded
+    if [ "$start_exit_code" -ne 0 ]; then
+        log_error "wiggum start failed (exit $start_exit_code): $start_output"
+        return 1
+    fi
+
+    # Find the worker directory that was just created (using shared library)
+    local worker_dir
+    worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$task_id")
+
+    if [ -z "$worker_dir" ]; then
+        log_error "Failed to find worker directory for $task_id"
+        return 1
+    fi
+
+    SPAWNED_WORKER_ID=$(basename "$worker_dir")
+
+    # Wait for agent.pid to appear (using shared library)
+    if ! wait_for_worker_pid "$worker_dir" "$PID_WAIT_TIMEOUT"; then
+        log_error "Agent PID file not created for $task_id"
+        return 1
+    fi
+
+    SPAWNED_WORKER_PID=$(cat "$worker_dir/agent.pid")
+    activity_log "worker.spawned" "$SPAWNED_WORKER_ID" "$task_id" "pid=$SPAWNED_WORKER_PID"
+}
+
+# Pre-worker checks before spawning a new worker
+# Returns 0 if safe to proceed, 1 if conflicts detected
+pre_worker_checks() {
+    # Pull latest changes from main with retry
+    log "Pulling latest changes from origin/main..."
+
+    local pull_output
+    local max_attempts=3
+    local delays=(2 4)
+
+    for ((attempt=1; attempt<=max_attempts; attempt++)); do
+        if pull_output=$(git pull --ff-only origin main 2>&1); then
+            break
+        fi
+
+        # Immediately fail on conflicts (non-transient)
+        if echo "$pull_output" | grep -qi "CONFLICT"; then
+            log_error "Git pull conflict detected: $pull_output"
+            log_error "Cannot spawn new workers with unresolved conflicts"
+            return 1
+        fi
+
+        # On last attempt, give up
+        if [ $attempt -eq $max_attempts ]; then
+            log_error "Git pull failed after $max_attempts attempts: $pull_output"
+            return 1
+        fi
+
+        # Transient error - retry with backoff
+        local delay=${delays[$((attempt-1))]}
+        log "Git pull attempt $attempt failed (transient), retrying in ${delay}s..."
+        sleep "$delay"
+    done
+
+    # Check for conflicts with active worktrees
+    local workers_dir="$RALPH_DIR/workers"
+    if [ -d "$workers_dir" ]; then
+        for worker_dir in "$workers_dir"/worker-*; do
+            [ -d "$worker_dir/workspace" ] || continue
+
+            local workspace="$worker_dir/workspace"
+            if [ -d "$workspace/.git" ] || [ -f "$workspace/.git" ]; then
+                # Check if worktree has conflicts with main
+                if git -C "$workspace" diff --name-only origin/main 2>/dev/null | \
+                   xargs -I {} git -C "$workspace" diff --check origin/main -- {} 2>&1 | \
+                   grep -q "conflict"; then
+                    log_error "Conflict detected in $(basename "$worker_dir")"
+                    return 1
+                fi
+            fi
+        done
+    fi
+
+    return 0
+}
+
+# Handle main worker completion (callback for pool_cleanup_finished)
+_handle_main_worker_completion() {
+    local worker_dir="$1"
+    local task_id="$2"
+    activity_log "worker.completed" "" "$task_id" "worker_dir=$worker_dir"
+    log "Worker for $task_id finished"
+    scheduler_mark_event
+}
+
+# Handle fix worker completion (callback for pool_cleanup_finished)
+_handle_fix_worker_completion() {
+    local worker_dir="$1"
+    local task_id="$2"
+
+    if handle_fix_worker_completion "$worker_dir" "$task_id"; then
+        # Fix succeeded - attempt merge if needed
+        if git_state_is "$worker_dir" "needs_merge"; then
+            attempt_pr_merge "$worker_dir" "$task_id" "$RALPH_DIR" || true
+        fi
+    fi
+}
+
+# Handle fix worker timeout (callback for pool_cleanup_finished)
+_handle_fix_worker_timeout() {
+    local worker_dir="$1"
+    local task_id="$2"
+    handle_fix_worker_timeout "$worker_dir" "$task_id" "$FIX_WORKER_TIMEOUT"
+}
+
+# Handle resolve worker completion (callback for pool_cleanup_finished)
+_handle_resolve_worker_completion() {
+    local worker_dir="$1"
+    local task_id="$2"
+
+    if handle_resolve_worker_completion "$worker_dir" "$task_id"; then
+        # Resolution succeeded - attempt merge if needed
+        if git_state_is "$worker_dir" "needs_merge"; then
+            attempt_pr_merge "$worker_dir" "$task_id" "$RALPH_DIR" || true
+        fi
+
+        # If this was a batch worker, immediately spawn the next one
+        _spawn_next_batch_worker "$worker_dir" || true
+    fi
+}
+
+# Spawn the next worker in a batch queue (for back-to-back execution)
+#
+# Called after a batch worker completes to immediately trigger the next one.
+# Returns 0 if a worker was spawned, 1 if batch is complete/failed/no next worker.
+_spawn_next_batch_worker() {
+    local completed_worker_dir="$1"
+
+    # Check if this was a batch worker
+    source "$WIGGUM_HOME/lib/scheduler/batch-coordination.sh"
+    batch_coord_has_worker_context "$completed_worker_dir" || return 1
+
+    local batch_id
+    batch_id=$(batch_coord_read_worker_context "$completed_worker_dir" "batch_id")
+    [ -n "$batch_id" ] || return 1
+
+    # Check batch status
+    local status
+    status=$(batch_coord_get_status "$batch_id" "$PROJECT_DIR")
+    case "$status" in
+        complete|failed) return 1 ;;
+    esac
+
+    # Find the next worker that should execute
+    local next_task_id
+    next_task_id=$(batch_coord_get_next_task "$batch_id" "$PROJECT_DIR")
+    [ -n "$next_task_id" ] || return 1
+
+    # Find worker directory for next task
+    local next_worker_dir
+    next_worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$next_task_id" 2>/dev/null)
+    [ -n "$next_worker_dir" ] && [ -d "$next_worker_dir" ] || return 1
+
+    # Verify it's this task's turn and it needs resolution
+    git_state_is "$next_worker_dir" "needs_resolve" || return 1
+    batch_coord_is_my_turn "$batch_id" "$next_task_id" "$PROJECT_DIR" || return 1
+
+    # Check priority worker capacity
+    local fix_count resolve_count total_priority
+    fix_count=$(pool_count "fix")
+    resolve_count=$(pool_count "resolve")
+    total_priority=$((fix_count + resolve_count))
+    if [ "$total_priority" -ge "$FIX_WORKER_LIMIT" ]; then
+        log "Batch: deferring next worker - at capacity ($total_priority/$FIX_WORKER_LIMIT)"
+        return 1
+    fi
+
+    log "Batch $batch_id: immediately spawning next worker for $next_task_id"
+
+    # Use the existing spawn function from priority-workers.sh
+    source "$WIGGUM_HOME/lib/scheduler/priority-workers.sh"
+    _spawn_batch_resolve_worker "$RALPH_DIR" "$PROJECT_DIR" "$next_worker_dir" "$next_task_id"
+    return $?
+}
+
+# Handle resolve worker timeout (callback for pool_cleanup_finished)
+_handle_resolve_worker_timeout() {
+    local worker_dir="$1"
+    local task_id="$2"
+    handle_resolve_worker_timeout "$worker_dir" "$task_id" "$RESOLVE_WORKER_TIMEOUT"
+}
+
+# Schedule resume of stopped workers
+#
+# Called once at startup to resume any stopped workers before starting new
+# tasks. Delegates to `wiggum resume` which handles the logic of determining
+# whether to use LLM analysis (step completed) or direct resume (interrupted).
+#
+# Skips workers that:
+#   - Are terminal failures (last step + FAIL)
+#   - Are at capacity (MAX_WORKERS)
+#   - Have tasks no longer pending/in-progress
+_schedule_resume_workers() {
+    local resumable
+    resumable=$(get_resumable_workers "$RALPH_DIR")
+    [ -n "$resumable" ] || return 0
+
+    log "Checking for stopped workers to resume..."
+
+    while read -r worker_dir task_id current_step worker_type; do
+        [ -n "$worker_dir" ] || continue
+
+        # Skip workers not applicable to the current run mode
+        if [[ "$WIGGUM_RUN_MODE" != "default" && "$worker_type" != "fix" && "$worker_type" != "resolve" ]]; then
+            log_debug "Skipping resume of main worker $task_id ($WIGGUM_RUN_MODE mode)"
+            continue
+        fi
+        if [[ "$WIGGUM_RUN_MODE" == "merge-only" && "$worker_type" == "fix" ]]; then
+            log_debug "Skipping resume of fix worker $task_id (merge-only mode)"
+            continue
+        fi
+
+        # Check capacity based on worker type
+        if [[ "$worker_type" == "fix" || "$worker_type" == "resolve" ]]; then
+            local fix_count resolve_count total_priority
+            fix_count=$(pool_count "fix")
+            resolve_count=$(pool_count "resolve")
+            total_priority=$((fix_count + resolve_count))
+            if [ "$total_priority" -ge "$FIX_WORKER_LIMIT" ]; then
+                log "Priority workers at capacity ($total_priority/$FIX_WORKER_LIMIT) - deferring resume of $task_id"
+                continue
+            fi
+        else
+            local main_count
+            main_count=$(pool_count "main")
+            if [ "$main_count" -ge "$MAX_WORKERS" ]; then
+                log "At capacity ($main_count/$MAX_WORKERS) - deferring remaining resumes"
+                break
+            fi
+        fi
+
+        # Check task is still pending or in-progress
+        local task_status
+        task_status=$(get_task_status "$RALPH_DIR/kanban.md" "$task_id")
+        case "$task_status" in
+            " "|"=") ;;
+            *)
+                log_debug "Skipping resume of $task_id - task status is '$task_status'"
+                continue
+                ;;
+        esac
+
+        # Mark as in-progress if pending
+        if [ "$task_status" = " " ]; then
+            if ! update_kanban_status "$RALPH_DIR/kanban.md" "$task_id" "="; then
+                log_error "Failed to mark $task_id as in-progress"
+                continue
+            fi
+        fi
+
+        # Resume the worker via wiggum resume (handles interrupted vs completed logic)
+        # Note: resume-decide may determine a different starting step based on analysis
+        log "Initiating resume for $task_id (pipeline at: '$current_step')"
+        local worker_id
+        worker_id=$(basename "$worker_dir")
+
+        # Run wiggum resume in background, passing through config
+        # --quiet suppresses interactive output
+        (
+            cd "$PROJECT_DIR" && \
+            "$WIGGUM_HOME/bin/wiggum-resume" "$worker_id" --quiet \
+                --max-iters "$MAX_ITERATIONS" \
+                --max-turns "$MAX_TURNS" \
+                ${WIGGUM_PIPELINE:+--pipeline "$WIGGUM_PIPELINE"}
+        ) >> "$RALPH_DIR/logs/workers.log" 2>&1 &
+        local resume_pid=$!
+
+        # Track resume process for non-blocking polling in main loop.
+        # Resume runs LLM analysis (resume-decide) before launching the worker
+        # subprocess, so we cannot wait synchronously — it blocks 30+ seconds
+        # per worker and delays _main_loop startup.
+        _PENDING_RESUMES[$resume_pid]="$worker_dir|$task_id|$worker_type"
+        log "Resume process launched for $task_id (resume PID: $resume_pid)"
+    done <<< "$resumable"
+}
+
+# Poll background resume processes for completion
+#
+# Called each main-loop iteration. Checks if any wiggum-resume processes
+# launched by _schedule_resume_workers() have finished, and if so, registers
+# the resulting worker into the pool.
+_poll_pending_resumes() {
+    [ ${#_PENDING_RESUMES[@]} -gt 0 ] || return 0
+
+    local pid
+    for pid in "${!_PENDING_RESUMES[@]}"; do
+        # Still running? Skip.
+        if kill -0 "$pid" 2>/dev/null; then
+            continue
+        fi
+
+        # Process finished — get exit code
+        local resume_exit=0
+        wait "$pid" 2>/dev/null || resume_exit=$?
+
+        # Parse metadata
+        local entry="${_PENDING_RESUMES[$pid]}"
+        unset '_PENDING_RESUMES[$pid]'
+        local worker_dir task_id worker_type
+        IFS='|' read -r worker_dir task_id worker_type <<< "$entry"
+
+        if [ "$resume_exit" -ne 0 ]; then
+            log_error "Resume command failed for $task_id (exit code: $resume_exit)"
+            continue
+        fi
+
+        # Worker subprocess was launched by wiggum-resume — poll for its PID
+        if wait_for_worker_pid "$worker_dir" "$PID_WAIT_TIMEOUT"; then
+            local wpid
+            wpid=$(cat "$worker_dir/agent.pid")
+            pool_add "$wpid" "$worker_type" "$task_id"
+            scheduler_mark_event
+            activity_log "worker.resumed" "$(basename "$worker_dir")" "$task_id" \
+                "pipeline_step=$(cat "$worker_dir/current_step" 2>/dev/null || echo unknown) pid=$wpid type=$worker_type"
+            log "Resumed worker for $task_id (PID: $wpid, type: $worker_type)"
+        else
+            log_error "Resume started but PID not created for $task_id"
+        fi
+    done
 }

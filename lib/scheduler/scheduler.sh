@@ -64,7 +64,7 @@ scheduler_init() {
     _SCHED_PLAN_BONUS="${5:-15000}"
     _SCHED_DEP_BONUS_PER_TASK="${6:-7000}"
 
-    _SCHED_READY_SINCE_FILE="$_SCHED_RALPH_DIR/.task-ready-since"
+    _SCHED_READY_SINCE_FILE="$_SCHED_RALPH_DIR/orchestrator/task-ready-since"
 
     # Initialize ready-since file if it doesn't exist
     touch "$_SCHED_READY_SINCE_FILE"
@@ -332,7 +332,7 @@ scheduler_is_complete() {
     # Check for tasks needing fixes (populated by PR optimization)
     # In merge-only mode, skip this check - we're not fixing tasks
     if [[ "$run_mode" != "merge-only" ]]; then
-        local tasks_needing_fix="$_SCHED_RALPH_DIR/.tasks-needing-fix.txt"
+        local tasks_needing_fix="$_SCHED_RALPH_DIR/orchestrator/tasks-needing-fix.txt"
         if [ -s "$tasks_needing_fix" ]; then
             return 1
         fi
@@ -506,4 +506,203 @@ get_resumable_workers() {
 
         echo "$worker_dir $task_id $current_step $worker_type"
     done
+}
+
+# Write scheduler state to JSON file
+#
+# Persists SCHED_READY_TASKS, SCHED_BLOCKED_TASKS, SCHED_PENDING_TASKS
+# to scheduler-state.json for file-based state sharing.
+#
+# Args:
+#   state_dir - Directory to write scheduler-state.json
+scheduler_write_state() {
+    local state_dir="$1"
+    local state_file="$state_dir/scheduler-state.json"
+    local now
+    now=$(date +%s)
+
+    # Convert space-separated lists to JSON arrays
+    local ready_json blocked_json pending_json
+    ready_json=$(echo "$SCHED_READY_TASKS" | tr ' ' '\n' | jq -R 'select(length > 0)' | jq -s '.')
+    blocked_json=$(echo "$SCHED_BLOCKED_TASKS" | tr ' ' '\n' | jq -R 'select(length > 0)' | jq -s '.')
+    pending_json=$(echo "$SCHED_PENDING_TASKS" | tr ' ' '\n' | jq -R 'select(length > 0)' | jq -s '.')
+
+    jq -n \
+        --argjson computed_at "$now" \
+        --argjson ready "$ready_json" \
+        --argjson blocked "$blocked_json" \
+        --argjson pending "$pending_json" \
+        '{computed_at: $computed_at, ready_tasks: $ready, blocked_tasks: $blocked, pending_tasks: $pending}' \
+        > "$state_file"
+}
+
+# Read scheduler state from JSON file
+#
+# Loads scheduler-state.json into SCHED_READY_TASKS, SCHED_BLOCKED_TASKS,
+# SCHED_PENDING_TASKS global variables.
+#
+# Args:
+#   state_dir - Directory containing scheduler-state.json
+#
+# Returns: 0 on success, 1 if file not found
+scheduler_read_state() {
+    local state_dir="$1"
+    local state_file="$state_dir/scheduler-state.json"
+
+    [ -f "$state_file" ] || return 1
+
+    SCHED_READY_TASKS=$(jq -r '.ready_tasks // [] | .[]' "$state_file" 2>/dev/null | tr '\n' ' ')
+    SCHED_BLOCKED_TASKS=$(jq -r '.blocked_tasks // [] | .[]' "$state_file" 2>/dev/null | tr '\n' ' ')
+    SCHED_PENDING_TASKS=$(jq -r '.pending_tasks // [] | .[]' "$state_file" 2>/dev/null | tr '\n' ' ')
+
+    # Trim trailing spaces
+    SCHED_READY_TASKS="${SCHED_READY_TASKS% }"
+    SCHED_BLOCKED_TASKS="${SCHED_BLOCKED_TASKS% }"
+    SCHED_PENDING_TASKS="${SCHED_PENDING_TASKS% }"
+
+    return 0
+}
+
+# Write cyclic tasks to JSON file
+#
+# Persists _SCHED_CYCLIC_TASKS to cyclic-tasks.json.
+#
+# Args:
+#   state_dir - Directory to write cyclic-tasks.json
+scheduler_write_cyclic() {
+    local state_dir="$1"
+    local cyclic_file="$state_dir/cyclic-tasks.json"
+
+    local json='{'
+    local first=true
+    for task_id in "${!_SCHED_CYCLIC_TASKS[@]}"; do
+        if [ "$first" = true ]; then
+            first=false
+        else
+            json+=","
+        fi
+        json+="\"$task_id\":\"${_SCHED_CYCLIC_TASKS[$task_id]}\""
+    done
+    json+='}'
+
+    echo "$json" > "$cyclic_file"
+}
+
+# Write skip tasks to JSON file
+#
+# Persists _SCHED_SKIP_TASKS to skip-tasks.json.
+#
+# Args:
+#   state_dir - Directory to write skip-tasks.json
+scheduler_write_skip_tasks() {
+    local state_dir="$1"
+    local skip_file="$state_dir/skip-tasks.json"
+
+    local json='{'
+    local first=true
+    for task_id in "${!_SCHED_SKIP_TASKS[@]}"; do
+        if [ "$first" = true ]; then
+            first=false
+        else
+            json+=","
+        fi
+        json+="\"$task_id\":${_SCHED_SKIP_TASKS[$task_id]}"
+    done
+    json+='}'
+
+    echo "$json" > "$skip_file"
+}
+
+# Read skip tasks from JSON file
+#
+# Loads skip-tasks.json into _SCHED_SKIP_TASKS.
+#
+# Args:
+#   state_dir - Directory containing skip-tasks.json
+#
+# Returns: 0 on success, 1 if file not found
+scheduler_read_skip_tasks() {
+    local state_dir="$1"
+    local skip_file="$state_dir/skip-tasks.json"
+
+    [ -f "$skip_file" ] || return 1
+
+    _SCHED_SKIP_TASKS=()
+    local entries
+    entries=$(jq -r 'to_entries[] | "\(.key)|\(.value)"' "$skip_file" 2>/dev/null) || return 1
+
+    while IFS='|' read -r task_id count; do
+        [ -n "$task_id" ] || continue
+        _SCHED_SKIP_TASKS[$task_id]="$count"
+    done <<< "$entries"
+
+    return 0
+}
+
+# Write pending resumes to JSON file
+#
+# Args:
+#   state_dir - Directory to write pending-resumes.json
+#   -         - Pending resumes data is passed via _PENDING_RESUMES associative array
+#              (pid -> "worker_dir|task_id|worker_type")
+scheduler_write_pending_resumes() {
+    local state_dir="$1"
+    local resumes_file="$state_dir/pending-resumes.json"
+
+    # Check if _PENDING_RESUMES exists
+    if ! declare -p _PENDING_RESUMES &>/dev/null; then
+        echo '{}' > "$resumes_file"
+        return 0
+    fi
+
+    local json='{'
+    local first=true
+    for pid in "${!_PENDING_RESUMES[@]}"; do
+        local info="${_PENDING_RESUMES[$pid]}"
+        local worker_dir="${info%%|*}"
+        local rest="${info#*|}"
+        local task_id="${rest%%|*}"
+        local worker_type="${rest##*|}"
+
+        if [ "$first" = true ]; then
+            first=false
+        else
+            json+=","
+        fi
+        json+="\"$pid\":{\"worker_dir\":\"$worker_dir\",\"task_id\":\"$task_id\",\"worker_type\":\"$worker_type\"}"
+    done
+    json+='}'
+
+    echo "$json" > "$resumes_file"
+}
+
+# Read pending resumes from JSON file
+#
+# Loads pending-resumes.json into _PENDING_RESUMES associative array.
+#
+# Args:
+#   state_dir - Directory containing pending-resumes.json
+#
+# Returns: 0 on success, 1 if file not found
+scheduler_read_pending_resumes() {
+    local state_dir="$1"
+    local resumes_file="$state_dir/pending-resumes.json"
+
+    [ -f "$resumes_file" ] || return 1
+
+    # Ensure array exists
+    if ! declare -p _PENDING_RESUMES &>/dev/null; then
+        declare -gA _PENDING_RESUMES=()
+    fi
+
+    _PENDING_RESUMES=()
+    local entries
+    entries=$(jq -r 'to_entries[] | "\(.key)|\(.value.worker_dir)|\(.value.task_id)|\(.value.worker_type)"' "$resumes_file" 2>/dev/null) || return 1
+
+    while IFS='|' read -r pid worker_dir task_id worker_type; do
+        [ -n "$pid" ] || continue
+        _PENDING_RESUMES[$pid]="$worker_dir|$task_id|$worker_type"
+    done <<< "$entries"
+
+    return 0
 }

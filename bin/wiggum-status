@@ -151,7 +151,7 @@ echo "Project: $PROJECT_DIR"
 echo ""
 
 # Check orchestrator status
-orchestrator_lock="$RALPH_DIR/.orchestrator.pid"
+orchestrator_lock="$RALPH_DIR/orchestrator/orchestrator.pid"
 if [ -f "$orchestrator_lock" ]; then
     orchestrator_pid=$(cat "$orchestrator_lock" 2>/dev/null)
     if [[ "$orchestrator_pid" =~ ^[0-9]+$ ]] && kill -0 "$orchestrator_pid" 2>/dev/null; then

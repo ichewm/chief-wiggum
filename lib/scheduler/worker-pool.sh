@@ -117,7 +117,7 @@ pool_add() {
 
     # Persist to disk so subshell callers are visible to the main process
     if [ -n "${RALPH_DIR:-}" ]; then
-        local pending_file="$RALPH_DIR/.pool-pending"
+        local pending_file="$RALPH_DIR/orchestrator/pool-pending"
         (
             flock -x 200
             echo "$pid|$type|$task_id|$start_time" >> "$pending_file"
@@ -129,14 +129,14 @@ pool_add() {
 
 # Ingest pending pool entries written to disk by subshells
 #
-# Reads $ralph_dir/.pool-pending under flock, adds each entry to
+# Reads $ralph_dir/orchestrator/pool-pending under flock, adds each entry to
 # _WORKER_POOL (skipping duplicates), then truncates the file.
 #
 # Args:
 #   ralph_dir - Ralph directory path
 pool_ingest_pending() {
     local ralph_dir="$1"
-    local pending_file="$ralph_dir/.pool-pending"
+    local pending_file="$ralph_dir/orchestrator/pool-pending"
 
     [ -s "$pending_file" ] || return 0
 
@@ -522,4 +522,63 @@ pool_dump() {
         echo "  \"$pid\": {\"type\": \"$type\", \"task_id\": \"$task_id\", \"start_time\": $start_time}"
     done
     echo "}"
+}
+
+# Save worker pool state to JSON file
+#
+# Writes _WORKER_POOL to pool.json for file-based state sharing.
+#
+# Args:
+#   state_dir - Directory to write pool.json (e.g., $RALPH_DIR/orchestrator)
+pool_save() {
+    local state_dir="$1"
+    local pool_file="$state_dir/pool.json"
+
+    local json='{"workers":{'
+    local first=true
+    for pid in "${!_WORKER_POOL[@]}"; do
+        local info="${_WORKER_POOL[$pid]}"
+        local type="${info%%|*}"
+        local rest="${info#*|}"
+        local task_id="${rest%%|*}"
+        local start_time="${rest##*|}"
+
+        if [ "$first" = true ]; then
+            first=false
+        else
+            json+=","
+        fi
+        json+="\"$pid\":{\"type\":\"$type\",\"task_id\":\"$task_id\",\"start_time\":$start_time}"
+    done
+    json+='}}'
+
+    echo "$json" > "$pool_file"
+}
+
+# Load worker pool state from JSON file
+#
+# Reads pool.json into _WORKER_POOL, merging with any existing entries.
+# Existing entries take precedence (in-memory is more current).
+#
+# Args:
+#   state_dir - Directory containing pool.json
+#
+# Returns: 0 on success, 1 if file not found
+pool_load() {
+    local state_dir="$1"
+    local pool_file="$state_dir/pool.json"
+
+    [ -f "$pool_file" ] || return 1
+
+    local entries
+    entries=$(jq -r '.workers | to_entries[] | "\(.key)|\(.value.type)|\(.value.task_id)|\(.value.start_time)"' "$pool_file" 2>/dev/null) || return 1
+
+    while IFS='|' read -r pid type task_id start_time; do
+        [ -n "$pid" ] || continue
+        # Don't overwrite existing in-memory entries
+        [ -z "${_WORKER_POOL[$pid]+x}" ] || continue
+        _WORKER_POOL[$pid]="$type|$task_id|$start_time"
+    done <<< "$entries"
+
+    return 0
 }

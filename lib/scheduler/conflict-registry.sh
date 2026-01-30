@@ -30,7 +30,7 @@ _CONFLICT_REGISTRY_LOADED=1
 #   ralph_dir - Ralph directory path
 conflict_registry_init() {
     local ralph_dir="$1"
-    local registry_file="$ralph_dir/.conflict-registry.json"
+    local registry_file="$ralph_dir/orchestrator/conflict-registry.json"
 
     if [ ! -f "$registry_file" ]; then
         echo '{"files": {}, "tasks": {}}' > "$registry_file"
@@ -49,7 +49,7 @@ conflict_registry_add() {
     local task_id="$2"
     local pr_number="$3"
     local files="$4"
-    local registry_file="$ralph_dir/.conflict-registry.json"
+    local registry_file="$ralph_dir/orchestrator/conflict-registry.json"
     local timestamp
     timestamp=$(date -Iseconds)
 
@@ -86,7 +86,7 @@ conflict_registry_add() {
 conflict_registry_remove() {
     local ralph_dir="$1"
     local task_id="$2"
-    local registry_file="$ralph_dir/.conflict-registry.json"
+    local registry_file="$ralph_dir/orchestrator/conflict-registry.json"
 
     [ -f "$registry_file" ] || return 0
 
@@ -118,7 +118,7 @@ conflict_registry_remove() {
 conflict_registry_get_file_tasks() {
     local ralph_dir="$1"
     local file_path="$2"
-    local registry_file="$ralph_dir/.conflict-registry.json"
+    local registry_file="$ralph_dir/orchestrator/conflict-registry.json"
 
     [ -f "$registry_file" ] || return 0
 
@@ -136,7 +136,7 @@ conflict_registry_get_file_tasks() {
 conflict_registry_has_multi_pr_conflict() {
     local ralph_dir="$1"
     local task_id="$2"
-    local registry_file="$ralph_dir/.conflict-registry.json"
+    local registry_file="$ralph_dir/orchestrator/conflict-registry.json"
 
     [ -f "$registry_file" ] || return 1
 
@@ -166,7 +166,7 @@ conflict_registry_has_multi_pr_conflict() {
 # Returns: Space-separated list of task IDs
 conflict_registry_list_tasks() {
     local ralph_dir="$1"
-    local registry_file="$ralph_dir/.conflict-registry.json"
+    local registry_file="$ralph_dir/orchestrator/conflict-registry.json"
 
     [ -f "$registry_file" ] || return 0
 
@@ -183,7 +183,7 @@ conflict_registry_list_tasks() {
 conflict_registry_get_task_files() {
     local ralph_dir="$1"
     local task_id="$2"
-    local registry_file="$ralph_dir/.conflict-registry.json"
+    local registry_file="$ralph_dir/orchestrator/conflict-registry.json"
 
     [ -f "$registry_file" ] || return 0
 
@@ -200,7 +200,7 @@ conflict_registry_get_task_files() {
 conflict_registry_get_pr() {
     local ralph_dir="$1"
     local task_id="$2"
-    local registry_file="$ralph_dir/.conflict-registry.json"
+    local registry_file="$ralph_dir/orchestrator/conflict-registry.json"
 
     [ -f "$registry_file" ] || return 0
 
@@ -217,7 +217,7 @@ conflict_registry_get_pr() {
 conflict_registry_has_task() {
     local ralph_dir="$1"
     local task_id="$2"
-    local registry_file="$ralph_dir/.conflict-registry.json"
+    local registry_file="$ralph_dir/orchestrator/conflict-registry.json"
 
     [ -f "$registry_file" ] || return 1
 
@@ -232,7 +232,7 @@ conflict_registry_has_task() {
 # Returns: JSON summary of registry state
 conflict_registry_summary() {
     local ralph_dir="$1"
-    local registry_file="$ralph_dir/.conflict-registry.json"
+    local registry_file="$ralph_dir/orchestrator/conflict-registry.json"
 
     [ -f "$registry_file" ] || { echo '{"task_count": 0, "file_count": 0, "multi_conflict_files": 0}'; return 0; }
 
@@ -250,7 +250,7 @@ conflict_registry_summary() {
 #   ralph_dir - Ralph directory path
 conflict_registry_clear() {
     local ralph_dir="$1"
-    local registry_file="$ralph_dir/.conflict-registry.json"
+    local registry_file="$ralph_dir/orchestrator/conflict-registry.json"
 
     rm -f "$registry_file"
 }

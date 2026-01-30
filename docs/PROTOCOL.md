@@ -320,7 +320,7 @@ Existence of a file with .lock extension marks the underlying file locked and ca
 | Resource | Lock File |
 |----------|-----------|
 | kanban.md | `.ralph/kanban.md.lock` |
-| PID operations | `.ralph/.pid-ops.lock` |
+| PID operations | `.ralph/orchestrator/pid-ops.lock` |
 | Events log | `.ralph/logs/events.jsonl.lock` |
 
 ## Workspace Boundary Protocol

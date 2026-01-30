@@ -24,6 +24,7 @@ setup() {
     mkdir -p "$RALPH_DIR/workers"
     mkdir -p "$RALPH_DIR/logs"
     mkdir -p "$RALPH_DIR/plans"
+    mkdir -p "$RALPH_DIR/orchestrator"
 
     # Create minimal kanban file
     cat > "$RALPH_DIR/kanban.md" << 'EOF'

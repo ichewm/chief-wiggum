@@ -290,8 +290,8 @@ cmd_global_sync() {
         return 1
     fi
 
-    local sync_state_file="$RALPH_DIR/.sync-state.json"
-    local tasks_needing_fix="$RALPH_DIR/.tasks-needing-fix.txt"
+    local sync_state_file="$RALPH_DIR/orchestrator/sync-state.json"
+    local tasks_needing_fix="$RALPH_DIR/orchestrator/tasks-needing-fix.txt"
 
     # Initialize sync state file if it doesn't exist
     if [ ! -f "$sync_state_file" ]; then
@@ -368,7 +368,7 @@ cmd_global_sync() {
                     fi
                 else
                     # No worker - record for later workspace creation
-                    local orphan_file="$RALPH_DIR/.prs-needing-workspace.jsonl"
+                    local orphan_file="$RALPH_DIR/orchestrator/prs-needing-workspace.jsonl"
                     # Save comments to review directory for reference
                     output_dir="$RALPH_DIR/review"
                     mkdir -p "$output_dir"

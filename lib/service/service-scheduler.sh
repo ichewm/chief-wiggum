@@ -920,3 +920,119 @@ service_scheduler_all_statuses() {
 
     echo "$result"
 }
+
+# =============================================================================
+# Phase-Based Execution (v2.0)
+# =============================================================================
+
+# Run all services in a given phase
+#
+# Phase semantics:
+#   - startup/shutdown: Sequential by order, synchronous. Failure in required
+#     startup service aborts. Shutdown runs in reverse order.
+#   - pre/post with tick schedule: Sequential by order, synchronous function call.
+#   - periodic: Delegates to existing service_scheduler_tick().
+#
+# Args:
+#   phase - Phase name (startup|pre|periodic|post|shutdown)
+#
+# Returns: 0 on success, 1 if a required startup service fails
+service_scheduler_run_phase() {
+    local phase="$1"
+
+    case "$phase" in
+        periodic)
+            # Periodic phase uses existing tick-based scheduling
+            service_scheduler_tick
+            return $?
+            ;;
+        startup|pre|post|shutdown)
+            _run_phase_services "$phase"
+            return $?
+            ;;
+        *)
+            log_error "Unknown phase: $phase"
+            return 1
+            ;;
+    esac
+}
+
+# Internal: Run services for a synchronous phase
+#
+# Args:
+#   phase - Phase name
+_run_phase_services() {
+    local phase="$1"
+
+    local service_ids
+    service_ids=$(service_get_phase_services "$phase")
+
+    [ -n "$service_ids" ] || return 0
+
+    # Shutdown runs in reverse order
+    if [ "$phase" = "shutdown" ]; then
+        service_ids=$(echo "$service_ids" | tac | tr '\n' ' ')
+        service_ids="${service_ids% }"
+    fi
+
+    for id in $service_ids; do
+        # Check conditions
+        if ! service_conditions_met "$id"; then
+            log_debug "Phase $phase: skipping $id (conditions not met)"
+            continue
+        fi
+
+        log_debug "Phase $phase: running $id"
+
+        local exec_config
+        exec_config=$(service_get_execution "$id")
+        local exec_type
+        exec_type=$(echo "$exec_config" | jq -r '.type // "function"')
+
+        local exec_rc=0
+        case "$exec_type" in
+            function)
+                local func_name
+                func_name=$(echo "$exec_config" | jq -r '.function // ""')
+                if [ -n "$func_name" ] && declare -F "$func_name" > /dev/null 2>&1; then
+                    service_state_mark_started "$id"
+                    "$func_name" || exec_rc=$?
+                    if [ "$exec_rc" -eq 0 ]; then
+                        service_state_mark_completed "$id"
+                    else
+                        service_state_mark_failed "$id"
+                    fi
+                else
+                    log_warn "Phase $phase: function '$func_name' not found for service $id"
+                    exec_rc=1
+                fi
+                ;;
+            command)
+                local cmd
+                cmd=$(echo "$exec_config" | jq -r '.command // ""')
+                if [ -n "$cmd" ]; then
+                    service_state_mark_started "$id"
+                    bash -c "$cmd" || exec_rc=$?
+                    if [ "$exec_rc" -eq 0 ]; then
+                        service_state_mark_completed "$id"
+                    else
+                        service_state_mark_failed "$id"
+                    fi
+                fi
+                ;;
+        esac
+
+        # Startup phase: abort on critical failure
+        if [ "$phase" = "startup" ] && [ "$exec_rc" -ne 0 ]; then
+            local required
+            required=$(service_get_field "$id" ".required" "false")
+            if [ "$required" = "true" ]; then
+                log_error "Required startup service '$id' failed (exit code: $exec_rc)"
+                return 1
+            fi
+            log_warn "Optional startup service '$id' failed (exit code: $exec_rc), continuing"
+        fi
+    done
+
+    return 0
+}

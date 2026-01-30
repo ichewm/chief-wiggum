@@ -45,7 +45,7 @@ Service configuration uses JSON Schema draft 2020-12. The full schema is at `con
 
 ```json
 {
-  "version": "1.0",
+  "version": "2.0",
   "defaults": { ... },
   "groups": { ... },
   "services": [ ... ]
@@ -54,7 +54,7 @@ Service configuration uses JSON Schema draft 2020-12. The full schema is at `con
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `version` | string | Yes | Schema version (`"1.0"` or `"1.1"`) |
+| `version` | string | Yes | Schema version (`"1.0"`, `"1.1"`, or `"2.0"`) |
 | `defaults` | object | No | Default configuration applied to all services |
 | `groups` | object | No | Named groups for bulk operations |
 | `services` | array | Yes | Array of service definitions |
@@ -104,6 +104,9 @@ Each service requires `id`, `schedule`, and `execution` fields.
 |-------|------|---------|-------------|
 | `description` | string | - | Human-readable description |
 | `enabled` | boolean | `true` | Whether the service is enabled |
+| `phase` | string | `"periodic"` | Execution phase (v2.0): `startup`, `pre`, `periodic`, `post`, `shutdown` |
+| `order` | integer | `50` | Execution order within phase (lower = first, v2.0) |
+| `required` | boolean | `false` | Abort orchestrator on failure (startup/shutdown only, v2.0) |
 | `groups` | array | `[]` | Groups this service belongs to |
 | `depends_on` | array | `[]` | Services that must complete first |
 | `condition` | object | - | Conditions for execution |
@@ -114,6 +117,22 @@ Each service requires `id`, `schedule`, and `execution` fields.
 | `health` | object | - | Health check configuration |
 | `limits` | object | - | Resource limits |
 | `metrics` | object | - | Metrics collection settings |
+
+### Phases (v2.0)
+
+Services are organized into five execution phases:
+
+| Phase | When | Execution Model |
+|-------|------|-----------------|
+| `startup` | Once, before main loop | Sequential by `order`, synchronous. Failure in `required` service aborts orchestrator. |
+| `pre` | Every tick, before periodic | Sequential by `order`, synchronous (direct function call). |
+| `periodic` | Interval/cron/event-based | Dispatched by service scheduler (subprocess, async). |
+| `post` | Every tick, after periodic | Sequential by `order`, synchronous (direct function call). |
+| `shutdown` | Once, on exit | Sequential by reverse `order`, synchronous. |
+
+**Pre/post tick services** run synchronously because they are file I/O operations completing in <10ms. The scheduler calls `svc_*` functions directly — no subprocess fork. Each function reads files, does work, writes files, with no shared in-process state.
+
+**Startup/shutdown** services run sequentially. A `required: true` startup service that fails aborts the orchestrator. Shutdown services run in reverse order.
 
 ### Example Service
 
@@ -231,6 +250,22 @@ Run continuously, restarting after completion.
 |-------|------|----------|---------|-------------|
 | `type` | const | Yes | - | Must be `"continuous"` |
 | `restart_delay` | integer | No | `5` | Delay in seconds before restarting |
+
+### Tick Schedule (v2.0)
+
+Run every orchestrator loop iteration (~1s cadence). Tick services execute synchronously as direct function calls (not subprocesses), completing in <10ms. Used for pre/post phase services that do file I/O.
+
+```json
+{
+  "type": "tick"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | const | Yes | Must be `"tick"` |
+
+No interval or jitter — runs every tick. Only valid with `phase: "pre"` or `phase: "post"`.
 
 ---
 
@@ -442,6 +477,9 @@ Only run when conditions are met.
     "env_equals": {
       "WIGGUM_MODE": "production"
     },
+    "env_not_equals": {
+      "WIGGUM_RUN_MODE": "merge-only"
+    },
     "command": "git status --porcelain | grep -q ."
   }
 }
@@ -453,6 +491,7 @@ Only run when conditions are met.
 | `file_not_exists` | string | Glob pattern - run only if no matches |
 | `env_set` | string | Environment variable must be set |
 | `env_equals` | object | Environment variables must equal values |
+| `env_not_equals` | object | Environment variables must NOT equal values (v2.0) |
 | `command` | string | Shell command must exit 0 |
 
 All specified conditions must pass for the service to run.
@@ -465,7 +504,7 @@ Monitor service health and detect stuck processes.
 {
   "health": {
     "type": "file",
-    "path": ".ralph/.heartbeat",
+    "path": ".ralph/services/heartbeat",
     "max_age": 60,
     "interval": 30,
     "on_unhealthy": "restart"
@@ -592,7 +631,7 @@ A service will only run after all dependencies have completed successfully in th
 
 ## State Management
 
-Service state is persisted to `.ralph/.service-state.json`.
+Service state is persisted to `.ralph/services/state.json`.
 
 ### State Structure
 
@@ -651,7 +690,7 @@ Projects can override or add services via `.ralph/services.json`.
 
 ```json
 {
-  "version": "1.0",
+  "version": "2.0",
   "services": [
     {
       "id": "pr-sync",
@@ -663,6 +702,7 @@ Projects can override or add services via `.ralph/services.json`.
     {
       "id": "custom-service",
       "enabled": true,
+      "phase": "periodic",
       "schedule": {
         "type": "interval",
         "interval": 120
@@ -772,7 +812,30 @@ This pattern:
 
 ## Default Services
 
-The default `config/services.json` defines these services:
+The default `config/services.json` defines services organized by phase:
+
+### Startup Phase (run once, sequential)
+
+| ID | Order | Description |
+|----|-------|-------------|
+| `validate-kanban` | 10 | Validate kanban format |
+| `init-scheduler` | 20 | Initialize scheduler, detect dependency cycles |
+| `preflight-git` | 30 | Check clean git state, pull main |
+| `preflight-ssh` | 40 | Test SSH connection |
+| `preflight-gh` | 50 | Test GitHub CLI auth |
+| `restore-workers` | 60 | Restore worker pool from worker directories |
+| `resume-workers` | 70 | Resume stopped WIP workers |
+| `init-terminal` | 80 | Initialize terminal header |
+
+### Pre Phase (every tick, sequential)
+
+| ID | Order | Description |
+|----|-------|-------------|
+| `pool-ingest` | 10 | Read pool-pending, merge into pool.json |
+| `resume-poll` | 20 | Check pending-resumes.json for finished PIDs |
+| `worker-cleanup` | 30 | Reap finished workers, update pool.json |
+
+### Periodic Phase (interval/cron/event-based)
 
 | ID | Interval | Description |
 |----|----------|-------------|
@@ -783,10 +846,29 @@ The default `config/services.json` defines these services:
 | `multi-pr-planner` | 900s | Check for conflict batches |
 | `fix-workers` | 60s | Spawn fix workers for PR comment issues |
 | `resolve-workers` | 60s | Spawn resolve workers for merge conflicts |
-| `worker-cleanup` | 60s | Clean up all finished workers |
 | `pr-optimizer-check` | 60s | Check for completed PR optimizer |
-| `task-spawner` | 60s | Spawn workers for ready tasks (disabled) |
-| `status-display` | event | Display status on scheduling events |
+
+### Post Phase (every tick, sequential)
+
+| ID | Order | Description |
+|----|-------|-------------|
+| `completion-check` | 10 | Write should-exit file if all tasks done |
+| `rate-limit-guard` | 20 | Check rate limits, write pause file if needed |
+| `scheduler-tick` | 30 | Parse kanban, write scheduler-state.json |
+| `task-spawner` | 40 | Read scheduler state, spawn workers |
+| `skip-decay` | 50 | Decay skip-tasks.json (every 180 ticks) |
+| `orphan-detection` | 60 | Detect orphan workers (every 60 ticks) |
+| `aging-update` | 70 | Update task-ready-since aging |
+| `status-display` | 80 | Update terminal header |
+| `state-save` | 90 | Persist service state.json |
+
+### Shutdown Phase (run once, reverse order)
+
+| ID | Order | Description |
+|----|-------|-------------|
+| `final-state-save` | 10 | Final service state persistence |
+| `terminal-cleanup` | 20 | Clean up terminal header |
+| `lock-cleanup` | 30 | Remove orchestrator.pid |
 
 ---
 
@@ -816,9 +898,9 @@ The default `config/services.json` defines these services:
 
 | Function | Description |
 |----------|-------------|
-| `service_scheduler_init(ralph_dir, project_dir)` | Initialize scheduler |
-| `service_scheduler_tick()` | Check and run due services |
-| `service_scheduler_run_startup()` | Run startup services |
+| `service_scheduler_init(ralph_dir, project_dir)` | Initialize scheduler, load services |
+| `service_scheduler_tick()` | Check and run due periodic services |
+| `service_scheduler_run_phase(phase)` | Run all services for a phase (startup/pre/periodic/post/shutdown) |
 | `service_is_due(id)` | Check if service should run |
 | `service_trigger_event(event, args...)` | Trigger event-based services |
 | `service_scheduler_status()` | Get scheduler status summary |
@@ -860,7 +942,7 @@ The default `config/services.json` defines these services:
 
 ```bash
 # View service state
-cat .ralph/.service-state.json | jq .
+cat .ralph/services/state.json | jq .
 
 # Check which services are due
 wiggum service status --json | jq '.[] | select(.status != "running")'

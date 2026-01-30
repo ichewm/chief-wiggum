@@ -432,7 +432,7 @@ usage_tracker_update() {
     echo "$usage_json"
 }
 
-# Write usage JSON to a shared .ralph/claude-usage.json file
+# Write usage JSON to a shared .ralph/orchestrator/claude-usage.json file
 # Args: $1 = ralph directory path
 # Output: prints usage JSON to stdout
 usage_tracker_write_shared() {
@@ -440,7 +440,7 @@ usage_tracker_write_shared() {
     local usage_json
     usage_json=$(usage_tracker_calculate)
     mkdir -p "$ralph_dir"
-    echo "$usage_json" > "$ralph_dir/claude-usage.json"
+    echo "$usage_json" > "$ralph_dir/orchestrator/claude-usage.json"
     echo "$usage_json"
 }
 
@@ -449,7 +449,7 @@ usage_tracker_write_shared() {
 # Returns: 0 if over threshold (rate limited), 1 if OK
 rate_limit_check() {
     local ralph_dir="$1"
-    local usage_file="$ralph_dir/claude-usage.json"
+    local usage_file="$ralph_dir/orchestrator/claude-usage.json"
     local config_file="${WIGGUM_HOME}/config/config.json"
 
     # Read threshold from config, env var, or use default

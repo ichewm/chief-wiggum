@@ -24,6 +24,7 @@ TEST_DIR=""
 setup() {
     TEST_DIR=$(mktemp -d)
     mkdir -p "$TEST_DIR/.ralph"
+    mkdir -p "$TEST_DIR/.ralph/services"
 
     # Reset all state
     _SERVICE_JSON_FILE=""
@@ -174,7 +175,7 @@ test_state_save_and_restore() {
 
     service_state_save
 
-    assert_file_exists "$TEST_DIR/.ralph/.service-state.json" \
+    assert_file_exists "$TEST_DIR/.ralph/services/state.json" \
         "State file should be created"
 
     # Simulate process restart: clear in-memory state but keep file

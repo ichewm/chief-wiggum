@@ -68,10 +68,16 @@ export ERROR_LOG_MAX_AGE
 STUCK_WORKER_THRESHOLD="${WIGGUM_STUCK_WORKER_THRESHOLD:-1800}"
 export STUCK_WORKER_THRESHOLD
 
+# Orchestrator and service state directories
+ORCH_STATE_DIR="$RALPH_DIR/orchestrator"
+SVC_STATE_DIR="$RALPH_DIR/services"
+
 # Export for child processes
 export WIGGUM_HOME
 export PROJECT_DIR
 export RALPH_DIR
+export ORCH_STATE_DIR
+export SVC_STATE_DIR
 export CLAUDE
 
 # =============================================================================

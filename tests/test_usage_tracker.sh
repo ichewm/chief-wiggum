@@ -178,10 +178,10 @@ test_rate_limit_no_data() {
 # =============================================================================
 test_rate_limit_under_threshold() {
     local ralph_dir="$TEST_DIR/ralph-under"
-    mkdir -p "$ralph_dir"
+    mkdir -p "$ralph_dir/orchestrator"
 
     # Create usage data under threshold
-    cat > "$ralph_dir/claude-usage.json" << 'JSON'
+    cat > "$ralph_dir/orchestrator/claude-usage.json" << 'JSON'
 {
     "current_5h_cycle": {
         "start_time": 1700000000000,
@@ -203,14 +203,14 @@ JSON
 # =============================================================================
 test_rate_limit_over_threshold() {
     local ralph_dir="$TEST_DIR/ralph-over"
-    mkdir -p "$ralph_dir"
+    mkdir -p "$ralph_dir/orchestrator"
 
     # Get current cycle start in milliseconds to avoid stale data detection
     local current_cycle_start_ms
     current_cycle_start_ms=$(( $(_usage_get_5h_cycle_start) * 1000 ))
 
     # Create usage data over threshold with current cycle timestamp
-    cat > "$ralph_dir/claude-usage.json" << JSON
+    cat > "$ralph_dir/orchestrator/claude-usage.json" << JSON
 {
     "current_5h_cycle": {
         "start_time": $current_cycle_start_ms,
@@ -232,13 +232,13 @@ JSON
 # =============================================================================
 test_rate_limit_custom_threshold() {
     local ralph_dir="$TEST_DIR/ralph-custom"
-    mkdir -p "$ralph_dir"
+    mkdir -p "$ralph_dir/orchestrator"
 
     # Get current cycle start in milliseconds to avoid stale data detection
     local current_cycle_start_ms
     current_cycle_start_ms=$(( $(_usage_get_5h_cycle_start) * 1000 ))
 
-    cat > "$ralph_dir/claude-usage.json" << JSON
+    cat > "$ralph_dir/orchestrator/claude-usage.json" << JSON
 {
     "current_5h_cycle": {
         "start_time": $current_cycle_start_ms,
@@ -355,15 +355,15 @@ test_write_shared() {
     mkdir -p "$CLAUDE_PROJECTS_DIR"
 
     local ralph_dir="$TEST_DIR/ralph-shared"
-    mkdir -p "$ralph_dir"
+    mkdir -p "$ralph_dir/orchestrator"
 
     local result
     result=$(usage_tracker_write_shared "$ralph_dir" 2>/dev/null)
 
-    assert_file_exists "$ralph_dir/claude-usage.json" "Shared usage file should be created"
+    assert_file_exists "$ralph_dir/orchestrator/claude-usage.json" "Shared usage file should be created"
 
     local prompts
-    prompts=$(jq -r '.current_5h_cycle.total_prompts' "$ralph_dir/claude-usage.json")
+    prompts=$(jq -r '.current_5h_cycle.total_prompts' "$ralph_dir/orchestrator/claude-usage.json")
     assert_equals "0" "$prompts" "Empty projects should produce 0 prompts"
 }
 

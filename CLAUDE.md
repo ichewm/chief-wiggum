@@ -50,6 +50,8 @@ WIGGUM_LOG_LEVEL=debug wiggum run           # Verbose logging
 | `lib/agents/` | Agent implementations (system, engineering, product) |
 | `lib/pipeline/` | Pipeline engine (loader, runner - state machine) |
 | `lib/worker/` | Worker lifecycle management |
+| `lib/scheduler/` | Task scheduling, worker pool, priority, orchestrator functions |
+| `lib/orchestrator/` | Orchestrator lifecycle, arg parsing, directory migration |
 | `lib/tasks/` | Kanban parsing, task parsing |
 | `lib/git/` | Git worktree operations, PR creation |
 | `lib/utils/` | Logging, metrics, cost calculation |

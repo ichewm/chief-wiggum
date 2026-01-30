@@ -22,7 +22,7 @@ _PID_OPS_LOCK_FILE=""
 # Returns: lock file path
 _get_pid_ops_lock() {
     local ralph_dir="$1"
-    echo "$ralph_dir/.pid-ops.lock"
+    echo "$ralph_dir/orchestrator/pid-ops.lock"
 }
 
 # Find the newest worker directory for a task

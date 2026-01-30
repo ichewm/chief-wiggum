@@ -367,7 +367,7 @@ pr_merge_handle_remaining() {
         if [ "$has_comments" = "true" ]; then
             log "  $task_id: needs_fix (has new comments)"
             git_state_set "$worker_dir" "needs_fix" "pr-merge-optimizer" "New comments need addressing"
-            echo "$task_id" >> "$ralph_dir/.tasks-needing-fix.txt"
+            echo "$task_id" >> "$ralph_dir/orchestrator/tasks-needing-fix.txt"
             ((++needs_fix))
             continue
         fi

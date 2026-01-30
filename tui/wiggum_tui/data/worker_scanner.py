@@ -346,7 +346,7 @@ def get_orchestrator_status(ralph_dir: Path) -> tuple[bool, int | None]:
     Returns:
         Tuple of (running: bool, pid: int | None).
     """
-    pid_path = ralph_dir / ".orchestrator.pid"
+    pid_path = ralph_dir / "orchestrator" / "orchestrator.pid"
 
     if not pid_path.exists():
         return False, None

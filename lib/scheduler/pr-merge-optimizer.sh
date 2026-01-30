@@ -55,7 +55,7 @@ source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 
 # State file path
 _pr_merge_state_file() {
-    echo "$1/pr-merge-state.json"
+    echo "$1/orchestrator/pr-merge-state.json"
 }
 
 # Initialize or reset the PR merge state

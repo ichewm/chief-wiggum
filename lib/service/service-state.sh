@@ -2,7 +2,7 @@
 # =============================================================================
 # service-state.sh - Persistent state for service scheduler recovery
 #
-# Manages state file: .ralph/.service-state.json
+# Manages state file: .ralph/services/state.json
 #
 # Provides:
 #   service_state_init(ralph_dir)    - Initialize state tracking
@@ -74,8 +74,8 @@ declare -gA _SERVICE_LAST_SUCCESS=()      # service_id -> epoch of last successf
 #   ralph_dir - Ralph directory path
 service_state_init() {
     local ralph_dir="$1"
-    _SERVICE_STATE_FILE="$ralph_dir/.service-state.json"
-    _SERVICE_METRICS_FILE="$ralph_dir/.service-metrics.jsonl"
+    _SERVICE_STATE_FILE="$ralph_dir/services/state.json"
+    _SERVICE_METRICS_FILE="$ralph_dir/services/metrics.jsonl"
 
     # Reset in-memory state
     _SERVICE_LAST_RUN=()

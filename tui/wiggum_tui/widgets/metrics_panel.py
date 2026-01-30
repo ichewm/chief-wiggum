@@ -316,7 +316,7 @@ def parse_pipeline_step_durations(ralph_dir: Path) -> dict[str, dict]:
 
 
 def parse_service_metrics(ralph_dir: Path) -> list[dict]:
-    """Parse .ralph/.service-metrics.jsonl for service health data.
+    """Parse .ralph/services/metrics.jsonl for service health data.
 
     Args:
         ralph_dir: Path to .ralph directory.
@@ -324,7 +324,7 @@ def parse_service_metrics(ralph_dir: Path) -> list[dict]:
     Returns:
         List of dicts with keys: service_id, runs, success_count, avg_duration_ms, last_run.
     """
-    metrics_path = ralph_dir / ".service-metrics.jsonl"
+    metrics_path = ralph_dir / "services" / "metrics.jsonl"
     if not metrics_path.exists():
         return []
 

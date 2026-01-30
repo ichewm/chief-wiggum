@@ -69,6 +69,8 @@ fi
 mkdir -p "$RALPH_DIR/workers"
 mkdir -p "$RALPH_DIR/results"
 mkdir -p "$RALPH_DIR/logs"
+mkdir -p "$RALPH_DIR/orchestrator"
+mkdir -p "$RALPH_DIR/services"
 
 # Create .gitignore to exclude .ralph/ contents from version control
 cat > "$RALPH_DIR/.gitignore" <<'EOF'

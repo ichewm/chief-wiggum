@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "2.0",
   "defaults": {
     "timeout": 300,
     "restart_policy": {
@@ -9,8 +9,138 @@
   },
   "services": [
     {
+      "id": "validate-kanban",
+      "description": "Validate kanban.md format",
+      "phase": "startup",
+      "order": 10,
+      "required": true,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_validate_kanban"
+      }
+    },
+    {
+      "id": "init-scheduler",
+      "description": "Initialize scheduler and detect dependency cycles",
+      "phase": "startup",
+      "order": 20,
+      "required": true,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_init_scheduler"
+      }
+    },
+    {
+      "id": "preflight-git",
+      "description": "Check clean git status and pull main",
+      "phase": "startup",
+      "order": 30,
+      "required": true,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_preflight_git"
+      }
+    },
+    {
+      "id": "preflight-ssh",
+      "description": "Test SSH connection to git remote",
+      "phase": "startup",
+      "order": 40,
+      "required": true,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_preflight_ssh"
+      }
+    },
+    {
+      "id": "preflight-gh",
+      "description": "Test GitHub CLI authentication",
+      "phase": "startup",
+      "order": 50,
+      "required": true,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_preflight_gh"
+      }
+    },
+    {
+      "id": "restore-workers",
+      "description": "Restore active workers from existing worker directories",
+      "phase": "startup",
+      "order": 60,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_restore_workers"
+      }
+    },
+    {
+      "id": "resume-workers",
+      "description": "Resume stopped WIP workers",
+      "phase": "startup",
+      "order": 70,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_resume_workers"
+      }
+    },
+    {
+      "id": "init-terminal",
+      "description": "Initialize terminal header display",
+      "phase": "startup",
+      "order": 80,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_init_terminal"
+      }
+    },
+
+    {
+      "id": "pool-ingest",
+      "description": "Consume persisted pool entries from subshells",
+      "phase": "pre",
+      "order": 10,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_pool_ingest"
+      }
+    },
+    {
+      "id": "resume-poll",
+      "description": "Poll background resume processes for completion",
+      "phase": "pre",
+      "order": 20,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_resume_poll"
+      }
+    },
+    {
+      "id": "worker-cleanup",
+      "description": "Reap finished workers and run completion callbacks",
+      "phase": "pre",
+      "order": 30,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_worker_cleanup"
+      }
+    },
+
+    {
       "id": "pr-sync",
       "description": "Sync PR statuses and detect new comments",
+      "phase": "periodic",
+      "order": 10,
       "schedule": {
         "type": "interval",
         "interval": 180,
@@ -24,6 +154,8 @@
     {
       "id": "usage-tracker",
       "description": "Update shared usage data for rate limiting",
+      "phase": "periodic",
+      "order": 20,
       "schedule": {
         "type": "interval",
         "interval": 180,
@@ -37,6 +169,8 @@
     {
       "id": "orphan-workspace",
       "description": "Create workspaces for orphaned PRs",
+      "phase": "periodic",
+      "order": 30,
       "schedule": {
         "type": "interval",
         "interval": 180,
@@ -50,6 +184,8 @@
     {
       "id": "pr-optimizer",
       "description": "Optimize and execute PR merges",
+      "phase": "periodic",
+      "order": 40,
       "schedule": {
         "type": "interval",
         "interval": 900,
@@ -67,6 +203,8 @@
     {
       "id": "multi-pr-planner",
       "description": "Check for conflict batches and spawn multi-PR planner",
+      "phase": "periodic",
+      "order": 50,
       "schedule": {
         "type": "interval",
         "interval": 900,
@@ -75,11 +213,16 @@
       "execution": {
         "type": "function",
         "function": "svc_orch_spawn_multi_pr_planner"
+      },
+      "condition": {
+        "env_not_equals": { "WIGGUM_RUN_MODE": "merge-only" }
       }
     },
     {
       "id": "fix-workers",
       "description": "Spawn fix workers for PR comment issues",
+      "phase": "periodic",
+      "order": 60,
       "schedule": {
         "type": "interval",
         "interval": 60,
@@ -88,11 +231,16 @@
       "execution": {
         "type": "function",
         "function": "svc_orch_spawn_fix_workers"
+      },
+      "condition": {
+        "env_not_equals": { "WIGGUM_RUN_MODE": "merge-only" }
       }
     },
     {
       "id": "resolve-workers",
       "description": "Spawn resolve workers for merge conflicts",
+      "phase": "periodic",
+      "order": 70,
       "schedule": {
         "type": "interval",
         "interval": 60,
@@ -104,21 +252,10 @@
       }
     },
     {
-      "id": "worker-cleanup",
-      "description": "Clean up all finished workers (main, fix, resolve)",
-      "schedule": {
-        "type": "interval",
-        "interval": 60,
-        "run_on_startup": true
-      },
-      "execution": {
-        "type": "function",
-        "function": "svc_orch_cleanup_all_workers"
-      }
-    },
-    {
       "id": "pr-optimizer-check",
       "description": "Check for completed PR optimizer and process results",
+      "phase": "periodic",
+      "order": 80,
       "schedule": {
         "type": "interval",
         "interval": 60,
@@ -129,31 +266,141 @@
         "function": "svc_orch_check_pr_optimizer"
       }
     },
+
     {
-      "id": "task-spawner",
-      "description": "Spawn workers for ready tasks (DISABLED - runs in main process)",
-      "enabled": false,
-      "_comment": "Task spawning must run in the main process because it depends on in-memory scheduler state (SCHED_READY_TASKS) which is not accessible from subshells. The spawning logic is now inline in _main_loop_service_based.",
-      "schedule": {
-        "type": "interval",
-        "interval": 60,
-        "run_on_startup": true
-      },
+      "id": "completion-check",
+      "description": "Check if all tasks are complete and signal exit",
+      "phase": "post",
+      "order": 10,
+      "schedule": { "type": "tick" },
       "execution": {
         "type": "function",
-        "function": "svc_orch_spawn_ready_tasks"
+        "function": "svc_orch_check_completion"
+      }
+    },
+    {
+      "id": "rate-limit-guard",
+      "description": "Check rate limits and pause if needed",
+      "phase": "post",
+      "order": 20,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_rate_limit_guard"
+      }
+    },
+    {
+      "id": "scheduler-tick",
+      "description": "Parse kanban and update scheduler state",
+      "phase": "post",
+      "order": 30,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_scheduler_tick"
+      }
+    },
+    {
+      "id": "task-spawner",
+      "description": "Spawn workers for ready tasks",
+      "phase": "post",
+      "order": 40,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_task_spawner"
+      },
+      "condition": {
+        "env_equals": { "WIGGUM_RUN_MODE": "default" }
+      }
+    },
+    {
+      "id": "skip-decay",
+      "description": "Decay skip counts for failed kanban updates",
+      "phase": "post",
+      "order": 50,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_skip_decay"
+      }
+    },
+    {
+      "id": "orphan-detection",
+      "description": "Detect orphan workers without pool entries",
+      "phase": "post",
+      "order": 60,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_orphan_detection"
+      }
+    },
+    {
+      "id": "aging-update",
+      "description": "Update aging tracking after scheduling events",
+      "phase": "post",
+      "order": 70,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_aging_update"
       }
     },
     {
       "id": "status-display",
-      "description": "Display orchestrator status on scheduling events",
-      "schedule": {
-        "type": "event",
-        "trigger": "scheduling_event"
-      },
+      "description": "Update terminal header with current status",
+      "phase": "post",
+      "order": 80,
+      "schedule": { "type": "tick" },
       "execution": {
         "type": "function",
-        "function": "svc_orch_display_status"
+        "function": "svc_orch_status_display"
+      }
+    },
+    {
+      "id": "state-save",
+      "description": "Persist service state to disk",
+      "phase": "post",
+      "order": 90,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_state_save"
+      }
+    },
+
+    {
+      "id": "final-state-save",
+      "description": "Final service state persistence on shutdown",
+      "phase": "shutdown",
+      "order": 10,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_state_save"
+      }
+    },
+    {
+      "id": "terminal-cleanup",
+      "description": "Clean up terminal header on shutdown",
+      "phase": "shutdown",
+      "order": 20,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_terminal_cleanup"
+      }
+    },
+    {
+      "id": "lock-cleanup",
+      "description": "Remove orchestrator lock file on shutdown",
+      "phase": "shutdown",
+      "order": 30,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_lock_cleanup"
       }
     }
   ]

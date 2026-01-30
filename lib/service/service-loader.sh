@@ -130,11 +130,11 @@ service_load() {
 
     # Validate schedule types (now includes cron)
     local bad_schedule
-    bad_schedule=$(jq -r '.services[] | select(.schedule.type | . != "interval" and . != "event" and . != "continuous" and . != "cron") | .id' "$file" | head -1)
+    bad_schedule=$(jq -r '.services[] | select(.schedule.type | . != "interval" and . != "event" and . != "continuous" and . != "cron" and . != "tick") | .id' "$file" | head -1)
     if [ -n "$bad_schedule" ]; then
         local sched_type
         sched_type=$(jq -r --arg id "$bad_schedule" '.services[] | select(.id == $id) | .schedule.type' "$file")
-        log_error "Service '$bad_schedule' has invalid schedule type: '$sched_type' (must be interval, event, continuous, or cron)"
+        log_error "Service '$bad_schedule' has invalid schedule type: '$sched_type' (must be interval, event, continuous, cron, or tick)"
         return 1
     fi
 
@@ -543,6 +543,23 @@ service_conditions_met() {
             local actual_value="${!var:-}"
             if [ "$actual_value" != "$expected_value" ]; then
                 log_debug "Service $id condition env_equals '$var=$expected_value' not met (actual: '$actual_value')"
+                return 1
+            fi
+        done
+    fi
+
+    # Check env_not_equals
+    local env_not_equals
+    env_not_equals=$(echo "$condition" | jq -c '.env_not_equals // null')
+    if [ "$env_not_equals" != "null" ]; then
+        local env_ne_vars
+        env_ne_vars=$(echo "$env_not_equals" | jq -r 'keys[]')
+        for var in $env_ne_vars; do
+            local excluded_value
+            excluded_value=$(echo "$env_not_equals" | jq -r --arg v "$var" '.[$v]')
+            local actual_value="${!var:-}"
+            if [ "$actual_value" = "$excluded_value" ]; then
+                log_debug "Service $id condition env_not_equals '$var!=$excluded_value' not met (actual: '$actual_value')"
                 return 1
             fi
         done
@@ -979,4 +996,53 @@ service_load_builtin_defaults() {
     _SERVICE_COUNT=6
 
     log "Loaded built-in default services with $_SERVICE_COUNT services"
+}
+
+# =============================================================================
+# Phase Functions (v2.0)
+# =============================================================================
+
+# Get phase for a service
+#
+# Args:
+#   id - Service identifier
+#
+# Returns: Phase string (startup|pre|periodic|post|shutdown), default: periodic
+service_get_phase() {
+    local id="$1"
+    service_get_field "$id" ".phase" "periodic"
+}
+
+# Get execution order within phase
+#
+# Args:
+#   id - Service identifier
+#
+# Returns: Order integer, default: 50
+service_get_order() {
+    local id="$1"
+    service_get_field "$id" ".order" "50"
+}
+
+# Get all services for a given phase, sorted by order
+#
+# Args:
+#   phase - Phase name (startup|pre|periodic|post|shutdown)
+#
+# Returns: Space-separated list of service IDs, sorted by order
+service_get_phase_services() {
+    local phase="$1"
+
+    _service_jq -r --arg phase "$phase" '
+        .groups as $groups |
+        [.services[] |
+            select(.enabled != false) |
+            select(
+                (.groups // []) as $svc_groups |
+                ($svc_groups | length == 0) or
+                ($svc_groups | map(. as $g | $groups[$g].enabled // true) | all)
+            ) |
+            select((.phase // "periodic") == $phase)
+        ] | sort_by(.order // 50) | .[].id
+    '
 }

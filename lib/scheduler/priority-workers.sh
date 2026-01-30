@@ -40,7 +40,7 @@ _PRIORITY_CAPACITY_FILE=""
 #   ralph_dir - Ralph directory path
 _priority_capacity_init() {
     local ralph_dir="$1"
-    _PRIORITY_CAPACITY_FILE="$ralph_dir/.priority-worker-count"
+    _PRIORITY_CAPACITY_FILE="$ralph_dir/orchestrator/priority-worker-count"
 
     # Create file if it doesn't exist
     [ -f "$_PRIORITY_CAPACITY_FILE" ] || echo "0" > "$_PRIORITY_CAPACITY_FILE"
@@ -268,7 +268,7 @@ _verify_task_merged() {
 # Check for tasks needing fixes and spawn fix workers
 #
 # Collects tasks from two sources:
-# 1. .tasks-needing-fix.txt (populated by wiggum-review sync for fresh comments)
+# 1. orchestrator/tasks-needing-fix.txt (populated by wiggum-review sync for fresh comments)
 # 2. Worker directories with needs_fix git state (fallback for stuck tasks)
 #
 # Tasks are sorted by dependency depth (descending) so that tasks which
@@ -289,7 +289,7 @@ spawn_fix_workers() {
     local project_dir="$2"
     local limit="$3"
 
-    local tasks_needing_fix="$ralph_dir/.tasks-needing-fix.txt"
+    local tasks_needing_fix="$ralph_dir/orchestrator/tasks-needing-fix.txt"
     local kanban_file="$ralph_dir/kanban.md"
 
     [ -d "$ralph_dir/workers" ] || return 0
@@ -868,7 +868,7 @@ create_orphan_pr_workspaces() {
     local ralph_dir="$1"
     local project_dir="$2"
 
-    local orphan_file="$ralph_dir/.prs-needing-workspace.jsonl"
+    local orphan_file="$ralph_dir/orchestrator/prs-needing-workspace.jsonl"
 
     if [ ! -s "$orphan_file" ]; then
         return 0
@@ -927,7 +927,7 @@ create_orphan_pr_workspaces() {
         "$WIGGUM_HOME/bin/wiggum-review" task "$task_id" sync 2>/dev/null || true
 
         # Queue for fix processing
-        echo "$task_id" >> "$ralph_dir/.tasks-needing-fix.txt"
+        echo "$task_id" >> "$ralph_dir/orchestrator/tasks-needing-fix.txt"
         git_state_set "$worker_dir" "needs_fix" "priority-workers.create_orphan_pr_workspaces" "Workspace created from PR branch"
 
         log "  $task_id: Workspace created, queued for fix"

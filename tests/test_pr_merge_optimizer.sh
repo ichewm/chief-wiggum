@@ -19,6 +19,7 @@ setup() {
     RALPH_DIR="$TEST_DIR/.ralph"
     PROJECT_DIR="$TEST_DIR/project"
     mkdir -p "$RALPH_DIR/workers"
+    mkdir -p "$RALPH_DIR/orchestrator"
     mkdir -p "$PROJECT_DIR"
 
     # Create a minimal kanban.md
@@ -91,13 +92,13 @@ EOF
 test_pr_merge_init_creates_file() {
     pr_merge_init "$RALPH_DIR"
 
-    assert_file_exists "$RALPH_DIR/pr-merge-state.json" "State file should exist"
+    assert_file_exists "$RALPH_DIR/orchestrator/pr-merge-state.json" "State file should exist"
 }
 
 test_pr_merge_init_creates_valid_json() {
     pr_merge_init "$RALPH_DIR"
 
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
 
     local prs conflict_graph merge_order
     prs=$(jq '.prs' "$state_file")
@@ -162,7 +163,7 @@ test_build_conflict_graph_no_conflicts() {
     pr_merge_init "$RALPH_DIR"
 
     # Add PRs with no overlapping files
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     jq '.prs = {
         "TASK-001": {"files_modified": ["src/api.ts"]},
         "TASK-002": {"files_modified": ["src/utils.ts"]}
@@ -180,7 +181,7 @@ test_build_conflict_graph_with_conflicts() {
     pr_merge_init "$RALPH_DIR"
 
     # Add PRs with overlapping files
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     jq '.prs = {
         "TASK-001": {"files_modified": ["src/api.ts", "src/utils.ts"]},
         "TASK-002": {"files_modified": ["src/api.ts", "src/models.ts"]}
@@ -202,7 +203,7 @@ test_build_conflict_graph_three_way() {
     pr_merge_init "$RALPH_DIR"
 
     # Add 3 PRs with various overlaps
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     jq '.prs = {
         "TASK-001": {"files_modified": ["src/api.ts"]},
         "TASK-002": {"files_modified": ["src/api.ts", "src/utils.ts"]},
@@ -235,7 +236,7 @@ test_build_conflict_graph_three_way() {
 test_calculate_merge_priority_base_score() {
     pr_merge_init "$RALPH_DIR"
 
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     jq '.prs = {
         "TASK-001": {
             "files_modified": [],
@@ -254,7 +255,7 @@ test_calculate_merge_priority_base_score() {
 test_calculate_merge_priority_conflict_penalty() {
     pr_merge_init "$RALPH_DIR"
 
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     jq '.prs = {
         "TASK-001": {
             "files_modified": [],
@@ -273,7 +274,7 @@ test_calculate_merge_priority_conflict_penalty() {
 test_calculate_merge_priority_file_penalty() {
     pr_merge_init "$RALPH_DIR"
 
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     jq '.prs = {
         "TASK-001": {
             "files_modified": ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts"],
@@ -297,7 +298,7 @@ test_mis_no_conflicts() {
     pr_merge_init "$RALPH_DIR"
 
     # All PRs independent - MIS should include all
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     jq '.prs = {
         "TASK-001": {"files_modified": ["a.ts"], "mergeable_to_main": true},
         "TASK-002": {"files_modified": ["b.ts"], "mergeable_to_main": true},
@@ -316,7 +317,7 @@ test_mis_pairwise_conflict() {
     pr_merge_init "$RALPH_DIR"
 
     # Two PRs conflict - MIS should be size 1
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     jq '.prs = {
         "TASK-001": {"files_modified": ["a.ts"], "mergeable_to_main": true},
         "TASK-002": {"files_modified": ["a.ts"], "mergeable_to_main": true}
@@ -335,7 +336,7 @@ test_mis_chain_conflict() {
 
     # Chain: A-B-C (A conflicts with B, B conflicts with C)
     # MIS should be {A, C} (size 2)
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     jq '.prs = {
         "TASK-001": {"files_modified": ["a.ts"], "mergeable_to_main": true},
         "TASK-002": {"files_modified": ["a.ts", "b.ts"], "mergeable_to_main": true},
@@ -369,7 +370,7 @@ test_mis_prefers_mergeable() {
 
     # Two conflicting PRs: one mergeable, one not
     # MIS should prefer the mergeable one
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     jq '.prs = {
         "TASK-001": {"files_modified": ["a.ts"], "mergeable_to_main": true},
         "TASK-002": {"files_modified": ["a.ts"], "mergeable_to_main": false}
@@ -390,7 +391,7 @@ test_mis_prefers_mergeable() {
 test_find_optimal_order_includes_all_prs() {
     pr_merge_init "$RALPH_DIR"
 
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     jq '.prs = {
         "TASK-001": {"files_modified": [], "mergeable_to_main": false},
         "TASK-002": {"files_modified": [], "mergeable_to_main": false},
@@ -410,7 +411,7 @@ test_find_optimal_order_mis_first() {
 
     # PRs: A conflicts with B, C is independent
     # MIS = {A or B, C} - C should definitely be in first batch
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     jq '.prs = {
         "TASK-001": {"files_modified": ["a.ts"], "mergeable_to_main": true},
         "TASK-002": {"files_modified": ["a.ts"], "mergeable_to_main": true},
@@ -448,7 +449,7 @@ test_pr_merge_stats_empty() {
 test_pr_merge_stats_with_data() {
     pr_merge_init "$RALPH_DIR"
 
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     jq '.prs = {
         "TASK-001": {"mergeable_to_main": true, "has_new_comments": false},
         "TASK-002": {"mergeable_to_main": false, "has_new_comments": true},
@@ -479,7 +480,7 @@ test_integration_conflict_detection_and_categorization() {
     pr_merge_init "$RALPH_DIR"
 
     # Set up state with mixed PRs
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     jq '.prs = {
         "TASK-001": {
             "pr_number": 1,
@@ -531,7 +532,7 @@ test_integration_merge_order_respects_conflicts() {
     # PR1: mergeable, conflicts with PR2
     # PR2: not mergeable, conflicts with PR1
     # PR3: mergeable, no conflicts (should be first)
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     jq '.prs = {
         "TASK-001": {
             "files_modified": ["src/api.ts"],
@@ -579,7 +580,7 @@ test_gather_skips_worker_in_fixing_state() {
 
     pr_merge_gather_all "$RALPH_DIR" "$PROJECT_DIR" 2>/dev/null
 
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     local has_task
     has_task=$(jq 'has("prs") and (.prs | has("TASK-001"))' "$state_file")
     assert_equals "false" "$has_task" "Worker in 'fixing' state should be excluded from gather"
@@ -591,7 +592,7 @@ test_gather_skips_worker_in_needs_fix_state() {
 
     pr_merge_gather_all "$RALPH_DIR" "$PROJECT_DIR" 2>/dev/null
 
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     local has_task
     has_task=$(jq 'has("prs") and (.prs | has("TASK-001"))' "$state_file")
     assert_equals "false" "$has_task" "Worker in 'needs_fix' state should be excluded from gather"
@@ -603,7 +604,7 @@ test_gather_includes_worker_in_needs_merge_state() {
 
     pr_merge_gather_all "$RALPH_DIR" "$PROJECT_DIR" 2>/dev/null
 
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     local has_task
     has_task=$(jq 'has("prs") and (.prs | has("TASK-001"))' "$state_file")
     assert_equals "true" "$has_task" "Worker in 'needs_merge' state should be included in gather"
@@ -615,7 +616,7 @@ test_gather_includes_worker_with_no_git_state() {
 
     pr_merge_gather_all "$RALPH_DIR" "$PROJECT_DIR" 2>/dev/null
 
-    local state_file="$RALPH_DIR/pr-merge-state.json"
+    local state_file="$RALPH_DIR/orchestrator/pr-merge-state.json"
     local has_task
     has_task=$(jq 'has("prs") and (.prs | has("TASK-001"))' "$state_file")
     assert_equals "true" "$has_task" "Worker with 'none' git state should be included in gather"
