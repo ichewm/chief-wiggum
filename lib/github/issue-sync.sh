@@ -862,6 +862,68 @@ github_issue_sync() {
 }
 
 # =============================================================================
+# Point Status Update
+# =============================================================================
+
+# Update the GitHub issue linked to a specific task
+#
+# Looks up the task in sync state, applies label/state changes on the
+# linked GitHub issue, and saves the new status back to sync state.
+# No-op if no sync state file exists or the task has no linked issue.
+#
+# Args:
+#   ralph_dir  - Path to .ralph directory
+#   task_id    - Kanban task ID (e.g., "GH-42")
+#   new_status - New kanban status char (e.g., "=", "P")
+#
+# Returns: 0 always (failures are logged, not fatal)
+github_issue_sync_task_status() {
+    local ralph_dir="$1"
+    local task_id="$2"
+    local new_status="$3"
+
+    # No-op if no sync state exists
+    [ -f "$ralph_dir/github-sync-state.json" ] || return 0
+
+    # Ensure config is loaded (needed for label mappings)
+    [ -n "${GITHUB_SYNC_STATUS_LABELS:-}" ] || load_github_sync_config
+
+    local entry
+    entry=$(github_sync_state_get_task "$ralph_dir" "$task_id")
+    [ "$entry" != "null" ] || return 0
+
+    local issue_number last_synced_status last_remote_state
+    issue_number=$(echo "$entry" | jq -r '.issue_number')
+    last_synced_status=$(echo "$entry" | jq -r '.last_synced_status // " "')
+    last_remote_state=$(echo "$entry" | jq -r '.last_remote_state // "open"')
+
+    # Skip if status hasn't changed
+    [ "$new_status" != "$last_synced_status" ] || return 0
+
+    # Update GitHub issue
+    github_issue_update_status "$issue_number" "$new_status" "$last_synced_status" \
+        "$last_remote_state" "false"
+
+    # Determine new remote state
+    local new_remote_state="$last_remote_state"
+    if github_sync_should_close "$new_status"; then
+        new_remote_state="closed"
+    elif [ "$last_remote_state" = "closed" ] && github_sync_should_close "$last_synced_status"; then
+        new_remote_state="open"
+    fi
+
+    # Update sync state
+    local updated_entry
+    updated_entry=$(echo "$entry" | jq \
+        --arg status "$new_status" \
+        --arg state "$new_remote_state" \
+        '.last_synced_status = $status | .last_remote_state = $state')
+    github_sync_state_set_task "$ralph_dir" "$task_id" "$updated_entry"
+
+    log_debug "Synced issue #$issue_number to status '$new_status' for task $task_id"
+}
+
+# =============================================================================
 # Status Report
 # =============================================================================
 

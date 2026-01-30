@@ -50,6 +50,9 @@ source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 source "$WIGGUM_HOME/lib/pipeline/pipeline-loader.sh"
 source "$WIGGUM_HOME/lib/pipeline/pipeline-runner.sh"
 
+# Source GitHub issue sync for status updates
+source "$WIGGUM_HOME/lib/github/issue-sync.sh"
+
 # Phase timing tracking
 declare -gA PHASE_TIMINGS=()
 
@@ -436,6 +439,8 @@ _update_kanban_status() {
             if ! update_kanban_pending_approval "$RALPH_DIR/kanban.md" "$task_id"; then
                 log_error "Failed to update kanban.md after retries"
             fi
+            # Update linked GitHub issue to pending-approval
+            github_issue_sync_task_status "$RALPH_DIR" "$task_id" "P" || true
         else
             log "Marking task $task_id as complete [x] in kanban (no PR created)"
             if ! update_kanban "$RALPH_DIR/kanban.md" "$task_id"; then

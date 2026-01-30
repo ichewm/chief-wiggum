@@ -41,6 +41,7 @@ source "$WIGGUM_HOME/lib/worker/worker-lifecycle.sh"
 source "$WIGGUM_HOME/lib/worker/agent-registry.sh"
 source "$WIGGUM_HOME/lib/runtime/runtime.sh"
 source "$WIGGUM_HOME/lib/backend/claude/usage-tracker.sh"
+source "$WIGGUM_HOME/lib/github/issue-sync.sh"
 
 # Recompute usage at startup (ensures rate limit checks use fresh data)
 if [ -d "$RALPH_DIR" ]; then
@@ -179,6 +180,9 @@ do_start() {
         if ! update_kanban_status "$RALPH_DIR/kanban.md" "$task_id" "="; then
             echo "Warning: Failed to update kanban status to in-progress"
         fi
+
+        # Update linked GitHub issue to in-progress
+        github_issue_sync_task_status "$RALPH_DIR" "$task_id" "=" || true
 
         # Create worker directory with unique timestamp
         local timestamp
