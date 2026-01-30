@@ -69,6 +69,11 @@ terminal_header_init() {
     # Initial height: banner + separator (adjusted on first refresh)
     _TH_HEADER_HEIGHT=2
     _terminal_header_set_scroll_region
+
+    # Position cursor at start of scroll region
+    local scroll_top=$((_TH_HEADER_HEIGHT + 1))
+    printf '\033[%d;1H' "$scroll_top" > /dev/tty 2>/dev/null || true
+
     _terminal_header_clear_header_area
 }
 
@@ -98,12 +103,17 @@ terminal_header_refresh() {
     new_height=$(printf '%s\n' "$content" | wc -l)
     new_height=$((new_height))  # trim whitespace from wc
 
+    local old_height=$_TH_HEADER_HEIGHT
     if [[ "$new_height" -ne "$_TH_HEADER_HEIGHT" ]]; then
         _TH_HEADER_HEIGHT="$new_height"
+        # DECSC: save cursor before DECSTBM (which resets cursor to home)
+        printf '\0337' > /dev/tty 2>/dev/null || true
         _terminal_header_set_scroll_region
+        # DECRC: restore cursor to pre-DECSTBM position
+        printf '\0338' > /dev/tty 2>/dev/null || true
     fi
 
-    _terminal_header_render "$content"
+    _terminal_header_render "$content" "$old_height"
 }
 
 # Force the next refresh to redraw (clear cached content)
@@ -142,7 +152,11 @@ _terminal_header_on_resize() {
     [[ "$_TH_ENABLED" == true ]] || return 0
 
     _terminal_header_query_size
+    # DECSC: save cursor before DECSTBM (which resets cursor to home)
+    printf '\0337' > /dev/tty 2>/dev/null || true
     _terminal_header_set_scroll_region
+    # DECRC: restore cursor
+    printf '\0338' > /dev/tty 2>/dev/null || true
     _TH_LAST_CONTENT=""
 }
 
@@ -157,29 +171,36 @@ _terminal_header_query_size() {
 }
 
 # Set the scroll region below the header
+#
+# Only sets DECSTBM (scroll margins). Does NOT reposition the cursor.
+# Callers are responsible for cursor placement after calling this.
+#
+# Note: DECSTBM moves cursor to home (1,1) per VT100 spec.
 _terminal_header_set_scroll_region() {
     local scroll_top=$((_TH_HEADER_HEIGHT + 1))
 
-    # Ensure scroll region leaves at least 1 usable row
-    if [[ "$scroll_top" -ge "$_TH_TERM_ROWS" ]]; then
-        scroll_top=$((_TH_TERM_ROWS - 1))
+    # Ensure scroll region has at least 2 usable rows
+    if [[ "$scroll_top" -ge "$((_TH_TERM_ROWS - 1))" ]]; then
+        scroll_top=$((_TH_TERM_ROWS - 2))
+        [[ "$scroll_top" -ge 2 ]] || scroll_top=2
     fi
 
-    # Set scroll region and position cursor at its top
+    # DECSTBM: set scroll region (moves cursor to home per VT100 spec)
     printf '\033[%d;%dr' "$scroll_top" "$_TH_TERM_ROWS" > /dev/tty 2>/dev/null || true
-    printf '\033[%d;1H' "$scroll_top" > /dev/tty 2>/dev/null || true
 }
 
 # Clear all lines in the header area
 _terminal_header_clear_header_area() {
-    printf '\033[s' > /dev/tty 2>/dev/null || true
+    # DECSC: save cursor
+    printf '\0337' > /dev/tty 2>/dev/null || true
 
     local i
     for ((i = 1; i <= _TH_HEADER_HEIGHT; i++)); do
         printf '\033[%d;1H\033[2K' "$i" > /dev/tty 2>/dev/null || true
     done
 
-    printf '\033[u' > /dev/tty 2>/dev/null || true
+    # DECRC: restore cursor
+    printf '\0338' > /dev/tty 2>/dev/null || true
 }
 
 # Callback for pool_foreach - collects worker entries into _th_entries array
@@ -289,12 +310,14 @@ _terminal_header_build_content() {
 # from a previously taller header, then restores cursor position.
 #
 # Args:
-#   content - Multi-line header content string
+#   content    - Multi-line header content string
+#   old_height - Previous header height (for clearing stale rows)
 _terminal_header_render() {
     local content="$1"
+    local old_height="${2:-$_TH_HEADER_HEIGHT}"
 
-    # Save cursor position (inside scroll region)
-    printf '\033[s' > /dev/tty 2>/dev/null || true
+    # DECSC: save cursor position (more reliable with scroll regions than SCP)
+    printf '\0337' > /dev/tty 2>/dev/null || true
 
     # Write each header line
     local line_num=1
@@ -304,11 +327,13 @@ _terminal_header_render() {
     done <<< "$content"
 
     # Clear leftover lines from previously taller header
-    while [[ "$line_num" -le "$_TH_HEADER_HEIGHT" ]]; do
+    local clear_to=$_TH_HEADER_HEIGHT
+    [[ "$old_height" -gt "$clear_to" ]] && clear_to="$old_height"
+    while [[ "$line_num" -le "$clear_to" ]]; do
         printf '\033[%d;1H\033[2K' "$line_num" > /dev/tty 2>/dev/null || true
         ((++line_num)) || true
     done
 
-    # Restore cursor position (back to scroll region)
-    printf '\033[u' > /dev/tty 2>/dev/null || true
+    # DECRC: restore cursor position (back to scroll region)
+    printf '\0338' > /dev/tty 2>/dev/null || true
 }
