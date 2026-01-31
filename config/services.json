@@ -168,12 +168,21 @@
       "order": 10,
       "schedule": {
         "type": "interval",
-        "interval": 180,
+        "interval": 120,
         "run_on_startup": true
       },
       "execution": {
         "type": "command",
         "command": "wiggum-review sync"
+      },
+      "concurrency": {
+        "max_instances": 1,
+        "if_running": "skip"
+      },
+      "circuit_breaker": {
+        "enabled": true,
+        "threshold": 3,
+        "cooldown": 300
       }
     },
     {
@@ -213,7 +222,7 @@
       "order": 40,
       "schedule": {
         "type": "interval",
-        "interval": 900,
+        "interval": 300,
         "run_on_startup": true
       },
       "execution": {
@@ -232,7 +241,7 @@
       "order": 50,
       "schedule": {
         "type": "interval",
-        "interval": 900,
+        "interval": 300,
         "run_on_startup": true
       },
       "execution": {
@@ -323,6 +332,17 @@
       "execution": {
         "type": "function",
         "function": "svc_orch_scheduler_tick"
+      }
+    },
+    {
+      "id": "fast-merge",
+      "description": "Attempt merge for workers in needs_merge state",
+      "phase": "post",
+      "order": 42,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_process_pending_merges"
       }
     },
     {

@@ -988,6 +988,12 @@ _handle_main_worker_completion() {
     activity_log "worker.completed" "" "$task_id" "worker_dir=$worker_dir"
     log "Worker for $task_id finished"
     scheduler_mark_event
+
+    # If PR was created and is already in needs_merge state, attempt merge
+    # immediately (mirrors fix/resolve completion callbacks)
+    if git_state_is "$worker_dir" "needs_merge"; then
+        attempt_pr_merge "$worker_dir" "$task_id" "$RALPH_DIR" || true
+    fi
 }
 
 # Handle fix worker completion (callback for pool_cleanup_finished)
