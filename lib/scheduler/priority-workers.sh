@@ -900,7 +900,7 @@ create_orphan_pr_workspaces() {
 
         # Create worker directory
         local timestamp worker_id worker_dir
-        timestamp=$(date +%s)
+        timestamp=$(epoch_now)
         worker_id="worker-${task_id}-fix-${timestamp}"
         worker_dir="$ralph_dir/workers/$worker_id"
 

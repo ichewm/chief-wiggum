@@ -22,6 +22,7 @@ set -euo pipefail
 
 [ -n "${_GIT_STATE_LOADED:-}" ] && return 0
 _GIT_STATE_LOADED=1
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Get current state from git-state.json
 #
@@ -54,7 +55,7 @@ git_state_set() {
     local reason="${4:-}"
     local state_file="$worker_dir/git-state.json"
     local timestamp
-    timestamp=$(date -Iseconds)
+    timestamp=$(iso_now)
 
     # Ensure worker directory exists
     if [ ! -d "$worker_dir" ]; then
@@ -274,7 +275,7 @@ git_state_transitions() {
 # Returns: 1 if state file doesn't exist
 git_state_set_last_push() {
     local worker_dir="$1"
-    local timestamp="${2:-$(date -Iseconds)}"
+    local timestamp="${2:-$(iso_now)}"
     local state_file="$worker_dir/git-state.json"
 
     [ -f "$state_file" ] || return 1

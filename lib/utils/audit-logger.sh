@@ -4,6 +4,7 @@
 set -euo pipefail
 
 source "$WIGGUM_HOME/lib/core/file-lock.sh"
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 AUDIT_LOG="${AUDIT_LOG:-${RALPH_DIR:-$PROJECT_DIR/.ralph}/logs/audit.log}"
 
@@ -84,7 +85,7 @@ audit_log() {
     init_audit_log
 
     local timestamp
-    timestamp=$(date -Iseconds)
+    timestamp=$(iso_now)
     local log_entry="[$timestamp] $event_type"
 
     # Append all key=value pairs

@@ -62,7 +62,7 @@ agent_setup_context() {
     _AGENT_WORKSPACE="${2:-}"
     _AGENT_PROJECT_DIR="${3:-}"
     _AGENT_TASK_ID="${4:-}"
-    _AGENT_START_EPOCH=$(date +%s)
+    _AGENT_START_EPOCH=$(epoch_now)
 }
 
 # Get context values (for use in callbacks)
@@ -249,7 +249,7 @@ agent_log_completion() {
 
     local duration=""
     if [ -n "${_AGENT_START_EPOCH:-}" ]; then
-        duration=$(($(date +%s) - _AGENT_START_EPOCH))
+        duration=$(($(epoch_now) - _AGENT_START_EPOCH))
     fi
 
     log_agent_complete "${AGENT_TYPE:-unknown}" "$exit_code" "$duration"
@@ -349,7 +349,7 @@ agent_log_start() {
     local worker_id
     worker_id=$(basename "$worker_dir")
 
-    echo "[$(date -Iseconds)] INFO: AGENT_STARTED agent=$AGENT_TYPE worker_id=$worker_id task_id=$task_id pipeline=${WIGGUM_PIPELINE:-default} start_time=$(date +%s)" >> "$worker_dir/worker.log"
+    echo "[$(iso_now)] INFO: AGENT_STARTED agent=$AGENT_TYPE worker_id=$worker_id task_id=$task_id pipeline=${WIGGUM_PIPELINE:-default} start_time=$(epoch_now)" >> "$worker_dir/worker.log"
 }
 
 # Log agent completion event
@@ -357,15 +357,15 @@ agent_log_start() {
 # Args:
 #   worker_dir - Worker directory path
 #   exit_code  - Exit code from agent_run
-#   start_time - Start timestamp (from date +%s)
+#   start_time - Start timestamp (epoch seconds)
 agent_log_complete() {
     local worker_dir="$1"
     local exit_code="$2"
     local start_time="$3"
 
     local end_time duration
-    end_time=$(date +%s)
+    end_time=$(epoch_now)
     duration=$((end_time - start_time))
 
-    echo "[$(date -Iseconds)] INFO: AGENT_COMPLETED agent=$AGENT_TYPE duration_sec=$duration exit_code=$exit_code" >> "$worker_dir/worker.log"
+    echo "[$(iso_now)] INFO: AGENT_COMPLETED agent=$AGENT_TYPE duration_sec=$duration exit_code=$exit_code" >> "$worker_dir/worker.log"
 }

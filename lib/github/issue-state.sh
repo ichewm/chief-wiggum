@@ -11,6 +11,7 @@ set -euo pipefail
 # Prevent double-sourcing
 [ -n "${_GITHUB_ISSUE_STATE_LOADED:-}" ] && return 0
 _GITHUB_ISSUE_STATE_LOADED=1
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # =============================================================================
 # State File Paths
@@ -165,7 +166,7 @@ github_sync_state_remove_task() {
 # Returns: 0 on success
 github_sync_state_set_down_sync_time() {
     local ralph_dir="$1"
-    local timestamp="${2:-$(date +%s)}"
+    local timestamp="${2:-$(epoch_now)}"
 
     local state
     state=$(github_sync_state_load "$ralph_dir")
@@ -185,7 +186,7 @@ github_sync_state_set_down_sync_time() {
 # Returns: 0 on success
 github_sync_state_set_up_sync_time() {
     local ralph_dir="$1"
-    local timestamp="${2:-$(date +%s)}"
+    local timestamp="${2:-$(epoch_now)}"
 
     local state
     state=$(github_sync_state_load "$ralph_dir")

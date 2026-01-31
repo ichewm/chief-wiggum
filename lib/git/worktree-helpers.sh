@@ -7,6 +7,7 @@ set -euo pipefail
 
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/git/git-operations.sh"
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Global variable set by setup_worktree
 WORKTREE_PATH=""
@@ -78,7 +79,7 @@ setup_worktree() {
     # Create task-specific branch in worktree (avoids branch contention)
     if [ -n "$task_id" ]; then
         local branch_name
-        branch_name="task/${task_id}-$(date +%s)"
+        branch_name="task/${task_id}-$(epoch_now)"
         log_debug "Creating task branch: $branch_name"
         if ! (cd "$workspace" && git checkout -b "$branch_name" 2>&1) | tee -a "$worker_dir/worker.log"; then
             log_warn "setup_worktree: failed to create branch $branch_name, continuing with detached HEAD"

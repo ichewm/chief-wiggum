@@ -15,6 +15,8 @@ set -euo pipefail
 [ -n "${_AGENT_RESULT_LOADED:-}" ] && return 0
 _AGENT_RESULT_LOADED=1
 
+source "$WIGGUM_HOME/lib/core/platform.sh"
+
 # =============================================================================
 # STRUCTURED AGENT RESULTS (Epoch-Named)
 # =============================================================================
@@ -109,7 +111,7 @@ validate_result_schema() {
 # Returns: Path like results/<epoch>-<agent-type>-result.json
 agent_get_result_path() {
     local worker_dir="$1"
-    local epoch="${_AGENT_START_EPOCH:-$(date +%s)}"
+    local epoch="${_AGENT_START_EPOCH:-$(epoch_now)}"
     local name="${WIGGUM_STEP_ID:-${AGENT_TYPE:-unknown}}"
     echo "$worker_dir/results/${epoch}-${name}-result.json"
 }
@@ -154,7 +156,7 @@ agent_find_latest_report() {
 agent_write_report() {
     local worker_dir="$1"
     local content="$2"
-    local epoch="${_AGENT_START_EPOCH:-$(date +%s)}"
+    local epoch="${_AGENT_START_EPOCH:-$(epoch_now)}"
     local name="${WIGGUM_STEP_ID:-${AGENT_TYPE:-unknown}}"
     local report_path="$worker_dir/reports/${epoch}-${name}-report.md"
 
@@ -212,19 +214,19 @@ agent_write_result() {
 
     # Get timing info from epoch tracking
     local started_at completed_at duration_seconds
-    completed_at=$(date -Iseconds)
+    completed_at=$(iso_now)
     duration_seconds=0
     started_at="$completed_at"
 
     if [ -n "${_AGENT_START_EPOCH:-}" ] && [[ "${_AGENT_START_EPOCH}" =~ ^[0-9]+$ ]]; then
-        started_at=$(date -Iseconds -d "@$_AGENT_START_EPOCH" 2>/dev/null || date -Iseconds)
-        duration_seconds=$(($(date +%s) - _AGENT_START_EPOCH))
+        started_at=$(iso_from_epoch "$_AGENT_START_EPOCH")
+        duration_seconds=$(($(epoch_now) - _AGENT_START_EPOCH))
     elif [ -f "$worker_dir/worker.log" ]; then
         local start_epoch
         start_epoch=$(grep "AGENT_STARTED" "$worker_dir/worker.log" 2>/dev/null | tail -1 | grep_pcre_match 'start_time=\K\d+' || true)
         if [ -n "$start_epoch" ] && [[ "$start_epoch" =~ ^[0-9]+$ ]]; then
-            started_at=$(date -Iseconds -d "@$start_epoch" 2>/dev/null || date -Iseconds)
-            duration_seconds=$(($(date +%s) - start_epoch))
+            started_at=$(iso_from_epoch "$start_epoch")
+            duration_seconds=$(($(epoch_now) - start_epoch))
         fi
     fi
 

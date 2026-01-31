@@ -45,6 +45,7 @@ agent_source_registry
 
 # Source exit codes for standardized returns
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Source pipeline libraries
 source "$WIGGUM_HOME/lib/pipeline/pipeline-loader.sh"
@@ -58,12 +59,12 @@ declare -gA PHASE_TIMINGS=()
 
 _phase_start() {
     local phase="$1"
-    PHASE_TIMINGS["${phase}_start"]=$(date +%s)
+    PHASE_TIMINGS["${phase}_start"]=$(epoch_now)
 }
 
 _phase_end() {
     local phase="$1"
-    PHASE_TIMINGS["${phase}_end"]=$(date +%s)
+    PHASE_TIMINGS["${phase}_end"]=$(epoch_now)
 }
 
 _build_phase_timings_json() {
@@ -173,7 +174,7 @@ agent_run() {
 
     # Record start time
     local start_time
-    start_time=$(date +%s)
+    start_time=$(epoch_now)
     agent_log_start "$worker_dir" "$task_id"
 
     log "Task worker agent starting for $task_id (max $max_turns turns per session, plan_mode=$plan_mode)"

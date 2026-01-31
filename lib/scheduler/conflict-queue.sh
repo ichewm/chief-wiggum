@@ -18,6 +18,7 @@ set -euo pipefail
 
 [ -n "${_CONFLICT_QUEUE_LOADED:-}" ] && return 0
 _CONFLICT_QUEUE_LOADED=1
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Source dependencies
 source "$WIGGUM_HOME/lib/core/logger.sh"
@@ -71,7 +72,7 @@ conflict_queue_add() {
 
         # Add to queue
         local timestamp
-        timestamp=$(date -Iseconds)
+        timestamp=$(iso_now)
 
         local entry
         entry=$(jq -n \
@@ -206,7 +207,7 @@ conflict_queue_create_batch() {
     local lock_file="$ralph_dir/batches/.queue.lock"
 
     local batch_id
-    batch_id="batch-$(date +%s)"
+    batch_id="batch-$(epoch_now)"
 
     (
         flock -x 200
@@ -228,7 +229,7 @@ conflict_queue_create_batch() {
             --arg batch_id "$batch_id" \
             --argjson task_ids "$task_ids" \
             --argjson common_files "$common_files" \
-            --arg created_at "$(date -Iseconds)" \
+            --arg created_at "$(iso_now)" \
             '{
                 status: "pending",
                 task_ids: $task_ids,
@@ -393,7 +394,7 @@ conflict_queue_build_batch_file() {
     # Write batch file with explicit merge_order for the planner to use
     jq -n \
         --arg batch_id "$batch_id" \
-        --arg created_at "$(date -Iseconds)" \
+        --arg created_at "$(iso_now)" \
         --argjson common_files "$common_files" \
         --argjson tasks "$tasks" \
         --argjson merge_order "$task_ids" \

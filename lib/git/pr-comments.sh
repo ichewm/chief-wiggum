@@ -7,6 +7,7 @@ set -euo pipefail
 
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Load review config on source
 load_review_config
@@ -419,7 +420,7 @@ sync_pr_comments() {
     {
         echo "# PR Comments for Tasks: $patterns"
         echo ""
-        echo "**Synced at:** $(date -Iseconds)"
+        echo "**Synced at:** $(iso_now)"
         echo "**Approved user IDs:** $WIGGUM_APPROVED_USER_IDS, $current_user_id"
         echo ""
         echo "---"

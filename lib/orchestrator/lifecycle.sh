@@ -19,6 +19,9 @@ set -euo pipefail
 [ -n "${_ORCHESTRATOR_LIFECYCLE_LOADED:-}" ] && return 0
 _ORCHESTRATOR_LIFECYCLE_LOADED=1
 
+# Source platform helpers for portable time functions
+source "$WIGGUM_HOME/lib/core/platform.sh"
+
 # Validate that the project is properly initialized
 #
 # Checks:
@@ -138,7 +141,7 @@ _check_rate_limit_pause() {
     [ -n "$resume_at" ] || return 0
 
     local now
-    now=$(date +%s)
+    now=$(epoch_now)
 
     if [ "$now" -lt "$resume_at" ]; then
         local wait_seconds=$((resume_at - now))

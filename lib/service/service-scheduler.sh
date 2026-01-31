@@ -44,6 +44,7 @@
 # Prevent double-sourcing
 [ -n "${_SERVICE_SCHEDULER_LOADED:-}" ] && return 0
 _SERVICE_SCHEDULER_LOADED=1
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Source dependencies - use consolidated service-core.sh
 source "$WIGGUM_HOME/lib/service/service-core.sh"
@@ -106,7 +107,7 @@ service_scheduler_init() {
 
     _SCHED_INITIALIZED=true
     _SCHED_STARTUP_COMPLETE=false
-    _SCHED_LAST_HEALTH_CHECK=$(date +%s)
+    _SCHED_LAST_HEALTH_CHECK=$(epoch_now)
 
     log "Service scheduler initialized with $(service_count) services"
 }
@@ -200,7 +201,7 @@ service_scheduler_tick() {
                     local last_run
                     last_run=$(service_state_get_last_run "$id")
                     local now
-                    now=$(date +%s)
+                    now=$(epoch_now)
 
                     if [ $((now - last_run)) -ge "$restart_delay" ]; then
                         _run_service_if_allowed "$id"
@@ -248,7 +249,7 @@ service_is_due() {
     last_run=$(service_state_get_last_run "$id")
 
     local now
-    now=$(date +%s)
+    now=$(epoch_now)
 
     local elapsed=$((now - last_run))
 
@@ -467,7 +468,7 @@ _check_completed_services() {
                 # Record metrics
                 local start_time duration_ms
                 start_time=$(service_state_get_last_run "$id")
-                duration_ms=$(( ($(date +%s) - start_time) * 1000 ))
+                duration_ms=$(( ($(epoch_now) - start_time) * 1000 ))
                 service_state_record_execution "$id" "$duration_ms" "$exit_code"
 
                 if [ "$exit_code" -eq 0 ]; then
@@ -558,7 +559,7 @@ _circuit_breaker_blocks() {
             local opened_at
             opened_at=$(service_state_get_circuit_opened_at "$id")
             local now
-            now=$(date +%s)
+            now=$(epoch_now)
 
             if [ $((now - opened_at)) -ge "$cooldown" ]; then
                 # Transition to half-open
@@ -621,7 +622,7 @@ _update_circuit_breaker() {
 # Run health checks on services that have them configured
 _maybe_run_health_checks() {
     local now
-    now=$(date +%s)
+    now=$(epoch_now)
 
     # Only run health checks periodically
     if [ $((now - _SCHED_LAST_HEALTH_CHECK)) -lt "$_SCHED_HEALTH_CHECK_INTERVAL" ]; then
@@ -671,7 +672,7 @@ _run_health_check() {
                     # Check file age
                     local file_mtime now age
                     file_mtime=$(stat -c %Y "$health_path" 2>/dev/null || echo 0)
-                    now=$(date +%s)
+                    now=$(epoch_now)
                     age=$((now - file_mtime))
                     if [ "$age" -gt "$max_age" ]; then
                         healthy=false
@@ -697,7 +698,7 @@ _run_health_check() {
             # Check if service has updated its last_run recently
             local last_run now age
             last_run=$(service_state_get_last_run "$id")
-            now=$(date +%s)
+            now=$(epoch_now)
             age=$((now - last_run))
             if [ "$age" -gt "$max_age" ]; then
                 healthy=false
@@ -817,7 +818,7 @@ service_scheduler_service_status() {
     interval=$(service_get_interval "$id")
 
     local now
-    now=$(date +%s)
+    now=$(epoch_now)
 
     local next_run_in=""
     if [ "$interval" -gt 0 ]; then

@@ -20,6 +20,7 @@ set -euo pipefail
 
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
+source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/checkpoint.sh"
 source "$WIGGUM_HOME/lib/runtime/runtime.sh"
 source "$WIGGUM_HOME/lib/utils/work-log.sh"
@@ -274,7 +275,7 @@ run_ralph_loop() {
 
     # Record start time
     local start_time
-    start_time=$(date +%s)
+    start_time=$(epoch_now)
 
     # Generate unique run ID for this execution
     local run_id="${session_prefix}-${start_time}"
@@ -341,14 +342,14 @@ run_ralph_loop() {
 
         # Log iteration start
         if [ "$supervision_enabled" = true ]; then
-            echo "[$(date -Iseconds)] INFO: ITERATION_START iteration=$iteration session_id=$session_id max_turns=$max_turns restart_count=$restart_count" >> "$output_dir/worker.log" 2>/dev/null || true
+            echo "[$(iso_now)] INFO: ITERATION_START iteration=$iteration session_id=$session_id max_turns=$max_turns restart_count=$restart_count" >> "$output_dir/worker.log" 2>/dev/null || true
         else
-            echo "[$(date -Iseconds)] INFO: ITERATION_START iteration=$iteration session_id=$session_id max_turns=$max_turns" >> "$output_dir/worker.log" 2>/dev/null || true
+            echo "[$(iso_now)] INFO: ITERATION_START iteration=$iteration session_id=$session_id max_turns=$max_turns" >> "$output_dir/worker.log" 2>/dev/null || true
         fi
 
         # Generate timestamp for log filename
         local log_timestamp
-        log_timestamp=$(date +%s)
+        log_timestamp=$(epoch_now)
         local log_file="$output_dir/logs/$run_id/${session_prefix}-${iteration}-${log_timestamp}.log"
 
         log "Work phase starting (see logs/$run_id/${session_prefix}-${iteration}-${log_timestamp}.log for details)"
@@ -382,7 +383,7 @@ run_ralph_loop() {
         log "Work phase completed (exit code: $exit_code, session: $session_id)"
 
         # Log work phase completion
-        echo "[$(date -Iseconds)] INFO: WORK_PHASE_COMPLETE iteration=$iteration exit_code=$exit_code" >> "$output_dir/worker.log" 2>/dev/null || true
+        echo "[$(iso_now)] INFO: WORK_PHASE_COMPLETE iteration=$iteration exit_code=$exit_code" >> "$output_dir/worker.log" 2>/dev/null || true
 
         # Create checkpoint after work phase
         local checkpoint_status="in_progress"
@@ -535,7 +536,7 @@ ${summary_prompt}"
             local supervisor_system_prompt="You are a supervisor overseeing an iterative work process. Your bias is toward CONTINUE - only intervene with STOP or RESTART when you have high confidence something is fundamentally wrong. Let workers work."
 
             log "Running supervisor session $supervisor_session_id"
-            echo "[$(date -Iseconds)] INFO: SUPERVISOR_START iteration=$iteration session_id=$supervisor_session_id" >> "$output_dir/worker.log" 2>/dev/null || true
+            echo "[$(iso_now)] INFO: SUPERVISOR_START iteration=$iteration session_id=$supervisor_session_id" >> "$output_dir/worker.log" 2>/dev/null || true
 
             # Log supervisor prompt
             {
@@ -574,7 +575,7 @@ ${summary_prompt}"
             fi
 
             log "Supervisor decision: $decision"
-            echo "[$(date -Iseconds)] INFO: SUPERVISOR_COMPLETE iteration=$iteration decision=$decision" >> "$output_dir/worker.log" 2>/dev/null || true
+            echo "[$(iso_now)] INFO: SUPERVISOR_COMPLETE iteration=$iteration decision=$decision" >> "$output_dir/worker.log" 2>/dev/null || true
 
             # Update checkpoint with supervisor decision
             local reviewed_iteration=$((iteration - 1))
@@ -588,14 +589,14 @@ ${summary_prompt}"
 
                 STOP)
                     log "Supervisor: STOP - halting loop"
-                    echo "[$(date -Iseconds)] INFO: SUPERVISOR_STOP iteration=$iteration reason=supervisor_decision" >> "$output_dir/worker.log" 2>/dev/null || true
+                    echo "[$(iso_now)] INFO: SUPERVISOR_STOP iteration=$iteration reason=supervisor_decision" >> "$output_dir/worker.log" 2>/dev/null || true
 
                     local end_time
-                    end_time=$(date +%s)
+                    end_time=$(epoch_now)
                     local duration=$((end_time - start_time))
 
                     log "Ralph loop stopped by supervisor after $iteration iterations (duration: ${duration}s)"
-                    echo "[$(date -Iseconds)] INFO: LOOP_STOPPED_BY_SUPERVISOR end_time=$end_time duration_sec=$duration iterations=$iteration" >> "$output_dir/worker.log" 2>/dev/null || true
+                    echo "[$(iso_now)] INFO: LOOP_STOPPED_BY_SUPERVISOR end_time=$end_time duration_sec=$duration iterations=$iteration" >> "$output_dir/worker.log" 2>/dev/null || true
 
                     export RALPH_LOOP_LAST_SESSION_ID="$last_session_id"
                     _ralph_loop_completed_normally=true
@@ -608,10 +609,10 @@ ${summary_prompt}"
 
                     if [ $restart_count -gt "$max_restarts" ]; then
                         log_warn "Supervisor: RESTART requested but max_restarts ($max_restarts) exceeded - forcing STOP"
-                        echo "[$(date -Iseconds)] WARN: RESTART_LIMIT_EXCEEDED restart_count=$restart_count max_restarts=$max_restarts" >> "$output_dir/worker.log" 2>/dev/null || true
+                        echo "[$(iso_now)] WARN: RESTART_LIMIT_EXCEEDED restart_count=$restart_count max_restarts=$max_restarts" >> "$output_dir/worker.log" 2>/dev/null || true
 
                         local end_time
-                        end_time=$(date +%s)
+                        end_time=$(epoch_now)
                         local duration=$((end_time - start_time))
 
                         log "Ralph loop stopped due to restart limit (duration: ${duration}s)"
@@ -622,14 +623,14 @@ ${summary_prompt}"
                     fi
 
                     log "Supervisor: RESTART - archiving run $run_id and resetting to iteration 0"
-                    echo "[$(date -Iseconds)] INFO: SUPERVISOR_RESTART iteration=$iteration restart_count=$restart_count run_id=$run_id" >> "$output_dir/worker.log" 2>/dev/null || true
+                    echo "[$(iso_now)] INFO: SUPERVISOR_RESTART iteration=$iteration restart_count=$restart_count run_id=$run_id" >> "$output_dir/worker.log" 2>/dev/null || true
 
                     local archive_dir="$output_dir/supervisors/run-$((restart_count - 1))"
                     mkdir -p "$archive_dir"
                     mv "$output_dir/logs/$run_id" "$archive_dir/" 2>/dev/null || true
                     mv "$output_dir/summaries/$run_id" "$archive_dir/" 2>/dev/null || true
 
-                    run_id="${session_prefix}-$(date +%s)"
+                    run_id="${session_prefix}-$(epoch_now)"
                     export RALPH_RUN_ID="$run_id"
 
                     mkdir -p "$output_dir/logs/$run_id"
@@ -646,15 +647,15 @@ ${summary_prompt}"
 
     # Record end time
     local end_time
-    end_time=$(date +%s)
+    end_time=$(epoch_now)
     local duration=$((end_time - start_time))
 
     if [ $iteration -ge "$max_iterations" ]; then
         log_error "Ralph loop reached max iterations ($max_iterations) without completing"
         if [ "$supervision_enabled" = true ]; then
-            echo "[$(date -Iseconds)] WARN: LOOP_INCOMPLETE end_time=$end_time duration_sec=$duration iterations=$iteration restarts=$restart_count" >> "$output_dir/worker.log" 2>/dev/null || true
+            echo "[$(iso_now)] WARN: LOOP_INCOMPLETE end_time=$end_time duration_sec=$duration iterations=$iteration restarts=$restart_count" >> "$output_dir/worker.log" 2>/dev/null || true
         else
-            echo "[$(date -Iseconds)] WARN: LOOP_INCOMPLETE end_time=$end_time duration_sec=$duration iterations=$iteration max_iterations=$max_iterations" >> "$output_dir/worker.log" 2>/dev/null || true
+            echo "[$(iso_now)] WARN: LOOP_INCOMPLETE end_time=$end_time duration_sec=$duration iterations=$iteration max_iterations=$max_iterations" >> "$output_dir/worker.log" 2>/dev/null || true
         fi
         _ralph_loop_completed_normally=true
         trap - EXIT
@@ -662,10 +663,10 @@ ${summary_prompt}"
     fi
 
     if [ "$supervision_enabled" = true ]; then
-        echo "[$(date -Iseconds)] INFO: LOOP_COMPLETED end_time=$end_time duration_sec=$duration iterations=$iteration restarts=$restart_count" >> "$output_dir/worker.log" 2>/dev/null || true
+        echo "[$(iso_now)] INFO: LOOP_COMPLETED end_time=$end_time duration_sec=$duration iterations=$iteration restarts=$restart_count" >> "$output_dir/worker.log" 2>/dev/null || true
         log "Ralph loop finished after $iteration iterations, $restart_count restarts (duration: ${duration}s)"
     else
-        echo "[$(date -Iseconds)] INFO: LOOP_COMPLETED end_time=$end_time duration_sec=$duration iterations=$iteration" >> "$output_dir/worker.log" 2>/dev/null || true
+        echo "[$(iso_now)] INFO: LOOP_COMPLETED end_time=$end_time duration_sec=$duration iterations=$iteration" >> "$output_dir/worker.log" 2>/dev/null || true
         log "Ralph loop finished after $iteration iterations (duration: ${duration}s)"
     fi
 

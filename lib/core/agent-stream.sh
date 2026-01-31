@@ -113,7 +113,7 @@ RESPOND ONLY WITH THE RESULT TAG. NO OTHER OUTPUT."
     # Create backup log directory and file
     local run_id="${RALPH_RUN_ID:-default}"
     local backup_log
-    backup_log="$worker_dir/logs/$run_id/${log_prefix}-backup-$(date +%s).log"
+    backup_log="$worker_dir/logs/$run_id/${log_prefix}-backup-$(epoch_now).log"
     mkdir -p "$(dirname "$backup_log")"
 
     # Source runtime (provides resume capabilities)

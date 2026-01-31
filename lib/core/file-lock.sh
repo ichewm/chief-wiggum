@@ -2,6 +2,8 @@
 # File locking utilities for concurrent worker access
 set -euo pipefail
 
+source "$WIGGUM_HOME/lib/core/platform.sh"
+
 # =============================================================================
 # APPEND WITH LOCK (Common Pattern)
 # =============================================================================
@@ -277,7 +279,7 @@ append_changelog() {
     local pr_url="${5:-N/A}"
     local summary="${6:-}"
     local timestamp
-    timestamp=$(date -Iseconds)
+    timestamp=$(iso_now)
 
     local entry="
 ## [$task_id] - $timestamp

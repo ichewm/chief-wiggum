@@ -85,7 +85,79 @@ find_sorted_by_mtime() {
 }
 
 # =============================================================================
-# PORTABLE DATE
+# PORTABLE TIME (avoids external `date` binary where possible)
+# =============================================================================
+
+# Detect printf %()T support (bash 4.2+, avoids date subprocess)
+# macOS ships bash 3.2 which does NOT support this.
+_PLATFORM_HAS_PRINTF_T=0
+if printf '%(%s)T' -1 &>/dev/null; then
+    _PLATFORM_HAS_PRINTF_T=1
+fi
+
+# Detect GNU vs BSD date (cached — platform never changes mid-run)
+# gnu: supports `date -d "@epoch"` (Linux)
+# bsd: supports `date -r epoch` (macOS)
+_DATE_FLAVOR="unknown"
+if date -d "@0" +%s &>/dev/null 2>&1; then
+    _DATE_FLAVOR="gnu"
+elif date -r 0 +%s &>/dev/null 2>&1; then
+    _DATE_FLAVOR="bsd"
+fi
+
+# Get current epoch seconds
+#
+# Uses bash built-in printf %()T when available (Linux bash 4.2+),
+# falls back to external `date` command (macOS, older bash).
+#
+# Returns: epoch seconds on stdout
+epoch_now() {
+    if (( _PLATFORM_HAS_PRINTF_T )); then
+        printf '%(%s)T' -1
+    else
+        date +%s
+    fi
+}
+
+# Get current ISO 8601 timestamp (second precision with timezone offset)
+#
+# Uses bash built-in printf %()T when available, falls back to `date -Iseconds`.
+# Note: printf produces +0000 format; date -Iseconds produces +00:00 format.
+# Both are valid ISO 8601.
+#
+# Returns: ISO 8601 timestamp on stdout (e.g., "2024-01-26T10:30:00+0000")
+iso_now() {
+    if (( _PLATFORM_HAS_PRINTF_T )); then
+        printf '%(%Y-%m-%dT%H:%M:%S%z)T' -1
+    else
+        date -Iseconds
+    fi
+}
+
+# Convert epoch seconds to ISO 8601 timestamp
+#
+# Uses bash built-in printf %()T when available, falls back to
+# GNU `date -d` or BSD `date -r`.
+#
+# Args:
+#   epoch - Epoch seconds to convert
+#
+# Returns: ISO 8601 timestamp on stdout, or current time on failure
+iso_from_epoch() {
+    local epoch="$1"
+    if (( _PLATFORM_HAS_PRINTF_T )); then
+        printf '%(%Y-%m-%dT%H:%M:%S%z)T' "$epoch"
+    elif [[ "$_DATE_FLAVOR" == "gnu" ]]; then
+        date -Iseconds -d "@$epoch"
+    elif [[ "$_DATE_FLAVOR" == "bsd" ]]; then
+        date -Iseconds -r "$epoch"
+    else
+        date -Iseconds
+    fi
+}
+
+# =============================================================================
+# PORTABLE DATE (parsing and formatting)
 # =============================================================================
 
 # Parse a date string or epoch timestamp to epoch seconds
@@ -108,18 +180,17 @@ date_parse_epoch() {
         return 0
     fi
 
-    # Try GNU date first (Linux)
-    local epoch
-    epoch=$(date -d "$input" +%s 2>/dev/null) && { echo "$epoch"; return 0; }
-
-    # Try BSD date (macOS) - handles ISO 8601 format
-    # Try common formats
-    for fmt in "%Y-%m-%d" "%Y-%m-%dT%H:%M:%S" "%Y-%m-%d %H:%M:%S"; do
-        epoch=$(date -j -f "$fmt" "$input" +%s 2>/dev/null) && { echo "$epoch"; return 0; }
-    done
-
-    # Failed to parse
-    return 1
+    if [[ "$_DATE_FLAVOR" == "gnu" ]]; then
+        date -d "$input" +%s
+    elif [[ "$_DATE_FLAVOR" == "bsd" ]]; then
+        local epoch
+        for fmt in "%Y-%m-%d" "%Y-%m-%dT%H:%M:%S" "%Y-%m-%d %H:%M:%S"; do
+            epoch=$(date -j -f "$fmt" "$input" +%s 2>/dev/null) && { echo "$epoch"; return 0; }
+        done
+        return 1
+    else
+        return 1
+    fi
 }
 
 # Format an epoch timestamp to a date string
@@ -136,14 +207,15 @@ date_format_epoch() {
     local epoch="$1"
     local format="$2"
 
-    # Try GNU date first (Linux)
-    date -d "@$epoch" +"$format" 2>/dev/null && return 0
-
-    # Try BSD date (macOS)
-    date -r "$epoch" +"$format" 2>/dev/null && return 0
-
-    # Failed
-    return 1
+    if (( _PLATFORM_HAS_PRINTF_T )); then
+        printf "%($format)T" "$epoch"
+    elif [[ "$_DATE_FLAVOR" == "gnu" ]]; then
+        date -d "@$epoch" +"$format"
+    elif [[ "$_DATE_FLAVOR" == "bsd" ]]; then
+        date -r "$epoch" +"$format"
+    else
+        return 1
+    fi
 }
 
 # Get today's midnight as epoch timestamp
@@ -152,26 +224,39 @@ date_format_epoch() {
 # Usage: date_today_midnight
 # Returns: epoch timestamp for midnight today
 date_today_midnight() {
+    if (( _PLATFORM_HAS_PRINTF_T )); then
+        # Calculate using bash built-in printf (no external date needed)
+        local now hour min sec
+        printf -v now '%(%s)T' -1
+        printf -v hour '%(%H)T' -1
+        printf -v min '%(%M)T' -1
+        printf -v sec '%(%S)T' -1
+        hour=$((10#$hour))
+        min=$((10#$min))
+        sec=$((10#$sec))
+        echo $(( now - (hour * 3600) - (min * 60) - sec ))
+        return 0
+    fi
+
     local today
     today=$(date +%Y-%m-%d)
 
-    # Try GNU date first
-    date -d "$today" +%s 2>/dev/null && return 0
-
-    # Try BSD date
-    date -j -f "%Y-%m-%d" "$today" +%s 2>/dev/null && return 0
-
-    # Fallback: calculate manually
-    local now hour min sec
-    now=$(date +%s)
-    hour=$(date +%H)
-    min=$(date +%M)
-    sec=$(date +%S)
-    # Remove leading zeros for arithmetic
-    hour=$((10#$hour))
-    min=$((10#$min))
-    sec=$((10#$sec))
-    echo $(( now - (hour * 3600) - (min * 60) - sec ))
+    if [[ "$_DATE_FLAVOR" == "gnu" ]]; then
+        date -d "$today" +%s
+    elif [[ "$_DATE_FLAVOR" == "bsd" ]]; then
+        date -j -f "%Y-%m-%d" "$today" +%s
+    else
+        # Fallback: calculate manually
+        local now hour min sec
+        now=$(date +%s)
+        hour=$(date +%H)
+        min=$(date +%M)
+        sec=$(date +%S)
+        hour=$((10#$hour))
+        min=$((10#$min))
+        sec=$((10#$sec))
+        echo $(( now - (hour * 3600) - (min * 60) - sec ))
+    fi
 }
 
 # =============================================================================

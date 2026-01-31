@@ -42,6 +42,7 @@ agent_source_once
 
 # Source pipeline loader for dynamic config reading
 source "$WIGGUM_HOME/lib/pipeline/pipeline-loader.sh"
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Load pipeline configuration and cache step info for prompt generation
 # Sets _PIPELINE_STEPS array with step IDs in order
@@ -270,7 +271,7 @@ agent_run() {
     local task_id
     task_id=$(echo "$worker_id" | sed -E 's/worker-([A-Za-z]{2,10}-[0-9]{1,4})-.*/\1/' || echo "")
     local start_time
-    start_time=$(date -Iseconds)
+    start_time=$(iso_now)
 
     # Log header
     log_section "RESUME-DECIDE"
@@ -299,7 +300,7 @@ agent_run() {
     # Create run-namespaced log directory (unified agent interface)
     local step_id="${WIGGUM_STEP_ID:-resume-decide}"
     local run_epoch
-    run_epoch=$(date +%s)
+    run_epoch=$(epoch_now)
     local run_id="${step_id}-${run_epoch}"
     mkdir -p "$worker_dir/logs/$run_id"
     local log_file="$worker_dir/logs/$run_id/${step_id}-0-${run_epoch}.log"
@@ -362,7 +363,7 @@ agent_run() {
     log_kv "Decision" "$step"
     log_kv "Last Checkpoint" "${last_checkpoint:-none}"
     log_kv "Recovery Possible" "$recovery_possible"
-    log_kv "Finished" "$(date -Iseconds)"
+    log_kv "Finished" "$(iso_now)"
 
     # Build result JSON with recovery metadata
     local result_json

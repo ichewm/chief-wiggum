@@ -21,6 +21,7 @@ set -euo pipefail
 
 [ -n "${_TERMINAL_HEADER_LOADED:-}" ] && return 0
 _TERMINAL_HEADER_LOADED=1
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # =============================================================================
 # Module State
@@ -289,7 +290,7 @@ _terminal_header_build_content() {
     local iteration="$1"
     local max_workers="$2"
     local _th_now
-    _th_now=$(date +%s)
+    _th_now=$(epoch_now)
 
     # Gather worker counts
     local main_count fix_count resolve_count total_count

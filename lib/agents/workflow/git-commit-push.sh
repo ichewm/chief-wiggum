@@ -24,6 +24,7 @@ agent_required_paths() {
 # Source dependencies
 agent_source_core
 source "$WIGGUM_HOME/lib/git/git-operations.sh"
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Main entry point
 agent_run() {
@@ -91,7 +92,7 @@ agent_run() {
         task_id=$(echo "$worker_id" | sed -E 's/worker-([A-Za-z]{2,10}-[0-9]{1,4})-.*/\1/')
 
         if [ -n "$task_id" ] && [ "$task_id" != "$worker_id" ]; then
-            current_branch="task/${task_id}-$(date +%s)"
+            current_branch="task/${task_id}-$(epoch_now)"
             log "Detached HEAD - creating branch: $current_branch"
             if ! git -C "$workspace" checkout -b "$current_branch" 2>&1; then
                 log_error "Failed to create branch from detached HEAD"

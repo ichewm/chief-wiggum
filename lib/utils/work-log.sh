@@ -65,7 +65,7 @@ work_log_write_iteration() {
     local log_dir="$output_dir/work-log/$run_id"
     local iter_file="$log_dir/iteration-${iteration}.md"
     local timestamp
-    timestamp=$(date -Iseconds)
+    timestamp=$(iso_now)
 
     # Extract sections from summary text
     local context="" decisions="" pending="" current_work="" outcome=""

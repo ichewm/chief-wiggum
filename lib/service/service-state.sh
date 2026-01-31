@@ -35,6 +35,7 @@
 # Prevent double-sourcing
 [ -n "${_SERVICE_STATE_LOADED:-}" ] && return 0
 _SERVICE_STATE_LOADED=1
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # State tracking
 _SERVICE_STATE_FILE=""
@@ -170,7 +171,7 @@ service_state_save() {
     done
 
     # Add metadata
-    state_json=$(echo "$state_json" | jq --argjson ts "$(date +%s)" '.saved_at = $ts')
+    state_json=$(echo "$state_json" | jq --argjson ts "$(epoch_now)" '.saved_at = $ts')
 
     # Write atomically
     local tmp_file
@@ -249,7 +250,7 @@ service_state_restore() {
 
     local saved_at
     saved_at=$(jq -r '.saved_at // 0' "$_SERVICE_STATE_FILE")
-    local age=$(($(date +%s) - saved_at))
+    local age=$(($(epoch_now) - saved_at))
     log "Restored service state from $age seconds ago"
 
     return 0
@@ -273,7 +274,7 @@ service_state_get_last_run() {
 #   time - Optional epoch timestamp (default: now)
 service_state_set_last_run() {
     local id="$1"
-    local time="${2:-$(date +%s)}"
+    local time="${2:-$(epoch_now)}"
     _SERVICE_LAST_RUN[$id]="$time"
 }
 
@@ -449,7 +450,7 @@ service_state_mark_started() {
     local pid="${2:-}"
 
     _SERVICE_STATUS[$id]="running"
-    _SERVICE_LAST_RUN[$id]=$(date +%s)
+    _SERVICE_LAST_RUN[$id]=$(epoch_now)
     _SERVICE_RUN_COUNT[$id]=$(( ${_SERVICE_RUN_COUNT[$id]:-0} + 1 ))
 
     if [ -n "$pid" ]; then
@@ -467,7 +468,7 @@ service_state_mark_completed() {
     _SERVICE_FAIL_COUNT[$id]=0
     _SERVICE_RETRY_COUNT[$id]=0
     _SERVICE_BACKOFF_UNTIL[$id]=0
-    _SERVICE_LAST_SUCCESS[$id]=$(date +%s)
+    _SERVICE_LAST_SUCCESS[$id]=$(epoch_now)
     _SERVICE_SUCCESS_COUNT[$id]=$(( ${_SERVICE_SUCCESS_COUNT[$id]:-0} + 1 ))
     unset "_SERVICE_RUNNING_PID[$id]"
 
@@ -525,7 +526,7 @@ service_state_set_circuit_state() {
     _SERVICE_CIRCUIT_STATE[$id]="$state"
 
     if [ "$state" = "open" ]; then
-        _SERVICE_CIRCUIT_OPENED_AT[$id]=$(date +%s)
+        _SERVICE_CIRCUIT_OPENED_AT[$id]=$(epoch_now)
         _SERVICE_HALF_OPEN_ATTEMPTS[$id]=0
     fi
 }
@@ -594,7 +595,7 @@ service_state_record_execution() {
     # Emit metrics to file if configured
     if [ -n "$_SERVICE_METRICS_FILE" ]; then
         local now
-        now=$(date +%s)
+        now=$(epoch_now)
         local metrics_json
         metrics_json=$(jq -n -c \
             --arg id "$id" \
@@ -756,7 +757,7 @@ service_state_set_backoff() {
     local id="$1"
     local duration="$2"
     local now
-    now=$(date +%s)
+    now=$(epoch_now)
     _SERVICE_BACKOFF_UNTIL[$id]=$((now + duration))
 }
 
@@ -770,7 +771,7 @@ service_state_is_in_backoff() {
     local id="$1"
     local backoff_until="${_SERVICE_BACKOFF_UNTIL[$id]:-0}"
     local now
-    now=$(date +%s)
+    now=$(epoch_now)
     [ "$now" -lt "$backoff_until" ]
 }
 
@@ -784,7 +785,7 @@ service_state_get_backoff_remaining() {
     local id="$1"
     local backoff_until="${_SERVICE_BACKOFF_UNTIL[$id]:-0}"
     local now
-    now=$(date +%s)
+    now=$(epoch_now)
     local remaining=$((backoff_until - now))
     [ "$remaining" -lt 0 ] && remaining=0
     echo "$remaining"
@@ -846,7 +847,7 @@ service_state_succeeded_within() {
     local seconds="$2"
     local last_success="${_SERVICE_LAST_SUCCESS[$id]:-0}"
     local now
-    now=$(date +%s)
+    now=$(epoch_now)
     local cutoff=$((now - seconds))
     [ "$last_success" -ge "$cutoff" ]
 }

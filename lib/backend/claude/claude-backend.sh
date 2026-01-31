@@ -174,7 +174,7 @@ runtime_backend_supports_sessions() {
 }
 
 runtime_backend_generate_session_id() {
-    uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "$(date +%s)-$$-$RANDOM"
+    uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "$(epoch_now)-$$-$RANDOM"
 }
 
 # =============================================================================

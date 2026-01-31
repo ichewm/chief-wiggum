@@ -7,6 +7,7 @@ set -euo pipefail
 
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/file-lock.sh"
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Default events log location
 EVENTS_LOG="${EVENTS_LOG:-}"
@@ -63,7 +64,7 @@ emit_event() {
     fi
 
     local timestamp
-    timestamp=$(date -Iseconds)
+    timestamp=$(iso_now)
 
     local event_json
     if [ -n "$data" ]; then

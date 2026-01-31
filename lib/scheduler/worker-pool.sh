@@ -15,6 +15,7 @@ set -euo pipefail
 
 [ -n "${_WORKER_POOL_LOADED:-}" ] && return 0
 _WORKER_POOL_LOADED=1
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Pool storage - PID -> "type|task_id|start_time"
 declare -gA _WORKER_POOL=()
@@ -97,7 +98,7 @@ pool_add() {
     local type="$2"
     local task_id="$3"
     local start_time
-    start_time=$(date +%s)
+    start_time=$(epoch_now)
 
     # Validate type
     case "$type" in
@@ -405,7 +406,7 @@ pool_cleanup_finished() {
     local on_complete="${3:-}"
     local on_timeout="${4:-}"
     local now
-    now=$(date +%s)
+    now=$(epoch_now)
 
     POOL_CLEANUP_COUNT=0
     POOL_CLEANUP_EVENT=false
@@ -491,9 +492,9 @@ pool_restore_from_workers() {
         local start_time
         if [ -d "$worker_dir" ]; then
             # Use directory mtime as approximate start time
-            start_time=$(stat -c %Y "$worker_dir" 2>/dev/null || date +%s)
+            start_time=$(stat -c %Y "$worker_dir" 2>/dev/null || epoch_now)
         else
-            start_time=$(date +%s)
+            start_time=$(epoch_now)
         fi
 
         # Add to pool (skip if already exists)

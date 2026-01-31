@@ -27,6 +27,7 @@ set -euo pipefail
 
 [ -n "${_BACKEND_INTERFACE_LOADED:-}" ] && return 0
 _BACKEND_INTERFACE_LOADED=1
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # =============================================================================
 # REQUIRED FUNCTIONS (must be overridden by backend)
@@ -156,7 +157,7 @@ runtime_backend_rate_limit_wait() {
 # Generate a new unique session ID
 # Echoes: session ID string
 runtime_backend_generate_session_id() {
-    uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "$(date +%s)-$$-$RANDOM"
+    uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "$(epoch_now)-$$-$RANDOM"
 }
 
 # Get backend name for logging/config

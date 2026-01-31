@@ -10,6 +10,7 @@ source "$WIGGUM_HOME/lib/core/defaults.sh"
 source "$WIGGUM_HOME/lib/utils/calculate-cost.sh"
 source "$WIGGUM_HOME/lib/worker/git-state.sh"
 source "$WIGGUM_HOME/lib/github/issue-state.sh"
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # =============================================================================
 # GIT IDENTITY HELPER
@@ -183,7 +184,7 @@ git_create_commit() {
     else
         # Create a unique branch for this task attempt
         local timestamp
-        timestamp=$(date +%s)
+        timestamp=$(epoch_now)
         branch_name="task/$task_id-$timestamp"
         log "Creating new branch: $branch_name"
 

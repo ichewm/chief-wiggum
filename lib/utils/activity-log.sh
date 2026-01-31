@@ -15,6 +15,7 @@
 _ACTIVITY_LOG_LOADED=1
 
 source "$WIGGUM_HOME/lib/core/file-lock.sh"
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Global path to the activity log file (set by activity_init)
 _ACTIVITY_LOG_FILE=""
@@ -65,7 +66,7 @@ activity_log() {
     fi
 
     local ts
-    ts=$(date -Iseconds)
+    ts=$(iso_now)
 
     # Build all jq args and filter in a single pass (avoids N+1 jq subprocess spawns)
     local -a jq_args=(--arg ts "$ts" --arg event "$event" --arg worker_id "$worker_id" --arg task_id "$task_id")

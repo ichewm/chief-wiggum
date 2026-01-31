@@ -21,6 +21,7 @@ agent_source_core
 
 # Source batch coordination
 source "$WIGGUM_HOME/lib/scheduler/batch-coordination.sh"
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Configurable polling interval (seconds)
 BATCH_POLL_INTERVAL="${WIGGUM_BATCH_POLL_INTERVAL:-5}"
@@ -56,7 +57,7 @@ agent_run() {
     log "Task: $task_id (position $((position + 1)) of $total)"
 
     local start_time elapsed
-    start_time=$(date +%s)
+    start_time=$(epoch_now)
 
     while true; do
         # Check if it's our turn
@@ -68,7 +69,7 @@ agent_run() {
                 # It's our turn
                 log "Turn arrived for $task_id"
                 agent_write_result "$worker_dir" "PASS" \
-                    "{\"batch_id\":\"$batch_id\",\"position\":$position,\"waited_seconds\":$(($(date +%s) - start_time))}"
+                    "{\"batch_id\":\"$batch_id\",\"position\":$position,\"waited_seconds\":$(($(epoch_now) - start_time))}"
                 return 0
                 ;;
             2)
@@ -85,7 +86,7 @@ agent_run() {
         esac
 
         # Check timeout
-        elapsed=$(($(date +%s) - start_time))
+        elapsed=$(($(epoch_now) - start_time))
         if [ "$elapsed" -ge "$BATCH_MAX_WAIT" ]; then
             log_error "Timeout waiting for turn after ${elapsed}s"
             agent_write_result "$worker_dir" "FAIL" \

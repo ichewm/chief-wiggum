@@ -16,6 +16,9 @@ set -euo pipefail
 [ -n "${_SCHEDULER_LOADED:-}" ] && return 0
 _SCHEDULER_LOADED=1
 
+# Source platform helpers for portable time functions
+source "$WIGGUM_HOME/lib/core/platform.sh"
+
 # Source all scheduler components
 source "$WIGGUM_HOME/lib/scheduler/worker-pool.sh"
 source "$WIGGUM_HOME/lib/scheduler/priority-workers.sh"
@@ -527,7 +530,7 @@ scheduler_write_state() {
     local state_dir="$1"
     local state_file="$state_dir/scheduler-state.json"
     local now
-    now=$(date +%s)
+    now=$(epoch_now)
 
     # Convert space-separated lists to JSON arrays
     local ready_json blocked_json pending_json

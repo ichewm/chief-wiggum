@@ -19,6 +19,7 @@ set -euo pipefail
 _AGENT_MD_LOADED=1
 
 source "$WIGGUM_HOME/lib/core/logger.sh"
+source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
 
 # =============================================================================
@@ -1096,7 +1097,7 @@ _md_run_once() {
     # Use step ID from pipeline for log naming
     local step_id="${WIGGUM_STEP_ID:-agent}"
     local log_timestamp
-    log_timestamp=$(date +%s)
+    log_timestamp=$(epoch_now)
     local run_id="${step_id}-${log_timestamp}"
 
     # Set RALPH_RUN_ID for result extraction compatibility
@@ -1157,7 +1158,7 @@ _md_run_resume() {
     # Use step ID from pipeline for log naming
     local step_id="${WIGGUM_STEP_ID:-agent}"
     local log_timestamp
-    log_timestamp=$(date +%s)
+    log_timestamp=$(epoch_now)
     local run_id="${step_id}-${log_timestamp}"
 
     # Set RALPH_RUN_ID for result extraction compatibility
@@ -1205,7 +1206,7 @@ _md_run_live() {
     # Use step ID from pipeline for session naming
     local step_id="${WIGGUM_STEP_ID:-agent}"
     local log_timestamp
-    log_timestamp=$(date +%s)
+    log_timestamp=$(epoch_now)
     local run_id="${step_id}-${log_timestamp}"
 
     # Set RALPH_RUN_ID for result extraction compatibility
@@ -1240,7 +1241,7 @@ _md_run_live() {
 
     if [ "$is_first_run" = true ]; then
         # First run: create new named session
-        session_id=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "$(date +%s)-$$-$RANDOM")
+        session_id=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "$(epoch_now)-$$-$RANDOM")
         log "Live mode: creating new session $session_id"
 
         # Interpolate system prompt (only needed for first run)
@@ -1268,11 +1269,11 @@ _md_run_live() {
                 log_warn "Live mode: session expired or invalid, creating new session"
 
                 # Generate new session ID
-                session_id=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "$(date +%s)-$$-$RANDOM")
+                session_id=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "$(epoch_now)-$$-$RANDOM")
 
                 # Create new log file for retry
                 local retry_timestamp
-                retry_timestamp=$(date +%s)
+                retry_timestamp=$(epoch_now)
                 local retry_log_file="$worker_dir/logs/$run_id/${step_id}-0-${retry_timestamp}-retry.log"
 
                 # Interpolate system prompt for new session

@@ -26,7 +26,7 @@ _USAGE_TRACKER_DATA_DIR="${USAGE_DATA_DIR:-$WIGGUM_HOME/data}"
 # Get Monday midnight epoch timestamp for current week
 _usage_get_week_start() {
     local now dow monday_midnight
-    now=$(date +%s)
+    now=$(epoch_now)
     dow=$(date +%u)  # 1=Monday, 7=Sunday
     local days_since_monday=$(( dow - 1 ))
     local seconds_since_monday=$(( days_since_monday * 86400 ))
@@ -74,7 +74,7 @@ _usage_get_threshold_boundary() {
 # Otherwise, uses rolling 5h windows from epoch
 _usage_get_5h_cycle_start() {
     local now boundary
-    now=$(date +%s)
+    now=$(epoch_now)
     boundary=$(_usage_get_threshold_boundary)
 
     if [ -n "$boundary" ] && [ "$boundary" -gt 0 ] 2>/dev/null; then
@@ -237,8 +237,7 @@ usage_tracker_calculate() {
 
     # Only process files modified since the week start (avoids scanning thousands of old files)
     local week_start_date
-    week_start_date=$(date -d "@$week_start" +%Y-%m-%dT%H:%M:%S 2>/dev/null) || \
-        week_start_date=$(date -r "$week_start" +%Y-%m-%dT%H:%M:%S 2>/dev/null) || \
+    week_start_date=$(date_format_epoch "$week_start" "%Y-%m-%dT%H:%M:%S") || 
         week_start_date=""
 
     local find_args=(-name "*.jsonl")
@@ -386,7 +385,7 @@ _usage_empty_result() {
     local week_start="$1"
     local cycle_start="$2"
     local now_ms
-    now_ms=$(( $(date +%s) * 1000 ))
+    now_ms=$(( $(epoch_now) * 1000 ))
 
     cat <<EOF
 {
@@ -489,7 +488,7 @@ rate_limit_check() {
 # Wait until the current 5-hour cycle resets, logging periodically
 rate_limit_wait_for_cycle_reset() {
     local now cycle_start cycle_end wait_seconds
-    now=$(date +%s)
+    now=$(epoch_now)
     cycle_start=$(_usage_get_5h_cycle_start)
     cycle_end=$(( cycle_start + 18000 ))  # 5 hours
     wait_seconds=$(( cycle_end - now ))

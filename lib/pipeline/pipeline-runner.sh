@@ -22,6 +22,7 @@
 # Prevent double-sourcing
 [ -n "${_PIPELINE_RUNNER_LOADED:-}" ] && return 0
 _PIPELINE_RUNNER_LOADED=1
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 source "$WIGGUM_HOME/lib/utils/activity-log.sh"
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
@@ -595,7 +596,7 @@ _pipeline_run_step() {
     # Log step completion
     log_subsection "STEP COMPLETED: $step_id"
     log_kv "Result" "${gate_result:-UNKNOWN}"
-    log_kv "Finished" "$(date -Iseconds)"
+    log_kv "Finished" "$(iso_now)"
 
     activity_log "step.completed" "$_worker_id" "${WIGGUM_TASK_ID:-}" "step_id=$step_id" "agent=$step_agent" "result=${gate_result:-UNKNOWN}"
 

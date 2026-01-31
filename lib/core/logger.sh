@@ -165,9 +165,14 @@ log_command() {
     log_debug "Executing: $description"
     if [[ -n "${LOG_FILE:-}" ]]; then
         "$@" 2>&1 | while IFS= read -r line; do
-            local redacted_line
+            local redacted_line ts
             redacted_line=$(_redact_sensitive "$line")
-            echo "[$(date -Iseconds)] OUTPUT: $redacted_line" | tee -a "$LOG_FILE"
+            if (( _LOG_HAS_PRINTF_T )); then
+                printf -v ts '%(%Y-%m-%dT%H:%M:%S%z)T' -1
+            else
+                ts=$(date -Iseconds)
+            fi
+            echo "[$ts] OUTPUT: $redacted_line" | tee -a "$LOG_FILE"
         done
     else
         "$@" 2>&1 | while IFS= read -r line; do
@@ -232,7 +237,13 @@ log_agent_header() {
     [ -n "$step_id" ] && log_kv "Step ID" "$step_id"
     [ -n "$worker_id" ] && log_kv "Worker ID" "$worker_id"
     [ -n "$task_id" ] && log_kv "Task ID" "$task_id"
-    log_kv "Started" "$(date -Iseconds)"
+    local _started_ts
+    if (( _LOG_HAS_PRINTF_T )); then
+        printf -v _started_ts '%(%Y-%m-%dT%H:%M:%S%z)T' -1
+    else
+        _started_ts=$(date -Iseconds)
+    fi
+    log_kv "Started" "$_started_ts"
 }
 
 # Log agent completion with status
@@ -248,7 +259,13 @@ log_agent_complete() {
     log_subsection "COMPLETED: $agent_type"
     log_kv "Status" "$status"
     [ -n "$duration" ] && log_kv "Duration" "${duration}s"
-    log_kv "Finished" "$(date -Iseconds)"
+    local _finished_ts
+    if (( _LOG_HAS_PRINTF_T )); then
+        printf -v _finished_ts '%(%Y-%m-%dT%H:%M:%S%z)T' -1
+    else
+        _finished_ts=$(date -Iseconds)
+    fi
+    log_kv "Finished" "$_finished_ts"
     _log_output "INFO" "" 1
 }
 

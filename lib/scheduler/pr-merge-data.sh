@@ -11,6 +11,7 @@ set -euo pipefail
 
 [ -n "${_PR_MERGE_DATA_LOADED:-}" ] && return 0
 _PR_MERGE_DATA_LOADED=1
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # =============================================================================
 # Background Optimizer Status Tracking
@@ -49,7 +50,7 @@ pr_optimizer_mark_started() {
     jq -n \
         --arg status "running" \
         --argjson pid "$pid" \
-        --arg started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --arg started_at "$(TZ=UTC iso_now)" \
         '{status: $status, pid: $pid, started_at: $started_at}' > "$status_file"
 }
 
@@ -65,7 +66,7 @@ pr_optimizer_mark_completed() {
     jq \
         --arg status "completed" \
         --argjson merged_count "$merged_count" \
-        --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --arg completed_at "$(TZ=UTC iso_now)" \
         '. + {status: $status, merged_count: $merged_count, completed_at: $completed_at}' \
         "$status_file" > "$status_file.tmp"
     mv "$status_file.tmp" "$status_file"
@@ -83,7 +84,7 @@ pr_optimizer_mark_failed() {
     jq \
         --arg status "failed" \
         --arg error "$error" \
-        --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --arg completed_at "$(TZ=UTC iso_now)" \
         '. + {status: $status, error: $error, completed_at: $completed_at}' \
         "$status_file" > "$status_file.tmp"
     mv "$status_file.tmp" "$status_file"

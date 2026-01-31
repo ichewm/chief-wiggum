@@ -113,7 +113,7 @@ ${diff_output}
     # Use step ID from pipeline for log naming
     local step_id="${WIGGUM_STEP_ID:-planner}"
     local log_file
-    log_file="$worker_dir/logs/${step_id}-$(date +%s).log"
+    log_file="$worker_dir/logs/${step_id}-$(epoch_now).log"
     mkdir -p "$(dirname "$log_file")"
 
     log "Running planner (max $max_turns turns)..."

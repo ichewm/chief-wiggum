@@ -104,7 +104,7 @@ checkpoint_write() {
     checkpoint_file=$(checkpoint_get_path "$worker_dir" "$iteration")
 
     local timestamp
-    timestamp=$(date -Iseconds)
+    timestamp=$(iso_now)
 
     local worker_id task_id
     worker_id=$(basename "$worker_dir")

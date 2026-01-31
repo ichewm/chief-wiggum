@@ -27,6 +27,7 @@
 # Prevent double-sourcing
 [ -n "${_SERVICE_RUNNER_LOADED:-}" ] && return 0
 _SERVICE_RUNNER_LOADED=1
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Source dependencies (careful of circular deps - loader must be loaded first)
 # service-state.sh should already be loaded by scheduler
@@ -233,7 +234,7 @@ _run_service_command() {
 
     # Record start time for metrics
     local start_time
-    start_time=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+    start_time=$(date +%s%3N 2>/dev/null || echo "$(( $(epoch_now) * 1000 ))")
 
     # Run in background
     (
@@ -336,7 +337,7 @@ _run_service_function() {
 
     # Record start time for metrics
     local start_time
-    start_time=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+    start_time=$(date +%s%3N 2>/dev/null || echo "$(( $(epoch_now) * 1000 ))")
 
     # Run in background
     (
@@ -461,7 +462,7 @@ _run_service_pipeline() {
 
     # Record start time
     local start_time
-    start_time=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+    start_time=$(date +%s%3N 2>/dev/null || echo "$(( $(epoch_now) * 1000 ))")
 
     # Run pipeline in background
     (
@@ -535,7 +536,7 @@ _run_service_agent() {
     # If no worker_dir specified, create a service-specific worker directory
     if [ -z "$worker_dir" ]; then
         local timestamp
-        timestamp=$(date +%s)
+        timestamp=$(epoch_now)
         worker_dir="$_RUNNER_RALPH_DIR/workers/service-${id}-${timestamp}"
         mkdir -p "$worker_dir/logs" "$worker_dir/results"
     fi
@@ -546,7 +547,7 @@ _run_service_agent() {
 
     # Record start time
     local start_time
-    start_time=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+    start_time=$(date +%s%3N 2>/dev/null || echo "$(( $(epoch_now) * 1000 ))")
 
     # Run agent in background
     (
@@ -621,7 +622,7 @@ service_run_sync() {
 
     # Record start time
     local start_time
-    start_time=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+    start_time=$(date +%s%3N 2>/dev/null || echo "$(( $(epoch_now) * 1000 ))")
 
     service_state_mark_started "$id"
 
@@ -755,7 +756,7 @@ service_run_sync() {
                 # Create worker directory if not specified
                 if [ -z "$worker_dir" ]; then
                     local timestamp
-                    timestamp=$(date +%s)
+                    timestamp=$(epoch_now)
                     worker_dir="$_RUNNER_RALPH_DIR/workers/service-${id}-${timestamp}"
                     mkdir -p "$worker_dir/logs" "$worker_dir/results"
                 fi
@@ -785,7 +786,7 @@ service_run_sync() {
 
     # Calculate duration and record metrics
     local end_time
-    end_time=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+    end_time=$(date +%s%3N 2>/dev/null || echo "$(( $(epoch_now) * 1000 ))")
     local duration_ms=$((end_time - start_time))
     service_state_record_execution "$id" "$duration_ms" "$exit_code"
 
@@ -839,7 +840,7 @@ service_wait() {
     # Record metrics
     local start_time end_time duration_ms
     start_time=$(service_state_get_last_run "$id")
-    end_time=$(date +%s)
+    end_time=$(epoch_now)
     duration_ms=$(( (end_time - start_time) * 1000 ))
     service_state_record_execution "$id" "$duration_ms" "$exit_code"
 

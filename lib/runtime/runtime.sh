@@ -26,6 +26,7 @@ set -euo pipefail
 
 [ -n "${_RUNTIME_LOADED:-}" ] && return 0
 _RUNTIME_LOADED=1
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
@@ -152,7 +153,7 @@ run_agent_once() {
     # Auto-generate log file path if not specified
     if [ -z "$output_file" ] && [ -n "${WIGGUM_LOG_DIR:-}" ]; then
         mkdir -p "$WIGGUM_LOG_DIR"
-        output_file="$WIGGUM_LOG_DIR/once-$(date +%s)-$$.log"
+        output_file="$WIGGUM_LOG_DIR/once-$(epoch_now)-$$.log"
         log_debug "Auto-generated log file: $output_file"
     fi
 
@@ -229,7 +230,7 @@ run_agent_once_with_session() {
     # Auto-generate log file path if not specified
     if [ -z "$output_file" ] && [ -n "${WIGGUM_LOG_DIR:-}" ]; then
         mkdir -p "$WIGGUM_LOG_DIR"
-        output_file="$WIGGUM_LOG_DIR/once-session-$(date +%s)-$$.log"
+        output_file="$WIGGUM_LOG_DIR/once-session-$(epoch_now)-$$.log"
         log_debug "Auto-generated log file: $output_file"
     fi
 
@@ -288,7 +289,7 @@ run_agent_resume() {
     # Auto-generate log file path if not specified
     if [ -z "$output_file" ] && [ -n "${WIGGUM_LOG_DIR:-}" ]; then
         mkdir -p "$WIGGUM_LOG_DIR"
-        output_file="$WIGGUM_LOG_DIR/resume-${session_id:0:8}-$(date +%s).log"
+        output_file="$WIGGUM_LOG_DIR/resume-${session_id:0:8}-$(epoch_now).log"
         log_debug "Auto-generated log file: $output_file"
     fi
 

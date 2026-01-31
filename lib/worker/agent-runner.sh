@@ -16,6 +16,7 @@ set -euo pipefail
 
 source "$WIGGUM_HOME/lib/core/defaults.sh"
 source "$WIGGUM_HOME/lib/core/logger.sh"
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Global state for agent runner
 _AGENT_RUNNER_DIR=""
@@ -137,7 +138,7 @@ agent_runner_detect_violations() {
         {
             echo "================================================================================"
             echo "VIOLATION: Workspace Escape"
-            echo "Timestamp: $(date -Iseconds)"
+            echo "Timestamp: $(iso_now)"
             echo "Agent Dir: $_AGENT_RUNNER_DIR"
             cat "$_AGENT_RUNNER_DIR/violation_flag.txt"
             echo "================================================================================"

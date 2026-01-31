@@ -21,6 +21,7 @@ source "$WIGGUM_HOME/lib/github/issue-state.sh"
 source "$WIGGUM_HOME/lib/github/issue-parser.sh"
 source "$WIGGUM_HOME/lib/github/issue-writer.sh"
 source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # =============================================================================
 # Internal: GitHub API Helpers
@@ -958,7 +959,7 @@ github_issue_sync_status() {
 
     if [ "$last_down" -gt 0 ]; then
         local down_date
-        down_date=$(date -d "@$last_down" -Iseconds 2>/dev/null || date -r "$last_down" -Iseconds 2>/dev/null || echo "epoch:$last_down")
+        down_date=$(iso_from_epoch "$last_down")
         echo "  Last down-sync: $down_date"
     else
         echo "  Last down-sync: never"
@@ -966,7 +967,7 @@ github_issue_sync_status() {
 
     if [ "$last_up" -gt 0 ]; then
         local up_date
-        up_date=$(date -d "@$last_up" -Iseconds 2>/dev/null || date -r "$last_up" -Iseconds 2>/dev/null || echo "epoch:$last_up")
+        up_date=$(iso_from_epoch "$last_up")
         echo "  Last up-sync: $up_date"
     else
         echo "  Last up-sync: never"

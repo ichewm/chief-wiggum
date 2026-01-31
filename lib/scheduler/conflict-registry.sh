@@ -23,6 +23,7 @@ set -euo pipefail
 
 [ -n "${_CONFLICT_REGISTRY_LOADED:-}" ] && return 0
 _CONFLICT_REGISTRY_LOADED=1
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Initialize conflict registry file if it doesn't exist
 #
@@ -51,7 +52,7 @@ conflict_registry_add() {
     local files="$4"
     local registry_file="$ralph_dir/orchestrator/conflict-registry.json"
     local timestamp
-    timestamp=$(date -Iseconds)
+    timestamp=$(iso_now)
 
     conflict_registry_init "$ralph_dir"
 

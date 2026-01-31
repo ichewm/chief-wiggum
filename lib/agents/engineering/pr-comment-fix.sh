@@ -33,6 +33,7 @@ agent_source_ralph
 # Source git state tracking
 source "$WIGGUM_HOME/lib/worker/git-state.sh"
 source "$WIGGUM_HOME/lib/git/git-operations.sh"
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Load review config on source
 load_review_config
@@ -51,7 +52,7 @@ agent_run() {
 
     # Record start time and log agent start
     local start_time
-    start_time=$(date +%s)
+    start_time=$(epoch_now)
     agent_log_start "$worker_dir" "$(basename "$worker_dir")"
 
     # Verify workspace exists
@@ -293,7 +294,7 @@ _init_comment_status() {
     {
         echo "# PR Comment Fix Status"
         echo ""
-        echo "**Generated:** $(date -Iseconds)"
+        echo "**Generated:** $(iso_now)"
         echo ""
         echo "## Comments to Address"
         echo ""
@@ -344,7 +345,7 @@ _update_task_comments_with_commit() {
 ## Commit
 
 **SHA:** ${commit_sha}
-**Date:** $(date -Iseconds)
+**Date:** $(iso_now)
 
 ### Comments Addressed
 

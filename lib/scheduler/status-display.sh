@@ -11,6 +11,7 @@ set -euo pipefail
 
 [ -n "${_STATUS_DISPLAY_LOADED:-}" ] && return 0
 _STATUS_DISPLAY_LOADED=1
+source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Source dependencies
 source "$WIGGUM_HOME/lib/scheduler/worker-pool.sh"
@@ -79,7 +80,7 @@ compute_status_counts() {
     if [[ -f "$ralph_dir/logs/workers.log" ]]; then
         local error_max_age="${ERROR_LOG_MAX_AGE:-3600}"
         local cutoff_time
-        cutoff_time=$(date -d "@$(($(date +%s) - error_max_age))" -Iseconds 2>/dev/null || \
+        cutoff_time=$(iso_from_epoch "$(($(epoch_now) - error_max_age))" 2>/dev/null || \
                       date -v-"${error_max_age}"S -Iseconds 2>/dev/null || \
                       echo "")
 
@@ -101,7 +102,7 @@ compute_status_counts() {
 
     # --- Stuck count (activity idle threshold) ---
     local now_ts stuck_threshold
-    now_ts=$(date +%s)
+    now_ts=$(epoch_now)
     stuck_threshold="${STUCK_WORKER_THRESHOLD:-1800}"
     if [[ "$stuck_threshold" -gt 0 ]]; then
         _csc_check_stuck() {
@@ -169,7 +170,7 @@ _log_detailed_status() {
     if [ "$main_count" -gt 0 ]; then
         log_debug "In Progress:"
         local now_ts stuck_threshold
-        now_ts=$(date +%s)
+        now_ts=$(epoch_now)
         stuck_threshold="${STUCK_WORKER_THRESHOLD:-1800}"
 
         _display_workers_callback() {
@@ -202,7 +203,7 @@ _log_detailed_status() {
     if [ "$fix_count" -gt 0 ]; then
         log_debug "Fix Workers:"
         local now
-        now=$(date +%s)
+        now=$(epoch_now)
         _display_fix_callback() {
             local pid="$1" type="$2" task_id="$3" start_time="$4"
             local elapsed=$((now - start_time))
@@ -215,7 +216,7 @@ _log_detailed_status() {
     if [ "$resolve_count" -gt 0 ]; then
         log_debug "Resolve Workers:"
         local now
-        now=$(date +%s)
+        now=$(epoch_now)
         _display_resolve_callback() {
             local pid="$1" type="$2" task_id="$3" start_time="$4"
             local elapsed=$((now - start_time))
@@ -372,7 +373,7 @@ _log_detailed_status() {
         local error_max_age="${ERROR_LOG_MAX_AGE:-3600}"
 
         # Calculate cutoff timestamp (now - max_age)
-        cutoff_time=$(date -d "@$(($(date +%s) - error_max_age))" -Iseconds 2>/dev/null || \
+        cutoff_time=$(iso_from_epoch "$(($(epoch_now) - error_max_age))" 2>/dev/null || \
                       date -v-"${error_max_age}"S -Iseconds 2>/dev/null || \
                       echo "")
 
