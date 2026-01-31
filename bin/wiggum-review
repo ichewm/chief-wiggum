@@ -63,8 +63,8 @@ Task Pattern Examples:
   TASK-030,TASK-031         Multiple tasks (comma-separated)
 
 Environment Variables:
-  WIGGUM_APPROVED_AUTHORS           Comma-separated list of comment authors to include
-                                    (default: copilot,dependabot,github-actions[bot],...)
+  WIGGUM_APPROVED_USER_IDS          Comma-separated list of numeric GitHub user IDs to include
+                                    (default: empty)
   WIGGUM_COMMENT_FIX_MAX_ITERATIONS Maximum fix loop iterations (default: 10)
   WIGGUM_COMMENT_FIX_MAX_TURNS      Max turns per fix session (default: 30)
   WIGGUM_AUTO_COMMIT_AFTER_FIX      Auto commit/push after fix (default: true)

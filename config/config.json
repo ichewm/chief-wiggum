@@ -44,8 +44,7 @@
   "github": {
     "issue_sync": {
       "enabled": false,
-      "allowed_user_ids": [],
-      "allowed_usernames": [],
+      "allowed_user_ids": [123998984,124862625,124581466],
       "label_filter": "wiggum",
       "priority_labels": {
         "priority:critical": "CRITICAL",
@@ -65,7 +64,7 @@
     }
   },
   "review": {
-    "approved_authors": ["copilot", "dependabot", "github-actions[bot]", "dependabot[bot]", "renovate[bot]", "codecov[bot]"],
+    "approved_user_ids": [123998984,124862625,124581466,175728472],
     "fix_max_iterations": 10,
     "fix_max_turns": 30,
     "auto_commit_after_fix": true

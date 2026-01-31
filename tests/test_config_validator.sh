@@ -73,7 +73,7 @@ test_valid_config_passes() {
     "review": {
         "fix_max_iterations": 10,
         "fix_max_turns": 30,
-        "approved_authors": ["alice", "bob"]
+        "approved_user_ids": [12345, 67890]
     }
 }
 JSON
@@ -192,7 +192,7 @@ JSON
 # ===========================================================================
 # Test: Config with non-array approved_authors fails
 # ===========================================================================
-test_config_approved_authors_non_array() {
+test_config_approved_user_ids_non_array() {
     cat > "$TEST_DIR/config.json" << 'JSON'
 {
     "workers": { "max_iterations": 50, "sleep_seconds": 2 },
@@ -201,11 +201,11 @@ test_config_approved_authors_non_array() {
     "review": {
         "fix_max_iterations": 10,
         "fix_max_turns": 30,
-        "approved_authors": "alice"
+        "approved_user_ids": 12345
     }
 }
 JSON
-    assert_failure "review.approved_authors as string should fail (must be array)" \
+    assert_failure "review.approved_user_ids as integer should fail (must be array)" \
         validate_config "$TEST_DIR/config.json"
 }
 
@@ -484,7 +484,7 @@ run_test test_config_sleep_seconds_out_of_range
 run_test test_config_hooks_enabled_non_boolean
 run_test test_config_fix_max_iterations_out_of_range
 run_test test_config_fix_max_turns_out_of_range
-run_test test_config_approved_authors_non_array
+run_test test_config_approved_user_ids_non_array
 run_test test_config_unknown_keys_warn_but_pass
 run_test test_valid_agents_config_passes
 run_test test_agents_missing_agents_section

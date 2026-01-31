@@ -20,7 +20,7 @@ setup() {
     unset RALPH_DIR
     unset CLAUDE
     unset WIGGUM_MAX_WORKERS
-    unset WIGGUM_APPROVED_AUTHORS
+    unset WIGGUM_APPROVED_USER_IDS
     unset WIGGUM_COMMENT_FIX_MAX_ITERATIONS
     unset WIGGUM_COMMENT_FIX_MAX_TURNS
     unset WIGGUM_AUTO_COMMIT_AFTER_FIX
@@ -134,7 +134,7 @@ test_load_review_config_defaults_without_file() {
         export WIGGUM_HOME="$TEST_DIR/nonexistent"
         load_review_config
 
-        echo "AUTHORS=$WIGGUM_APPROVED_AUTHORS"
+        echo "USER_IDS=$WIGGUM_APPROVED_USER_IDS"
         echo "MAX_ITER=$WIGGUM_COMMENT_FIX_MAX_ITERATIONS"
         echo "MAX_TURNS=$WIGGUM_COMMENT_FIX_MAX_TURNS"
         echo "AUTO_COMMIT=$WIGGUM_AUTO_COMMIT_AFTER_FIX"
@@ -154,7 +154,7 @@ test_load_review_config_with_config_file() {
     cat > "$TEST_DIR/config/config.json" << 'EOF'
 {
     "review": {
-        "approved_authors": ["user1", "user2"],
+        "approved_user_ids": [12345, 67890],
         "fix_max_iterations": 15,
         "fix_max_turns": 40,
         "auto_commit_after_fix": true

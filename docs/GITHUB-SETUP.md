@@ -67,8 +67,7 @@ Add to `.ralph/config.json`:
   "github": {
     "issue_sync": {
       "enabled": true,
-      "allowed_user_ids": [12345678],
-      "allowed_usernames": ["your-github-username"]
+      "allowed_user_ids": [12345678]
     }
   }
 }
@@ -90,7 +89,6 @@ All fields with defaults shown:
     "issue_sync": {
       "enabled": false,
       "allowed_user_ids": [],
-      "allowed_usernames": [],
       "label_filter": "wiggum",
       "default_priority": "MEDIUM",
       "priority_labels": {
@@ -116,7 +114,6 @@ All fields with defaults shown:
 |-------|------|-------------|
 | `enabled` | bool | Master switch. Must be `true` to activate sync. |
 | `allowed_user_ids` | int[] | Numeric GitHub user IDs whose issues are synced. |
-| `allowed_usernames` | string[] | GitHub logins whose issues are synced (case-insensitive). |
 | `label_filter` | string | Gate label. Only issues with this label are synced. |
 | `default_priority` | string | Priority when no priority label is present. |
 | `priority_labels` | object | Maps GitHub label name to kanban priority string. |
@@ -129,7 +126,6 @@ All fields with defaults shown:
 |----------|-----------|
 | `WIGGUM_GITHUB_ISSUE_SYNC=true` | `enabled` |
 | `WIGGUM_GITHUB_ALLOWED_USER_IDS=123,456` | `allowed_user_ids` |
-| `WIGGUM_GITHUB_ALLOWED_USERNAMES=alice,bob` | `allowed_usernames` |
 | `WIGGUM_GITHUB_LABEL_FILTER=wiggum` | `label_filter` |
 | `WIGGUM_GITHUB_DEFAULT_PRIORITY=HIGH` | `default_priority` |
 
@@ -275,7 +271,7 @@ Set `enabled: true` in `.ralph/config.json` or `WIGGUM_GITHUB_ISSUE_SYNC=true`.
 ```
 GitHub sync: no allowed users configured
 ```
-Add `allowed_user_ids` or `allowed_usernames` to config. Find your ID with `gh api user --jq '.id'`.
+Add `allowed_user_ids` to config. Find your ID with `gh api user --jq '.id'`.
 
 **Issue not syncing**
 - Verify the issue has the gate label (`wiggum` by default).

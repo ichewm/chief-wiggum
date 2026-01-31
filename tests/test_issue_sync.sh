@@ -33,7 +33,6 @@ setup() {
     # Set config globals for tests
     GITHUB_SYNC_ENABLED="true"
     GITHUB_SYNC_ALLOWED_USER_IDS="12345"
-    GITHUB_SYNC_ALLOWED_USERNAMES="testuser"
     GITHUB_SYNC_LABEL_FILTER="wiggum"
     GITHUB_SYNC_DEFAULT_PRIORITY="MEDIUM"
     # shellcheck disable=SC2089 # JSON strings, not bash arrays
@@ -41,7 +40,7 @@ setup() {
     # shellcheck disable=SC2089 # JSON strings, not bash arrays
     GITHUB_SYNC_STATUS_LABELS='{"wiggum:in-progress":"=","wiggum:pending-approval":"P","wiggum:completed":"x","wiggum:failed":"*","wiggum:not-planned":"N"}'
     GITHUB_SYNC_CLOSE_ON="x"
-    export GITHUB_SYNC_ENABLED GITHUB_SYNC_ALLOWED_USER_IDS GITHUB_SYNC_ALLOWED_USERNAMES
+    export GITHUB_SYNC_ENABLED GITHUB_SYNC_ALLOWED_USER_IDS
     export GITHUB_SYNC_LABEL_FILTER GITHUB_SYNC_DEFAULT_PRIORITY
     # shellcheck disable=SC2090 # JSON strings passed to jq, not bash expansions
     export GITHUB_SYNC_PRIORITY_LABELS GITHUB_SYNC_STATUS_LABELS GITHUB_SYNC_CLOSE_ON
@@ -112,22 +111,12 @@ test_config_should_close() {
 
 test_author_allowed_by_id() {
     assert_success "User 12345 should be allowed" \
-        github_sync_is_author_allowed "12345" "anyname"
-}
-
-test_author_allowed_by_username() {
-    assert_success "testuser should be allowed" \
-        github_sync_is_author_allowed "" "testuser"
-}
-
-test_author_allowed_case_insensitive() {
-    assert_success "TestUser should be allowed (case insensitive)" \
-        github_sync_is_author_allowed "" "TestUser"
+        github_sync_is_author_allowed "12345"
 }
 
 test_author_not_allowed() {
     assert_failure "Unknown user should not be allowed" \
-        github_sync_is_author_allowed "99999" "unknownuser"
+        github_sync_is_author_allowed "99999"
 }
 
 # =============================================================================
@@ -791,8 +780,6 @@ run_test test_config_get_status_label_completed
 run_test test_config_get_status_char
 run_test test_config_should_close
 run_test test_author_allowed_by_id
-run_test test_author_allowed_by_username
-run_test test_author_allowed_case_insensitive
 run_test test_author_not_allowed
 run_test test_priority_from_labels
 run_test test_priority_from_labels_multiple

@@ -52,7 +52,7 @@ validate_config() {
     fi
 
     # Single jq call extracts all values at once (performance optimization)
-    # Output format: section_flags|max_iter|sleep_sec|hooks_enabled|fix_max_iter|fix_max_turns|approved_type|keys
+    # Output format: section_flags|max_iter|sleep_sec|hooks_enabled|fix_max_iter|fix_max_turns|approved_user_ids_type|keys
     # section_flags: 4-char string where each char is 1 (present) or 0 (missing) for workers,hooks,paths,review
     local extracted
     extracted=$(jq -r '
@@ -66,7 +66,7 @@ validate_config() {
             (.hooks.enabled // "true"),
             (.review.fix_max_iterations // 10),
             (.review.fix_max_turns // 30),
-            (if .review.approved_authors then (.review.approved_authors | type) else "null" end),
+            (if .review.approved_user_ids then (.review.approved_user_ids | type) else "null" end),
             (keys | join(","))
         ] | @tsv
     ' "$config_file" 2>/dev/null)
@@ -119,9 +119,9 @@ validate_config() {
             log_error "review.fix_max_turns must be between 1 and 100 (got: $fix_max_turns)"
             ((++errors))
         fi
-        # Validate approved_authors is an array if present
+        # Validate approved_user_ids is an array if present
         if [ "$approved_type" != "null" ] && [ "$approved_type" != "array" ]; then
-            log_error "review.approved_authors must be an array"
+            log_error "review.approved_user_ids must be an array"
             ((++errors))
         fi
     fi

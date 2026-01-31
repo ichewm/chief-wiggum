@@ -50,12 +50,11 @@ Examples:
 Configuration:
   Set in .ralph/config.json or config/config.json under github.issue_sync.
   Enable with: "enabled": true
-  Required: allowed_user_ids or allowed_usernames must be configured.
+  Required: allowed_user_ids must be configured.
 
 Environment:
   WIGGUM_GITHUB_ISSUE_SYNC=true        Enable sync
   WIGGUM_GITHUB_ALLOWED_USER_IDS=...   Comma-separated user IDs
-  WIGGUM_GITHUB_ALLOWED_USERNAMES=...  Comma-separated usernames
   WIGGUM_GITHUB_LABEL_FILTER=wiggum    Gate label (default: wiggum)
 
 EOF

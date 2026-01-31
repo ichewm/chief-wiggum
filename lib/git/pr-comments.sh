@@ -110,6 +110,11 @@ get_current_github_user() {
     timeout "${WIGGUM_GH_TIMEOUT:-30}" gh api user --jq '.login' 2>/dev/null
 }
 
+# Get current GitHub user's numeric ID
+get_current_github_user_id() {
+    timeout "${WIGGUM_GH_TIMEOUT:-30}" gh api user --jq '.id' 2>/dev/null
+}
+
 # Find PRs matching task regex patterns
 # Args: <comma-separated-patterns>
 # Output: JSON array of PR info (number, headRefName, url, state)
@@ -179,6 +184,7 @@ fetch_pr_comments() {
         type: "issue_comment",
         id: .id,
         author: .user.login,
+        author_id: .user.id,
         body: .body,
         created_at: .created_at,
         url: .html_url
@@ -190,6 +196,7 @@ fetch_pr_comments() {
         type: "review_comment",
         id: .id,
         author: .user.login,
+        author_id: .user.id,
         body: .body,
         path: .path,
         line: .line,
@@ -206,6 +213,7 @@ fetch_pr_comments() {
         type: "review",
         id: .id,
         author: .user.login,
+        author_id: .user.id,
         body: .body,
         state: .state,
         created_at: .submitted_at,
@@ -216,24 +224,28 @@ fetch_pr_comments() {
     echo "$issue_comments" "$review_comments" "$reviews" | jq -s 'add | sort_by(.created_at)'
 }
 
-# Filter comments by approved authors
-# Args: <comments_json> <approved_authors_csv> <current_user>
+# Filter comments by approved user IDs
+# Args: <comments_json> <approved_user_ids_csv> <current_user_id>
 # Output: Filtered JSON array
-filter_comments_by_authors() {
+filter_comments_by_user_ids() {
     local comments="$1"
-    local approved_authors="$2"
-    local current_user="$3"
+    local approved_user_ids="$2"
+    local current_user_id="$3"
 
-    # Build the full author list including current user
-    local all_authors="$approved_authors"
-    if [ -n "$current_user" ]; then
-        all_authors="$all_authors,$current_user"
+    # Build the full ID list including current user
+    local all_ids="$approved_user_ids"
+    if [ -n "$current_user_id" ]; then
+        if [ -n "$all_ids" ]; then
+            all_ids="$all_ids,$current_user_id"
+        else
+            all_ids="$current_user_id"
+        fi
     fi
 
-    # Filter using jq - case-insensitive matching
-    echo "$comments" | jq --arg authors "$all_authors" '
-        ($authors | split(",") | map(gsub("^\\s+|\\s+$"; "") | ascii_downcase)) as $approved |
-        [.[] | select((.author | ascii_downcase) as $a | $approved | any(. == $a))]
+    # Filter using jq - numeric comparison on author_id
+    echo "$comments" | jq --arg ids "$all_ids" '
+        ($ids | split(",") | map(gsub("^\\s+|\\s+$"; "") | tonumber)) as $approved |
+        [.[] | select(.author_id as $a | $approved | any(. == $a))]
     '
 }
 
@@ -370,15 +382,15 @@ sync_pr_comments() {
     local patterns="$1"
     local output_dir="$2"
 
-    # Get current GitHub user
-    local current_user
-    current_user=$(get_current_github_user)
-    if [ -z "$current_user" ]; then
+    # Get current GitHub user ID
+    local current_user_id
+    current_user_id=$(get_current_github_user_id)
+    if [ -z "$current_user_id" ]; then
         log_error "Could not determine current GitHub user. Are you logged in with 'gh auth login'?"
         return 1
     fi
 
-    log_debug "GitHub user: $current_user, approved: $WIGGUM_APPROVED_AUTHORS"
+    log_debug "GitHub user ID: $current_user_id, approved IDs: $WIGGUM_APPROVED_USER_IDS"
 
     # Find matching PRs
     local prs pr_count
@@ -408,7 +420,7 @@ sync_pr_comments() {
         echo "# PR Comments for Tasks: $patterns"
         echo ""
         echo "**Synced at:** $(date -Iseconds)"
-        echo "**Approved authors:** $WIGGUM_APPROVED_AUTHORS, $current_user"
+        echo "**Approved user IDs:** $WIGGUM_APPROVED_USER_IDS, $current_user_id"
         echo ""
         echo "---"
         echo ""
@@ -427,7 +439,7 @@ sync_pr_comments() {
 
         local comments filtered comment_count
         comments=$(fetch_pr_comments "$pr_number")
-        filtered=$(filter_comments_by_authors "$comments" "$WIGGUM_APPROVED_AUTHORS" "$current_user")
+        filtered=$(filter_comments_by_user_ids "$comments" "$WIGGUM_APPROVED_USER_IDS" "$current_user_id")
         comment_count=$(echo "$filtered" | jq 'length')
 
         log_debug "  PR #$pr_number: $comment_count comment(s)"

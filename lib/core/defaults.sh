@@ -99,10 +99,10 @@ _load_config_cache() {
     fi
 
     # Single jq call extracts all values (performance optimization)
-    # Format: approved_authors|fix_max_iter|fix_max_turns|auto_commit|rate_limit|git_name|git_email|fix_worker_limit
+    # Format: approved_user_ids|fix_max_iter|fix_max_turns|auto_commit|rate_limit|git_name|git_email|fix_worker_limit
     local extracted
     extracted=$(jq -r '[
-        (.review.approved_authors // [] | join(",")),
+        (.review.approved_user_ids // [] | map(tostring) | join(",")),
         (.review.fix_max_iterations // 10),
         (.review.fix_max_turns // 30),
         (.review.auto_commit_after_fix // true),
@@ -113,7 +113,7 @@ _load_config_cache() {
     ] | @tsv' "$config_file" 2>/dev/null) || true
 
     if [ -n "$extracted" ]; then
-        IFS=$'\t' read -r _CACHE_APPROVED_AUTHORS _CACHE_FIX_MAX_ITER _CACHE_FIX_MAX_TURNS \
+        IFS=$'\t' read -r _CACHE_APPROVED_USER_IDS _CACHE_FIX_MAX_ITER _CACHE_FIX_MAX_TURNS \
                          _CACHE_AUTO_COMMIT _CACHE_RATE_LIMIT _CACHE_GIT_NAME _CACHE_GIT_EMAIL \
                          _CACHE_FIX_WORKER_LIMIT \
                          <<< "$extracted"
@@ -126,18 +126,18 @@ _load_config_cache() {
 load_review_config() {
     _load_config_cache
 
-    WIGGUM_APPROVED_AUTHORS="${WIGGUM_APPROVED_AUTHORS:-${_CACHE_APPROVED_AUTHORS:-}}"
+    WIGGUM_APPROVED_USER_IDS="${WIGGUM_APPROVED_USER_IDS:-${_CACHE_APPROVED_USER_IDS:-}}"
     WIGGUM_COMMENT_FIX_MAX_ITERATIONS="${WIGGUM_COMMENT_FIX_MAX_ITERATIONS:-${_CACHE_FIX_MAX_ITER:-}}"
     WIGGUM_COMMENT_FIX_MAX_TURNS="${WIGGUM_COMMENT_FIX_MAX_TURNS:-${_CACHE_FIX_MAX_TURNS:-}}"
     WIGGUM_AUTO_COMMIT_AFTER_FIX="${WIGGUM_AUTO_COMMIT_AFTER_FIX:-${_CACHE_AUTO_COMMIT:-}}"
 
     # Fallback defaults if config doesn't exist or parsing fails
-    WIGGUM_APPROVED_AUTHORS="${WIGGUM_APPROVED_AUTHORS:-copilot,dependabot,github-actions[bot],dependabot[bot],renovate[bot],codecov[bot]}"
+    WIGGUM_APPROVED_USER_IDS="${WIGGUM_APPROVED_USER_IDS:-}"
     WIGGUM_COMMENT_FIX_MAX_ITERATIONS="${WIGGUM_COMMENT_FIX_MAX_ITERATIONS:-10}"
     WIGGUM_COMMENT_FIX_MAX_TURNS="${WIGGUM_COMMENT_FIX_MAX_TURNS:-30}"
     WIGGUM_AUTO_COMMIT_AFTER_FIX="${WIGGUM_AUTO_COMMIT_AFTER_FIX:-true}"
 
-    export WIGGUM_APPROVED_AUTHORS
+    export WIGGUM_APPROVED_USER_IDS
     export WIGGUM_COMMENT_FIX_MAX_ITERATIONS
     export WIGGUM_COMMENT_FIX_MAX_TURNS
     export WIGGUM_AUTO_COMMIT_AFTER_FIX

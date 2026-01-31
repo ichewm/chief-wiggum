@@ -360,7 +360,7 @@ github_issue_sync_down() {
         labels_json=$(echo "$parsed" | jq '.labels')
 
         # Validate author
-        if ! github_sync_is_author_allowed "$author_id" "$author_login"; then
+        if ! github_sync_is_author_allowed "$author_id"; then
             log_debug "Skipping issue #$number - author '$author_login' not allowed"
             ((++skipped))
             continue

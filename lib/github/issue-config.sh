@@ -21,7 +21,6 @@ _GITHUB_ISSUE_CONFIG_LOADED=1
 
 GITHUB_SYNC_ENABLED="${WIGGUM_GITHUB_ISSUE_SYNC:-}"
 GITHUB_SYNC_ALLOWED_USER_IDS="${WIGGUM_GITHUB_ALLOWED_USER_IDS:-}"
-GITHUB_SYNC_ALLOWED_USERNAMES="${WIGGUM_GITHUB_ALLOWED_USERNAMES:-}"
 GITHUB_SYNC_LABEL_FILTER="${WIGGUM_GITHUB_LABEL_FILTER:-}"
 GITHUB_SYNC_DEFAULT_PRIORITY="${WIGGUM_GITHUB_DEFAULT_PRIORITY:-}"
 GITHUB_SYNC_CLOSE_ON=""
@@ -36,7 +35,7 @@ GITHUB_SYNC_CLOSE_ON=""
 #   config_file - Path to JSON config file
 #
 # Returns: tab-separated values on stdout:
-#   enabled|user_ids|usernames|label_filter|default_priority|priority_labels_json|status_labels_json|close_on
+#   enabled|user_ids|label_filter|default_priority|priority_labels_json|status_labels_json|close_on
 _extract_github_sync_config() {
     local config_file="$1"
 
@@ -48,7 +47,6 @@ _extract_github_sync_config() {
     jq -r '[
         (.github.issue_sync.enabled // ""),
         (.github.issue_sync.allowed_user_ids // [] | map(tostring) | join(",")),
-        (.github.issue_sync.allowed_usernames // [] | join(",")),
         (.github.issue_sync.label_filter // ""),
         (.github.issue_sync.default_priority // ""),
         (.github.issue_sync.priority_labels // {} | tojson),
@@ -69,7 +67,6 @@ _extract_github_sync_config() {
 # Globals set:
 #   GITHUB_SYNC_ENABLED          - "true" or "false"
 #   GITHUB_SYNC_ALLOWED_USER_IDS - Comma-separated GitHub user IDs
-#   GITHUB_SYNC_ALLOWED_USERNAMES - Comma-separated GitHub usernames
 #   GITHUB_SYNC_LABEL_FILTER     - Required issue label
 #   GITHUB_SYNC_DEFAULT_PRIORITY - Default priority for new tasks
 #   GITHUB_SYNC_PRIORITY_LABELS  - JSON object mapping label -> priority
@@ -78,7 +75,7 @@ _extract_github_sync_config() {
 #
 # Returns: 0 always
 load_github_sync_config() {
-    local _cfg_enabled="" _cfg_user_ids="" _cfg_usernames=""
+    local _cfg_enabled="" _cfg_user_ids=""
     local _cfg_label_filter="" _cfg_default_priority=""
     local _cfg_priority_labels="" _cfg_status_labels="" _cfg_close_on=""
 
@@ -97,7 +94,7 @@ load_github_sync_config() {
     fi
 
     if [ -n "$extracted" ]; then
-        IFS=$'\x1f' read -r _cfg_enabled _cfg_user_ids _cfg_usernames \
+        IFS=$'\x1f' read -r _cfg_enabled _cfg_user_ids \
                          _cfg_label_filter _cfg_default_priority \
                          _cfg_priority_labels _cfg_status_labels _cfg_close_on \
                          <<< "$extracted"
@@ -106,7 +103,6 @@ load_github_sync_config() {
     # Apply env var overrides (env wins over config file)
     GITHUB_SYNC_ENABLED="${WIGGUM_GITHUB_ISSUE_SYNC:-${_cfg_enabled:-false}}"
     GITHUB_SYNC_ALLOWED_USER_IDS="${WIGGUM_GITHUB_ALLOWED_USER_IDS:-${_cfg_user_ids:-}}"
-    GITHUB_SYNC_ALLOWED_USERNAMES="${WIGGUM_GITHUB_ALLOWED_USERNAMES:-${_cfg_usernames:-}}"
     GITHUB_SYNC_LABEL_FILTER="${WIGGUM_GITHUB_LABEL_FILTER:-${_cfg_label_filter:-wiggum}}"
     GITHUB_SYNC_DEFAULT_PRIORITY="${WIGGUM_GITHUB_DEFAULT_PRIORITY:-${_cfg_default_priority:-MEDIUM}}"
 
@@ -130,7 +126,6 @@ load_github_sync_config() {
 
     export GITHUB_SYNC_ENABLED
     export GITHUB_SYNC_ALLOWED_USER_IDS
-    export GITHUB_SYNC_ALLOWED_USERNAMES
     export GITHUB_SYNC_LABEL_FILTER
     export GITHUB_SYNC_DEFAULT_PRIORITY
     # shellcheck disable=SC2090
@@ -163,8 +158,8 @@ github_sync_validate_config() {
         ((++errors)) || true
     fi
 
-    if [ -z "$GITHUB_SYNC_ALLOWED_USER_IDS" ] && [ -z "$GITHUB_SYNC_ALLOWED_USERNAMES" ]; then
-        log_error "GitHub sync: no allowed users configured (set allowed_user_ids or allowed_usernames)"
+    if [ -z "$GITHUB_SYNC_ALLOWED_USER_IDS" ]; then
+        log_error "GitHub sync: no allowed users configured (set allowed_user_ids)"
         ((++errors)) || true
     fi
 
@@ -256,33 +251,18 @@ github_sync_get_priority_from_labels() {
 # Check if a GitHub user is allowed to sync issues
 #
 # Args:
-#   author_id   - Numeric GitHub user ID (from issue JSON)
-#   author_login - GitHub username (from issue JSON)
+#   author_id - Numeric GitHub user ID (from issue JSON)
 #
 # Returns: 0 if allowed, 1 if not
 github_sync_is_author_allowed() {
     local author_id="$1"
-    local author_login="$2"
 
-    # Check user ID first (stable across username changes)
+    # Check user ID (stable across username changes)
     if [ -n "$GITHUB_SYNC_ALLOWED_USER_IDS" ] && [ -n "$author_id" ]; then
         local IFS=','
         local uid
         for uid in $GITHUB_SYNC_ALLOWED_USER_IDS; do
             [[ "$uid" == "$author_id" ]] && return 0
-        done
-    fi
-
-    # Fallback: check username (case-insensitive)
-    if [ -n "$GITHUB_SYNC_ALLOWED_USERNAMES" ] && [ -n "$author_login" ]; then
-        local login_lower
-        login_lower=$(echo "$author_login" | tr '[:upper:]' '[:lower:]')
-        local IFS=','
-        local name
-        for name in $GITHUB_SYNC_ALLOWED_USERNAMES; do
-            local name_lower
-            name_lower=$(echo "$name" | tr '[:upper:]' '[:lower:]')
-            [[ "$name_lower" == "$login_lower" ]] && return 0
         done
     fi
 

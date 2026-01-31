@@ -78,13 +78,13 @@
       "type": "object",
       "description": "PR review settings",
       "properties": {
-        "approved_authors": {
+        "approved_user_ids": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "integer"
           },
-          "default": ["copilot", "dependabot", "github-actions[bot]", "dependabot[bot]", "renovate[bot]", "codecov[bot]"],
-          "description": "List of comment authors to automatically include in reviews"
+          "default": [],
+          "description": "List of numeric GitHub user IDs whose comments are automatically included in reviews"
         },
         "fix_max_iterations": {
           "type": "integer",

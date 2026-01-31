@@ -20,6 +20,63 @@ source "$WIGGUM_HOME/lib/core/defaults.sh"
 source "$WIGGUM_HOME/lib/scheduler/conflict-queue.sh"
 source "$WIGGUM_HOME/lib/scheduler/batch-coordination.sh"
 
+# Seconds to wait for GitHub to report PR as mergeable after a push
+MERGE_POLL_TIMEOUT="${WIGGUM_MERGE_POLL_TIMEOUT:-30}"
+MERGE_POLL_INTERVAL="${WIGGUM_MERGE_POLL_INTERVAL:-5}"
+
+# Poll GitHub until PR mergeable status is determined
+#
+# After a push, GitHub returns mergeable=UNKNOWN while recalculating.
+# This function polls until GitHub resolves to MERGEABLE or CONFLICTING,
+# preventing the race condition where gh pr merge is called before
+# GitHub has processed the push.
+#
+# Args:
+#   pr_number - PR number to check
+#   task_id   - Task identifier (for logging)
+#
+# Returns:
+#   0 - PR is MERGEABLE
+#   1 - PR is CONFLICTING
+#   2 - Timeout or error (status unknown)
+_wait_for_mergeable() {
+    local pr_number="$1"
+    local task_id="$2"
+
+    local elapsed=0
+    local status
+
+    while [ "$elapsed" -lt "$MERGE_POLL_TIMEOUT" ]; do
+        status=$(gh pr view "$pr_number" --json mergeable -q '.mergeable' 2>/dev/null || echo "UNKNOWN")
+
+        case "$status" in
+            MERGEABLE)
+                log_debug "PR #$pr_number is mergeable for $task_id"
+                return 0
+                ;;
+            CONFLICTING)
+                log_debug "PR #$pr_number has conflicts for $task_id"
+                return 1
+                ;;
+            UNKNOWN|"")
+                # GitHub is still calculating - wait and retry
+                if [ "$elapsed" -eq 0 ]; then
+                    log_debug "Waiting for GitHub to calculate mergeable status for PR #$pr_number..."
+                fi
+                sleep "$MERGE_POLL_INTERVAL"
+                elapsed=$((elapsed + MERGE_POLL_INTERVAL))
+                ;;
+            *)
+                log_warn "Unexpected mergeable status '$status' for PR #$pr_number"
+                return 2
+                ;;
+        esac
+    done
+
+    log_warn "Timed out waiting for mergeable status for PR #$pr_number ($task_id) after ${elapsed}s"
+    return 2
+}
+
 # Clean up batch coordination state after a PR is merged
 #
 # When a PR is merged independently (not through batch resolution), we need to:
@@ -140,6 +197,41 @@ attempt_pr_merge() {
 
     log "Attempting merge for $task_id PR #$pr_number (attempt $merge_attempts/$MAX_MERGE_ATTEMPTS)"
 
+    # Wait for GitHub to determine mergeable status before attempting merge.
+    # After a push, GitHub returns UNKNOWN while recalculating - calling
+    # gh pr merge during this window fails with "not mergeable".
+    local poll_result=0
+    _wait_for_mergeable "$pr_number" "$task_id" || poll_result=$?
+
+    if [ "$poll_result" -eq 1 ]; then
+        # PR has conflicts - skip straight to conflict handling
+        log "PR #$pr_number has conflicts (detected before merge attempt)"
+        git_state_set_error "$worker_dir" "Merge conflict detected via mergeable status"
+        git_state_set "$worker_dir" "merge_conflict" "merge-manager.attempt_pr_merge" "PR has conflicts (pre-merge check)"
+
+        local affected_files='[]'
+        local workspace="$worker_dir/workspace"
+        if [ -d "$workspace" ]; then
+            local changed_files
+            changed_files=$(git -C "$workspace" diff --name-only origin/main 2>/dev/null | head -50 || true)
+            if [ -n "$changed_files" ]; then
+                affected_files=$(echo "$changed_files" | jq -R -s 'split("\n") | map(select(length > 0))')
+            fi
+        fi
+        conflict_queue_add "$ralph_dir" "$task_id" "$worker_dir" "$pr_number" "$affected_files"
+
+        if [ "$merge_attempts" -lt "$MAX_MERGE_ATTEMPTS" ]; then
+            git_state_set "$worker_dir" "needs_resolve" "merge-manager.attempt_pr_merge" "Conflict resolver required"
+            log "Merge conflict for $task_id - will spawn resolver"
+            return 1
+        else
+            git_state_set "$worker_dir" "failed" "merge-manager.attempt_pr_merge" "Max merge attempts ($MAX_MERGE_ATTEMPTS) exceeded"
+            log_error "Max merge attempts exceeded for $task_id"
+            return 2
+        fi
+    fi
+    # poll_result=2 (timeout/unknown) - proceed with merge attempt anyway
+
     local merge_output merge_exit=0
     # Don't use --delete-branch: worktrees conflict with local branch deletion
     # Branch cleanup happens when worktree is removed after merge
@@ -232,7 +324,18 @@ attempt_pr_merge() {
         fi
     fi
 
-    # Other merge failure
+    # "not mergeable" is transient after a push - GitHub may still be processing.
+    # Retry if we have attempts remaining instead of failing permanently.
+    if echo "$merge_output" | grep -qiE "not mergeable"; then
+        if [ "$merge_attempts" -lt "$MAX_MERGE_ATTEMPTS" ]; then
+            git_state_set_error "$worker_dir" "Transient: $merge_output"
+            git_state_set "$worker_dir" "needs_merge" "merge-manager.attempt_pr_merge" "PR not yet mergeable - will retry (attempt $merge_attempts/$MAX_MERGE_ATTEMPTS)"
+            log_warn "Merge not yet ready for $task_id (attempt $merge_attempts/$MAX_MERGE_ATTEMPTS) - will retry"
+            return 1
+        fi
+    fi
+
+    # Other merge failure (unrecoverable)
     git_state_set_error "$worker_dir" "Merge failed: $merge_output"
     git_state_set "$worker_dir" "failed" "merge-manager.attempt_pr_merge" "Merge failed: ${merge_output:0:100}"
     log_error "Merge failed for $task_id: $merge_output"
