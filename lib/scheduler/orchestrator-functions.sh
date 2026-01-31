@@ -1110,6 +1110,9 @@ _schedule_resume_workers() {
 
     log "Checking for stopped workers to resume..."
 
+    local pending_main_count=0
+    local pending_priority_count=0
+
     while read -r worker_dir task_id current_step worker_type; do
         [ -n "$worker_dir" ] || continue
 
@@ -1128,7 +1131,7 @@ _schedule_resume_workers() {
             local fix_count resolve_count total_priority
             fix_count=$(pool_count "fix")
             resolve_count=$(pool_count "resolve")
-            total_priority=$((fix_count + resolve_count))
+            total_priority=$((fix_count + resolve_count + pending_priority_count))
             if [ "$total_priority" -ge "$FIX_WORKER_LIMIT" ]; then
                 log "Priority workers at capacity ($total_priority/$FIX_WORKER_LIMIT) - deferring resume of $task_id"
                 continue
@@ -1136,8 +1139,8 @@ _schedule_resume_workers() {
         else
             local main_count
             main_count=$(pool_count "main")
-            if [ "$main_count" -ge "$MAX_WORKERS" ]; then
-                log "At capacity ($main_count/$MAX_WORKERS) - deferring remaining resumes"
+            if [ "$((main_count + pending_main_count))" -ge "$MAX_WORKERS" ]; then
+                log "At capacity ($((main_count + pending_main_count))/$MAX_WORKERS) - deferring remaining resumes"
                 break
             fi
         fi
@@ -1183,6 +1186,11 @@ _schedule_resume_workers() {
         # subprocess, so we cannot wait synchronously — it blocks 30+ seconds
         # per worker and delays _main_loop startup.
         _PENDING_RESUMES[$resume_pid]="$worker_dir|$task_id|$worker_type"
+        if [[ "$worker_type" == "fix" || "$worker_type" == "resolve" ]]; then
+            ((++pending_priority_count))
+        else
+            ((++pending_main_count))
+        fi
         log "Resume process launched for $task_id (resume PID: $resume_pid)"
     done <<< "$resumable"
 }
