@@ -494,8 +494,8 @@ pr_merge_gather_all() {
 
         # Skip workers with incomplete fix pipeline
         # Only merge PRs that either never entered fix flow (empty/none state)
-        # or explicitly completed it (needs_merge state)
-        if [ -n "$git_state" ] && [ "$git_state" != "none" ] && [ "$git_state" != "needs_merge" ]; then
+        # or completed it (needs_merge/fix_completed state)
+        if [ -n "$git_state" ] && [ "$git_state" != "none" ] && [ "$git_state" != "needs_merge" ] && [ "$git_state" != "fix_completed" ]; then
             log_debug "  Skipping $task_id: fix pipeline incomplete (state: $git_state)"
             continue
         fi
