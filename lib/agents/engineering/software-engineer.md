@@ -199,7 +199,8 @@ When ALL checklist items in the PRD are marked `[x]` (every single one — no ex
 AND the build passes, AND all tests pass:
 
 1. Mark the final "Mark this PRD as complete" meta-task as `[x]`
-2. Output: <result>PASS</result>
+2. Output: 
+<result>PASS</result>
 
 **IMPORTANT:** You must complete EVERY checklist item. Do not skip or defer any item.
 Do not output PASS if any `- [ ]` items remain unchecked.
