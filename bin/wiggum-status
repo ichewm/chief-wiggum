@@ -118,11 +118,12 @@ worker_count=0
 running_count=0
 declare -a worker_pids=()
 declare -a worker_names=()
+declare -a worker_types=()
 
-# Count total workers with PID files
+# Count total workers with PID files (agent.pid or resume.pid)
 for worker_dir in "$RALPH_DIR/workers"/worker-*; do
     [ -d "$worker_dir" ] || continue
-    [ -f "$worker_dir/agent.pid" ] || continue
+    [ -f "$worker_dir/agent.pid" ] || [ -f "$worker_dir/resume.pid" ] || continue
     ((++worker_count))
 done
 
@@ -133,15 +134,29 @@ scan_output=$(scan_active_workers "$RALPH_DIR") || {
         log_warn "Worker scan encountered lock contention, results may be incomplete"
     fi
 }
-while read -r pid _task_id worker_id; do
+while read -r pid _task_id worker_id pid_type; do
     [ -n "$pid" ] || continue
     ((++running_count))
     worker_pids+=("$pid")
     worker_names+=("$worker_id")
+    worker_types+=("$pid_type")
 done <<< "$scan_output"
 
-# Check if any workers are running
-if [ $running_count -eq 0 ]; then
+# Check orchestrator status
+orchestrator_running=false
+orchestrator_lock="$RALPH_DIR/orchestrator/orchestrator.pid"
+orchestrator_pid=""
+if [ -f "$orchestrator_lock" ]; then
+    orchestrator_pid=$(cat "$orchestrator_lock" 2>/dev/null)
+    if [[ "$orchestrator_pid" =~ ^[0-9]+$ ]] && kill -0 "$orchestrator_pid" 2>/dev/null; then
+        if ps -p "$orchestrator_pid" -o args= 2>/dev/null | grep -q "wiggum-run"; then
+            orchestrator_running=true
+        fi
+    fi
+fi
+
+# If neither orchestrator nor workers are running, exit early
+if [ $running_count -eq 0 ] && [ "$orchestrator_running" = "false" ]; then
     echo "No wiggum process running in this project"
     exit $EXIT_OK
 fi
@@ -150,19 +165,11 @@ echo "=== Chief Wiggum Status ==="
 echo "Project: $PROJECT_DIR"
 echo ""
 
-# Check orchestrator status
-orchestrator_lock="$RALPH_DIR/orchestrator/orchestrator.pid"
-if [ -f "$orchestrator_lock" ]; then
-    orchestrator_pid=$(cat "$orchestrator_lock" 2>/dev/null)
-    if [[ "$orchestrator_pid" =~ ^[0-9]+$ ]] && kill -0 "$orchestrator_pid" 2>/dev/null; then
-        if ps -p "$orchestrator_pid" -o args= 2>/dev/null | grep -q "wiggum-run"; then
-            echo "Orchestrator: RUNNING (PID: $orchestrator_pid)"
-        else
-            echo "Orchestrator: NOT RUNNING (stale lock)"
-        fi
-    else
-        echo "Orchestrator: NOT RUNNING (stale lock)"
-    fi
+# Display orchestrator status
+if [ "$orchestrator_running" = "true" ]; then
+    echo "Orchestrator: RUNNING (PID: $orchestrator_pid)"
+elif [ -f "$orchestrator_lock" ]; then
+    echo "Orchestrator: NOT RUNNING (stale lock)"
 else
     echo "Orchestrator: NOT RUNNING"
 fi
@@ -172,6 +179,7 @@ echo ""
 for i in "${!worker_pids[@]}"; do
     worker_name="${worker_names[$i]}"
     worker_pid="${worker_pids[$i]}"
+    worker_type="${worker_types[$i]}"
     worker_dir="$RALPH_DIR/workers/$worker_name"
 
     # Calculate running duration from worker start timestamp
@@ -183,6 +191,13 @@ for i in "${!worker_pids[@]}"; do
         if ((duration >= 0)); then
             duration_info=" [$(format_duration "$duration")]"
         fi
+    fi
+
+    # Determine status label based on PID type
+    if [ "$worker_type" = "resume" ]; then
+        status_label="RESUMING"
+    else
+        status_label="RUNNING"
     fi
 
     # Get pipeline info if available
@@ -202,7 +217,7 @@ for i in "${!worker_pids[@]}"; do
         fi
     fi
 
-    echo "✓ Worker $worker_name (PID: $worker_pid) - RUNNING$duration_info$pipeline_info$context_info"
+    echo "✓ Worker $worker_name (PID: $worker_pid) - ${status_label}${duration_info}${pipeline_info}${context_info}"
 done
 
 echo ""

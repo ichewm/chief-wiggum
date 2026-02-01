@@ -397,7 +397,7 @@ scheduler_detect_orphan_workers() {
         fi
     }
 
-    while read -r worker_pid task_id worker_id; do
+    while read -r worker_pid task_id worker_id _pid_type; do
         [ -n "$worker_pid" ] || continue
 
         # Check if this PID is already tracked

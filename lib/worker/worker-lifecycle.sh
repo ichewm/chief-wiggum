@@ -153,9 +153,9 @@ get_valid_worker_pid() {
 # Returns: 0 if running, 1 if not
 is_worker_running() {
     local worker_dir="$1"
-    local pid_file="$worker_dir/agent.pid"
 
-    get_valid_worker_pid "$pid_file" "bash" > /dev/null 2>&1
+    get_valid_worker_pid "$worker_dir/agent.pid" "bash" > /dev/null 2>&1 && return 0
+    get_valid_worker_pid "$worker_dir/resume.pid" "bash" > /dev/null 2>&1
 }
 
 # Get worker PID or return error
@@ -226,7 +226,8 @@ get_task_id_from_worker() {
 
 # Scan for active workers and return their info
 # Args: <ralph_dir>
-# Outputs lines of: <pid> <task_id> <worker_id>
+# Outputs lines of: <pid> <task_id> <worker_id> <pid_type>
+#   pid_type is "agent" (normal running) or "resume" (resume in progress)
 # Uses file locking to prevent race conditions during PID cleanup
 scan_active_workers() {
     local ralph_dir="$1"
@@ -246,21 +247,33 @@ scan_active_workers() {
         for worker_dir in "$ralph_dir/workers"/worker-*; do
             [ -d "$worker_dir" ] || continue
 
-            local pid_file="$worker_dir/agent.pid"
-            [ -f "$pid_file" ] || continue
-
             local worker_id
             worker_id=$(basename "$worker_dir")
             local task_id
             task_id=$(get_task_id_from_worker "$worker_id")
 
-            local pid
-            pid=$(get_valid_worker_pid "$pid_file" "bash") || true
+            # Check agent.pid first, then resume.pid as fallback
+            local pid="" pid_type=""
+            if [ -f "$worker_dir/agent.pid" ]; then
+                pid=$(get_valid_worker_pid "$worker_dir/agent.pid" "bash") || true
+                if [ -n "$pid" ]; then
+                    pid_type="agent"
+                else
+                    rm -f "$worker_dir/agent.pid"
+                fi
+            fi
+
+            if [ -z "$pid" ] && [ -f "$worker_dir/resume.pid" ]; then
+                pid=$(get_valid_worker_pid "$worker_dir/resume.pid" "bash") || true
+                if [ -n "$pid" ]; then
+                    pid_type="resume"
+                else
+                    rm -f "$worker_dir/resume.pid"
+                fi
+            fi
+
             if [ -n "$pid" ]; then
-                echo "$pid $task_id $worker_id"
-            else
-                # Clean up stale PID file (atomic within lock)
-                rm -f "$pid_file"
+                echo "$pid $task_id $worker_id $pid_type"
             fi
         done
 
@@ -484,7 +497,7 @@ terminate_all_workers() {
         fi
     }
 
-    while read -r pid _task_id worker_id; do
+    while read -r pid _task_id worker_id _pid_type; do
         [ -n "$pid" ] || continue
         worker_pids_map[$pid]="$worker_id"
     done <<< "$scan_output"
@@ -557,7 +570,7 @@ force_kill_remaining_workers() {
     local scan_output
     scan_output=$(scan_active_workers "$ralph_dir" 2>/dev/null) || true
 
-    while read -r pid _task_id worker_id; do
+    while read -r pid _task_id worker_id _pid_type; do
         [ -n "$pid" ] || continue
         if kill -0 "$pid" 2>/dev/null; then
             echo "Force killing $worker_id (PID $pid)"

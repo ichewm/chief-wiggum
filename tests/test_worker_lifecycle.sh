@@ -369,6 +369,65 @@ test_wait_for_worker_pid_timeout() {
 }
 
 # =============================================================================
+# resume.pid detection tests
+# =============================================================================
+
+test_is_worker_running_true_when_resuming() {
+    local worker_dir="$RALPH_DIR/workers/worker-TASK-010-12345"
+    mkdir -p "$worker_dir"
+
+    # Start a background bash process that stays as bash
+    bash -c 'while true; do sleep 1; done' &
+    local pid=$!
+    echo "$pid" > "$worker_dir/resume.pid"
+
+    _wait_pid_ready $pid
+
+    is_worker_running "$worker_dir"
+    local result=$?
+
+    # Clean up
+    kill $pid 2>/dev/null || true
+    wait $pid 2>/dev/null || true
+
+    assert_equals "0" "$result" "Should return 0 when worker has resume.pid"
+}
+
+test_scan_active_workers_finds_resuming() {
+    local worker_dir="$RALPH_DIR/workers/worker-TASK-011-12345"
+    mkdir -p "$worker_dir"
+
+    # Start a background bash process that stays as bash
+    bash -c 'while true; do sleep 1; done' &
+    local pid=$!
+    echo "$pid" > "$worker_dir/resume.pid"
+
+    _wait_pid_ready $pid
+
+    local result
+    result=$(scan_active_workers "$RALPH_DIR")
+
+    # Clean up
+    kill $pid 2>/dev/null || true
+    wait $pid 2>/dev/null || true
+
+    assert_output_contains "$result" "$pid" "Should include resuming worker PID"
+    assert_output_contains "$result" "TASK-011" "Should include task ID"
+    assert_output_contains "$result" "resume" "Should indicate resume pid type"
+}
+
+test_scan_active_workers_cleans_stale_resume_pid() {
+    local worker_dir="$RALPH_DIR/workers/worker-TASK-012-99999"
+    mkdir -p "$worker_dir"
+    echo "99999999" > "$worker_dir/resume.pid"
+
+    scan_active_workers "$RALPH_DIR" > /dev/null
+
+    # The stale resume.pid file should be removed
+    assert_file_not_exists "$worker_dir/resume.pid" "Should clean stale resume.pid file"
+}
+
+# =============================================================================
 # Run All Tests
 # =============================================================================
 
@@ -414,6 +473,11 @@ run_test test_scan_active_workers_cleans_stale
 # wait_for_worker_pid tests
 run_test test_wait_for_worker_pid_immediate
 run_test test_wait_for_worker_pid_timeout
+
+# resume.pid detection tests
+run_test test_is_worker_running_true_when_resuming
+run_test test_scan_active_workers_finds_resuming
+run_test test_scan_active_workers_cleans_stale_resume_pid
 
 print_test_summary
 exit_with_test_result

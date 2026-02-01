@@ -153,6 +153,23 @@ do_resume() {
         fi
     fi
 
+    # Check if resume already in progress
+    if [ -f "$worker_dir/resume.pid" ]; then
+        local resume_pid
+        resume_pid=$(cat "$worker_dir/resume.pid" 2>/dev/null)
+        if [[ "$resume_pid" =~ ^[0-9]+$ ]] && kill -0 "$resume_pid" 2>/dev/null; then
+            echo "Error: Resume already in progress for $worker_id (PID: $resume_pid)"
+            exit $EXIT_ERROR
+        fi
+        # Stale resume.pid — clean up
+        rm -f "$worker_dir/resume.pid"
+    fi
+
+    # Track this resume process so wiggum-status can detect it
+    echo "$$" > "$worker_dir/resume.pid"
+    # shellcheck disable=SC2064
+    trap "rm -f '${worker_dir}/resume.pid'" EXIT
+
     # Check main repo is clean (prevents workspace violations)
     local dirty_files
     dirty_files=$(cd "$PROJECT_DIR" && git status --porcelain 2>/dev/null | grep -v "^.. .ralph/" || true)

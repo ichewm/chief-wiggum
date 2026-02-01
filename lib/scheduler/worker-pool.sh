@@ -480,7 +480,7 @@ pool_restore_from_workers() {
         fi
     }
 
-    while read -r worker_pid task_id _worker_id; do
+    while read -r worker_pid task_id _worker_id _pid_type; do
         [ -n "$worker_pid" ] || continue
 
         # Get worker creation time from directory
