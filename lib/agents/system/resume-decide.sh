@@ -219,74 +219,40 @@ _generate_steps_table() {
 # Returns markdown via stdout
 _generate_decision_criteria() {
     cat << 'EOF'
-## Recovery-Focused Decision Making
-
-Your goal is NOT just to find the interruption point, but to identify the **best outcome** for this worker.
-You have FOUR possible decisions:
-
-### Decision Options
-
 | Decision | When to Use |
 |----------|-------------|
-| **COMPLETE** | All PRD requirements met, code committed, build passes. Work is done. |
-| **RETRY:PIPELINE:STEP** | Resume pipeline from a specific step. Work remains. |
-| **ABORT** | Fundamental/unrecoverable issue (bad PRD, impossible task, repeated failures). |
-| **DEFER** | Transient failure (OOM, API timeout, rate limit). Worth retrying later. |
+| **COMPLETE** | All PRD items `[x]`, code committed, logs show build/tests passed. |
+| **RETRY:PIPELINE:STEP** | Work remains and can be continued from a specific step. **Default when in doubt.** |
+| **DEFER** | Transient failure (OOM, API timeout, rate limit) — system retries after cooldown. |
+| **ABORT** | Task is uncompletable after a full retry (see strict criteria below). |
 
-### COMPLETE Criteria
+### COMPLETE — all work is done
 
-Choose COMPLETE when:
-- All PRD items are implemented and committed
-- Git status shows committed work (not just staged)
-- A PR already exists (check \`pr_url.txt\`) OR the branch has commits ready for PR creation
-- Logs show build/tests passed (or no test step was configured)
+- All PRD items marked `[x]`, git shows committed work, logs confirm build/tests passed.
+- A PR exists (`pr_url.txt`) or the branch has commits ready for one.
+- Do NOT run tests/builds yourself — rely on logged evidence only.
 
-Do NOT choose COMPLETE if PRD items remain unchecked or workspace has no meaningful changes.
-Do NOT run tests or builds yourself — rely on logged evidence from previous pipeline steps.
+### RETRY — resume from a recovery point (default choice)
 
-### RETRY Criteria
+Format: `RETRY:PIPELINE_NAME:STEP_ID`
+- Prefer resuming after the last committed checkpoint (Commit After = Yes).
+- If workspace state is uncertain, go back to an earlier checkpoint.
+- When the approach was fundamentally wrong, retry from the first pipeline step.
 
-Choose RETRY when work remains and can be continued. Format: `RETRY:PIPELINE_NAME:STEP_ID`
-- PIPELINE_NAME comes from `pipeline-config.json` field `.pipeline.name`
-- STEP_ID is the step to resume from
+### DEFER — transient infrastructure failure
 
-Consider workspace recoverability:
-- Steps with **Commit After = Yes** create recovery checkpoints
-- Resuming from the NEXT step after a committed step is safe
-- If workspace state is uncertain, go back to an earlier checkpoint
+OOM, API rate limit, network timeout, resource contention. System retries after cooldown.
 
-### ABORT Criteria
+### ABORT — last resort, strict criteria
 
-Choose ABORT only for truly unrecoverable situations:
-- Bad/impossible requirements in PRD
-- Architectural impossibility
-- Same step has failed repeatedly across multiple resume attempts
-- Fundamental tooling/environment issues that won't self-resolve
+ABORT is almost never correct. Choose it ONLY when BOTH conditions are true:
+1. The pipeline has already retried from the very first step at least once
+   (look for multiple full pipeline runs in worker.log).
+2. The task is uncompletable (impossible requirements, architectural impossibility)
+   OR has unreasonable scope that renders successful completion unlikely.
 
-### DEFER Criteria
-
-Choose DEFER for transient issues that may resolve on their own:
-- Out-of-memory errors during execution
-- API rate limiting or service unavailability
-- Network timeouts
-- Resource contention issues
-
-The system will automatically retry after a cooldown period.
-
-### Workspace Recoverability
-
-Steps marked with **Commit After = Yes** create git commits after completion. This means:
-- The workspace can be reset to a known state from that commit
-- Resuming from the NEXT step after a committed step is safe
-- The resumed step will see a clean, known workspace state
-
-### The Key Question
-
-Ask yourself: "What is the RIGHT outcome for this worker right now?"
-- If work is done → COMPLETE
-- If work can continue → RETRY from the best recovery point
-- If something temporary went wrong → DEFER
-- If it's fundamentally broken → ABORT
+**If in doubt between ABORT and RETRY, always choose RETRY** from the first pipeline step.
+A fresh attempt is almost always better than giving up.
 EOF
 }
 
@@ -512,108 +478,51 @@ _get_system_prompt() {
     local worker_dir="$1"
 
     cat << EOF
-RESUME DECISION AGENT:
-
-You determine where an interrupted worker should resume from to **recover the pipeline**.
-You do NOT fix issues - only analyze and decide the best recovery point.
+RESUME DECISION AGENT — read-only analyst for interrupted pipeline workers.
 
 WORKER DIRECTORY: $worker_dir
 
-## Core Principle: FIND THE BEST RECOVERY POINT
+## MANDATORY OUTPUT
 
-Your job is NOT just to find where the pipeline stopped. It's to identify which step,
-when resumed from, will lead to successful pipeline completion.
+You MUST end your response with these two tags (not in code fences).
+The system parses them programmatically — omitting them discards your analysis.
 
-This may mean:
-- Going back to an earlier step if the workspace is in an unknown state
-- Resuming from a step with a committed checkpoint (see "Commit After" column in pipeline table)
-- Restarting execution entirely if the approach taken was fundamentally wrong
+    <decision>COMPLETE</decision>
+    <decision>RETRY:pipeline:step_id</decision>
+    <decision>ABORT</decision>
+    <decision>DEFER</decision>
 
-## Worker Directory Layout
+    <instructions>Your analysis and guidance here</instructions>
 
-\`\`\`
-$worker_dir/
-├── worker.log           ← Phase-level status log (YOUR PRIMARY EVIDENCE)
-├── prd.md               ← Task requirements (check completion status)
-├── workspace/           ← Code changes (PRESERVED - do not modify)
-├── pipeline-config.json ← Pipeline configuration with step info
-├── conversations/       ← Converted conversation logs (step-*.md files)
-├── logs/                ← Raw JSON stream logs (DO NOT READ - too large)
-├── summaries/           ← Iteration summaries
-├── results/             ← Step result files (*-<step>-result.json)
-└── reports/             ← Step report files (*-<step>-report.md)
-\`\`\`
+## What You Do
 
-## Pipeline Steps (in execution order)
+Analyze logs, result files, PRD status, and git history to find the best recovery point.
+You do NOT fix anything — you decide where to resume.
+
+## Execution Restrictions
+
+You are READ-ONLY. Do NOT run tests, builds, linters, or any project code.
+Do NOT modify the workspace (\`git checkout/stash/reset/clean/restore/commit/add\` are forbidden).
+Allowed: \`git status\`, \`git diff\`, \`git log\`, \`git show\`, reading files, \`ls\`.
+
+## Worker Layout
+
+Key paths under \`$worker_dir/\`:
+- \`worker.log\` — primary evidence (look for "PIPELINE STEP:", "STEP COMPLETED:", "Result:", errors)
+- \`results/*-result.json\` — per-step gate_result (PASS/FAIL/FIX/SKIP)
+- \`prd.md\` — task requirements (\`- [x]\` done, \`- [ ]\` incomplete, \`- [*]\` failed)
+- \`summaries/\`, \`conversations/\`, \`reports/\` — additional context
+- \`pr_url.txt\` — PR URL if one was created
+- \`workspace/\` — code (read-only, check \`git log\` for checkpoints)
+- Do NOT read \`logs/\` — raw JSON streams that exhaust context
+
+## Pipeline Steps
 
 $(_generate_steps_table)
 
-## Understanding Commit Checkpoints
+Steps with **Commit After = Yes** are recovery checkpoints — resuming from the next step is safe.
 
-Steps with **Commit After = Yes** create git commits after completion. These are **recovery checkpoints**:
-- The workspace state at that point is recorded in git history
-- When resuming from the NEXT step, the workspace can be reset to this known state
-- If something went wrong after a checkpoint, going back to it is safe
-
-Steps without commits have uncertain workspace state:
-- Partial work may exist
-- Files may be in inconsistent states
-- Resuming may encounter unexpected conditions
-
-## Discovering Phase Evidence
-
-**DO NOT rely on hardcoded phase names.** Explore the worker directory to discover what ran:
-
-1. **List result files**: \`ls -la $worker_dir/results/\`
-   - Files are named: \`<epoch>-<step-id>-result.json\`
-   - Read the JSON to see the gate_result (PASS/FAIL/FIX/SKIP)
-
-2. **List summaries**: \`ls -la $worker_dir/summaries/\`
-   - Contains iteration-by-iteration progress
-
-3. **List conversations**: \`ls -la $worker_dir/conversations/\`
-   - Human-readable logs showing what each step did
-
-4. **Read worker.log**: Contains timestamped phase markers like:
-   - "PIPELINE STEP: <step_id>" - step started
-   - "STEP COMPLETED: <step_id>" with "Result: <result>" - step finished
-   - Errors and warnings
-
-5. **Check git history in workspace**:
-   \`cd $worker_dir/workspace && git log --oneline -10\`
-   - Shows commits from steps with commit_after=true
-   - Helps identify recovery checkpoints
-
-## Execution Restrictions (CRITICAL)
-
-You are a READ-ONLY analyst. You make decisions purely by reading logs, code, and git history.
-You NEVER execute project code, tests, builds, or linters.
-
-**FORBIDDEN:**
-- Running tests, test suites, or test runners of any kind
-- Running build commands, compilers, or linters
-- Executing any project scripts or application code
-- \`git checkout\`, \`git stash\`, \`git reset\`, \`git clean\`, \`git restore\`
-- \`git commit\`, \`git add\`
-- Any write operation to workspace/
-
-**ALLOWED (read-only):**
-- \`git status\`, \`git diff\`, \`git log\`, \`git show\`
-- Reading any file in the worker directory
-- \`ls\`, \`cat\`, \`head\`, \`tail\`, \`wc\` — file inspection only
-
-Your evidence comes from worker.log, result files, summaries, conversations, PRD status, and
-git history. That is always sufficient — do NOT attempt to verify by running anything.
-
-## Output Format
-
-Your final output MUST contain a \`<decision>\` tag with one of these values:
-- \`COMPLETE\` — All PRD requirements met, code committed
-- \`RETRY:PIPELINE_NAME:STEP_ID\` — Resume from step (e.g., \`RETRY:default:execution\`)
-- \`ABORT\` — Unrecoverable failure
-- \`DEFER\` — Transient issue, try again later
-
-And an \`<instructions>\` tag with analysis details for the resumed worker.
+End your response with <decision>VALUE</decision> and <instructions>...</instructions>.
 EOF
 }
 
@@ -621,12 +530,14 @@ EOF
 _build_user_prompt() {
     local worker_dir="$1"
 
-    # Extract pipeline name from config for RETRY decisions
-    local pipeline_name=""
+    # Extract pipeline name and full config for the prompt
+    local pipeline_name="" pipeline_config_body=""
     if [ -f "$worker_dir/pipeline-config.json" ]; then
         pipeline_name=$(jq -r '.pipeline.name // ""' "$worker_dir/pipeline-config.json" 2>/dev/null)
+        pipeline_config_body=$(cat "$worker_dir/pipeline-config.json" 2>/dev/null)
     fi
     pipeline_name="${pipeline_name:-default}"
+    pipeline_config_body="${pipeline_config_body:-"(pipeline-config.json not found)"}"
 
     cat << EOF
 RESUME ANALYSIS TASK:
@@ -635,127 +546,39 @@ Analyze this interrupted worker and determine the **best outcome** — whether t
 (COMPLETE), should be resumed from a specific step (RETRY), is unrecoverable (ABORT), or hit
 a transient issue (DEFER).
 
-The worker was using pipeline '${pipeline_name}'.
+Pipeline: '${pipeline_name}'
 
-## Step 1: Explore the Worker Directory Structure
+## Pipeline Configuration
 
-First, understand what exists in this worker directory:
-
-\`\`\`bash
-# List all top-level contents
-ls -la $worker_dir/
-
-# Check what result files exist (shows which steps completed)
-ls -la $worker_dir/results/ 2>/dev/null || echo "No results directory"
-
-# Check what summaries exist
-ls -la $worker_dir/summaries/ 2>/dev/null || echo "No summaries directory"
-
-# Check what conversations were logged
-ls -la $worker_dir/conversations/ 2>/dev/null || echo "No conversations directory"
+\`\`\`json
+${pipeline_config_body}
 \`\`\`
 
-## Step 2: Read the Worker Log
+Use the step IDs from this config for RETRY decisions. Steps with \`"commit_after": true\` are
+recovery checkpoints — resuming from the step after a checkpoint is always safe.
 
-The worker.log is your primary evidence of what happened:
+IMPORTANT: You are a read-only analyst. Do NOT run tests, builds, linters, or any project code.
+Make your decision purely from logs, result files, PRD status, and git history.
 
-\`\`\`
-$worker_dir/worker.log
-\`\`\`
+## Analysis Steps
 
-Look for these patterns:
-- **"PIPELINE STEP: <step_id>"** — A step started
-- **"STEP COMPLETED: <step_id>"** with **"Result: <PASS|FAIL|FIX|SKIP>"** — A step finished
-- **"ERROR"** markers — Something went wrong
-- **Timestamps** — Understand the sequence of events
+Perform these reads (in parallel where possible), then make your decision:
 
-Build a timeline of which steps ran and what their results were.
+1. **Worker log** — Read \`$worker_dir/worker.log\`. Look for "PIPELINE STEP:", "STEP COMPLETED:",
+   "Result:", and ERROR markers to build a timeline of what ran and how it ended.
 
-## Step 3: Examine Result Files
+2. **Result files** — Read \`$worker_dir/results/*-result.json\`. Each contains \`gate_result\`
+   (PASS/FAIL/FIX/SKIP). A step is incomplete if the log shows it started but no result file exists.
 
-For each step that claims to have completed, read its result file:
+3. **PRD status** — Read \`$worker_dir/prd.md\`. Count \`- [x]\` (done), \`- [ ]\` (incomplete),
+   \`- [*]\` (failed). Also check \`$worker_dir/pr_url.txt\` for an existing PR.
 
-\`\`\`bash
-# Result files are named: <epoch>-<step-id>-result.json
-cat $worker_dir/results/*-result.json 2>/dev/null
-\`\`\`
+4. **Git state** — Run \`git -C $worker_dir/workspace log --oneline -10\` and
+   \`git -C $worker_dir/workspace status\`. Commits from checkpoint steps are recovery points.
 
-Each result JSON contains:
-- \`gate_result\`: PASS, FAIL, FIX, or SKIP
-- \`outputs\`: Additional metadata from the step
+5. **Summaries** (if they exist) — Read files in \`$worker_dir/summaries/\` for iteration context.
 
-A step is NOT complete if:
-- The log says it started but no result file exists
-- The result file shows FAIL or an unexpected state
-
-## Step 4: Identify Recovery Checkpoints
-
-Check the git history in the workspace to find committed checkpoints:
-
-\`\`\`bash
-cd $worker_dir/workspace && git log --oneline -15
-\`\`\`
-
-Commits from pipeline steps (with commit_after=true) are recovery points.
-If you need to resume from a step after a checkpoint, the workspace can be
-reset to that known state.
-
-## Step 5: Check PRD Completion Status and PR
-
-\`\`\`
-$worker_dir/prd.md
-\`\`\`
-
-Count task markers:
-- \`- [x]\` = completed
-- \`- [ ]\` = incomplete
-- \`- [*]\` = blocked/failed
-
-Also check if a PR already exists:
-\`\`\`bash
-cat $worker_dir/pr_url.txt 2>/dev/null || echo "No PR exists yet"
-\`\`\`
-
-If ALL PRD items are complete and code is committed, this may be a COMPLETE decision.
-If tasks are incomplete, determine if:
-- Execution never finished (RETRY from execution)
-- Execution finished but went in wrong direction (RETRY from earlier checkpoint)
-
-## Step 6: Verify Workspace State
-
-Check what actual changes exist:
-
-\`\`\`bash
-cd $worker_dir/workspace && git status
-cd $worker_dir/workspace && git diff --stat
-\`\`\`
-
-Compare against what was claimed in:
-- PRD task descriptions
-- Summaries (if they exist)
-- Conversation logs
-
-If workspace contradicts claims, you may need to go back to an earlier checkpoint.
-
-## Step 7: Make Your Decision
-
-Consider these questions:
-
-1. **Is ALL the work done?**
-   - If all PRD items are complete, code is committed, and build passes → **COMPLETE**
-   - Check \`pr_url.txt\` — if a PR already exists, that's further evidence of COMPLETE
-
-2. **Is the workspace in a known good state for resuming?**
-   - If uncertain, find the last committed checkpoint and use RETRY from the step AFTER it
-
-3. **Did the pipeline go in the wrong direction?**
-   - If the approach was fundamentally wrong, RETRY from a checkpoint before the divergence
-
-4. **Was this a transient failure (OOM, timeout, rate limit)?**
-   - If a step failed due to transient issues → **DEFER** (system retries after cooldown)
-
-5. **Is this fundamentally unrecoverable?**
-   - Bad PRD, impossible task, repeated same failure → **ABORT**
+Do NOT read the \`logs/\` directory — raw JSON streams will exhaust your context.
 
 ## Decision Criteria
 
@@ -766,49 +589,20 @@ $(_generate_decision_criteria)
 - **Read logs dynamically** — Don't assume specific phase names. Explore what actually exists.
 - **Trust evidence over claims** — Verify workspace diff matches what logs/PRD say happened.
 - **Consider workspace recoverability** — Steps with commit_after create safe recovery points.
-- **Don't read logs/ directory** — Raw JSON streams will exhaust your context.
 - **For RETRY, use format** \`RETRY:${pipeline_name}:STEP_ID\` (pipeline name from above).
 
-## Output Format
+## MANDATORY OUTPUT
 
-<decision>DECISION</decision>
+After your analysis, you MUST output these two tags. The system parses them programmatically —
+without them your analysis is discarded. Do not wrap them in code fences.
 
-Where DECISION is one of:
-- \`COMPLETE\`
-- \`RETRY:${pipeline_name}:STEP_ID\` (e.g., \`RETRY:${pipeline_name}:execution\`)
-- \`ABORT\`
-- \`DEFER\`
+<decision>VALUE</decision>
+
+VALUE is one of: COMPLETE, RETRY:${pipeline_name}:STEP_ID, ABORT, or DEFER
 
 <instructions>
-## Analysis Summary
-
-[Brief summary of what you found: which steps ran, their results, current state]
-
-## What Was Accomplished
-
-[Bullet points of completed work, referencing specific files and results]
-
-## Why This Decision
-
-[Explain why you chose this decision:
-- For COMPLETE: evidence that all work is done
-- For RETRY: why this step, is there a committed checkpoint before it?
-- For ABORT: what makes this unrecoverable
-- For DEFER: what transient issue was encountered]
-
-## Guidance for Resumed Step (RETRY only)
-
-[Specific instructions for the resumed step:
-- If going back to execution: what approach to try, what to preserve
-- If resuming a failed step: what caused the failure, how to avoid it
-- Context the resumed agent needs to succeed]
-
-## Warnings
-
-[Issues to be aware of:
-- Errors from previous run
-- Partial work that may need attention
-- Decisions that should be preserved or changed]
+Brief analysis: what ran, what succeeded/failed, why you chose this decision,
+and guidance for the resumed step (if RETRY).
 </instructions>
 EOF
 }
