@@ -93,7 +93,7 @@ test_wait_for_mergeable_returns_2_on_timeout() {
     MERGE_POLL_INTERVAL=1
 
     local result=0
-    _wait_for_mergeable 42 "TASK-001" || result=$?
+    _wait_for_mergeable 42 "TASK-001" 2>/dev/null || result=$?
 
     assert_equals "2" "$result" "Should return 2 on timeout"
 }
@@ -133,7 +133,7 @@ test_wait_for_mergeable_returns_2_on_unexpected_status() {
     _mock_gh 'echo "WEIRD_STATUS"'
 
     local result=0
-    _wait_for_mergeable 42 "TASK-001" || result=$?
+    _wait_for_mergeable 42 "TASK-001" 2>/dev/null || result=$?
 
     assert_equals "2" "$result" "Should return 2 on unexpected status"
 }
@@ -142,7 +142,7 @@ test_wait_for_mergeable_returns_2_on_gh_failure() {
     _mock_gh 'exit 1'
 
     local result=0
-    _wait_for_mergeable 42 "TASK-001" || result=$?
+    _wait_for_mergeable 42 "TASK-001" 2>/dev/null || result=$?
 
     # gh failure produces empty string which maps to UNKNOWN, then times out
     assert_equals "2" "$result" "Should return 2 when gh fails"
@@ -166,7 +166,7 @@ GHEOF
     chmod +x "$MOCK_BIN/gh"
 
     local result=0
-    attempt_pr_merge "$WORKER_DIR" "TASK-001" "$RALPH_DIR" || result=$?
+    attempt_pr_merge "$WORKER_DIR" "TASK-001" "$RALPH_DIR" 2>/dev/null || result=$?
 
     # Should return 1 (retryable) not 2 (permanent failure)
     assert_equals "1" "$result" "not mergeable should be retryable"
@@ -194,7 +194,7 @@ GHEOF
     chmod +x "$MOCK_BIN/gh"
 
     local result=0
-    attempt_pr_merge "$WORKER_DIR" "TASK-001" "$RALPH_DIR" || result=$?
+    attempt_pr_merge "$WORKER_DIR" "TASK-001" "$RALPH_DIR" 2>/dev/null || result=$?
 
     # At max attempts, should be permanent failure
     assert_equals "2" "$result" "Should be permanent failure at max attempts"

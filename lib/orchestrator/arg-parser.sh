@@ -40,6 +40,10 @@ _parse_run_args() {
                 WIGGUM_RUN_MODE="merge-only"
                 shift
                 ;;
+            --resume-only)
+                WIGGUM_RUN_MODE="resume-only"
+                shift
+                ;;
             --max-workers)
                 if [[ -z "${2:-}" ]] || [[ "${2:-}" =~ ^- ]]; then
                     echo "Error: --max-workers requires a number argument"

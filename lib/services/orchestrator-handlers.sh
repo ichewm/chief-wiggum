@@ -207,6 +207,8 @@ svc_orch_init_terminal() {
         mode_desc="fix-only"
     elif [[ "$WIGGUM_RUN_MODE" == "merge-only" ]]; then
         mode_desc="merge-only"
+    elif [[ "$WIGGUM_RUN_MODE" == "resume-only" ]]; then
+        mode_desc="resume-only"
     elif [ "${WIGGUM_SMART_MODE:-false}" = "true" ]; then
         mode_desc="smart"
     elif [ "${WIGGUM_PLAN_MODE:-false}" = "true" ]; then

@@ -257,7 +257,7 @@ test_pipeline_on_result_fail_abort() {
 
     : > "$TEST_DIR/agent_invocations.txt"
     local exit_code=0
-    pipeline_run_all "$TEST_DIR/worker" "$TEST_DIR/project" "$TEST_DIR/worker/workspace" "" || exit_code=$?
+    pipeline_run_all "$TEST_DIR/worker" "$TEST_DIR/project" "$TEST_DIR/worker/workspace" "" 2>/dev/null || exit_code=$?
 
     assert_equals "1" "$exit_code" "Pipeline should return 1 on FAIL->abort"
 
@@ -286,7 +286,7 @@ test_pipeline_no_handler_continues() {
 
     : > "$TEST_DIR/agent_invocations.txt"
     local exit_code=0
-    pipeline_run_all "$TEST_DIR/worker" "$TEST_DIR/project" "$TEST_DIR/worker/workspace" "" || exit_code=$?
+    pipeline_run_all "$TEST_DIR/worker" "$TEST_DIR/project" "$TEST_DIR/worker/workspace" "" 2>/dev/null || exit_code=$?
 
     assert_equals "1" "$exit_code" "Pipeline should abort on FAIL without explicit handler"
 
@@ -342,7 +342,7 @@ test_pipeline_max_visits_abort() {
 
     : > "$TEST_DIR/agent_invocations.txt"
     local exit_code=0
-    pipeline_run_all "$TEST_DIR/worker" "$TEST_DIR/project" "$TEST_DIR/worker/workspace" "" || exit_code=$?
+    pipeline_run_all "$TEST_DIR/worker" "$TEST_DIR/project" "$TEST_DIR/worker/workspace" "" 2>/dev/null || exit_code=$?
 
     assert_equals "1" "$exit_code" "Pipeline should abort when max visits exceeded"
 
@@ -533,7 +533,7 @@ test_pipeline_stop_aborts() {
 
     : > "$TEST_DIR/agent_invocations.txt"
     local exit_code=0
-    pipeline_run_all "$TEST_DIR/worker" "$TEST_DIR/project" "$TEST_DIR/worker/workspace" "" || exit_code=$?
+    pipeline_run_all "$TEST_DIR/worker" "$TEST_DIR/project" "$TEST_DIR/worker/workspace" "" 2>/dev/null || exit_code=$?
 
     assert_equals "1" "$exit_code" "Pipeline should abort on STOP with abort handler"
 
@@ -566,7 +566,7 @@ test_pipeline_on_max_loop_detection() {
 
     : > "$TEST_DIR/agent_invocations.txt"
     local exit_code=0
-    pipeline_run_all "$TEST_DIR/worker" "$TEST_DIR/project" "$TEST_DIR/worker/workspace" "" || exit_code=$?
+    pipeline_run_all "$TEST_DIR/worker" "$TEST_DIR/project" "$TEST_DIR/worker/workspace" "" 2>/dev/null || exit_code=$?
 
     # Flow:
     # 1. step-a runs (visit 1), FAIL → jump:self
@@ -736,7 +736,7 @@ test_pipeline_aborts_on_missing_workspace() {
 
     : > "$TEST_DIR/agent_invocations.txt"
     local exit_code=0
-    pipeline_run_all "$TEST_DIR/worker" "$TEST_DIR/project" "$TEST_DIR/nonexistent-workspace" "" || exit_code=$?
+    pipeline_run_all "$TEST_DIR/worker" "$TEST_DIR/project" "$TEST_DIR/nonexistent-workspace" "" 2>/dev/null || exit_code=$?
 
     assert_equals "1" "$exit_code" "Should return 1 when workspace doesn't exist"
 }

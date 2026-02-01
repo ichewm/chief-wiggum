@@ -159,7 +159,7 @@ EOF
 
     scheduler_init "$RALPH_DIR" "$TEST_DIR"
     local result=0
-    scheduler_detect_cycles || result=$?
+    scheduler_detect_cycles 2>/dev/null || result=$?
 
     assert_equals "1" "$result" "Should detect self-dependency"
 }

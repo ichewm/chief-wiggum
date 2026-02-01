@@ -65,7 +65,7 @@ AGING_FACTOR=7         # Scheduling events per priority level promotion
 SIBLING_WIP_PENALTY=20000  # Fixed-point penalty when sibling is WIP (20000 = 2.0)
 PLAN_BONUS=15000           # Fixed-point bonus for tasks with plans (15000 = 1.5)
 DEP_BONUS_PER_TASK=7000    # Fixed-point bonus per task blocked (7000 = 0.7)
-WIGGUM_RUN_MODE="default"  # default | fix-only | merge-only
+WIGGUM_RUN_MODE="default"  # default | fix-only | merge-only | resume-only
 
 show_help() {
     cat << EOF
@@ -84,6 +84,8 @@ Modes:
                        comments, test failures) and merge them
   --merge-only         Skip new workers AND fix workers. Only merge PRs that are
                        ready and resolve merge conflicts
+  --resume-only        Only resume previously stopped workers. No new tasks,
+                       no fix workers, no resolve workers
 
 Options:
   --max-workers N      Maximum concurrent workers (default: 4)
@@ -110,6 +112,7 @@ Examples:
   wiggum run --text                        # Raw log output (no terminal UI)
   wiggum run --fix-only                   # Only fix and merge existing PRs
   wiggum run --merge-only                 # Only merge ready PRs
+  wiggum run --resume-only                # Only resume stopped workers
 
 Behavior:
   - Chief assigns pending tasks [ ] to workers based on dependency graph
@@ -200,6 +203,13 @@ main() {
         log "Merge-only mode: disabled fix-workers, multi-pr-planner services"
     elif [[ "$WIGGUM_RUN_MODE" == "fix-only" ]]; then
         log "Fix-only mode: task spawning disabled"
+    elif [[ "$WIGGUM_RUN_MODE" == "resume-only" ]]; then
+        _SERVICE_JSON=$(echo "$_SERVICE_JSON" | jq '
+            .services |= map(
+                if .id == "fix-workers" or .id == "multi-pr-planner" or .id == "resolve-workers" or .id == "orphan-workspace"
+                then .enabled = false
+                else . end)')
+        log "Resume-only mode: disabled fix-workers, resolve-workers, multi-pr-planner, orphan-workspace services"
     fi
 
     # Invalidate service config cache after run-mode modifications to _SERVICE_JSON

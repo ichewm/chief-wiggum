@@ -72,12 +72,16 @@ run_suite() {
 
     TOTAL_SUITES=$((TOTAL_SUITES + 1))
 
-    echo "----------------------------------------"
-    echo "Running: $name"
-    echo "----------------------------------------"
-
     if [ ! -f "$script" ]; then
-        echo "ERROR: Test script not found: $script"
+        if [ "$VERBOSE" = true ]; then
+            echo "----------------------------------------"
+            echo "Running: $name"
+            echo "----------------------------------------"
+            echo "ERROR: Test script not found: $script"
+            echo ""
+        else
+            printf "  %-24s SKIP (not found)\n" "$name:"
+        fi
         FAILED_SUITES=$((FAILED_SUITES + 1))
         FAILED_SUITE_NAMES+=("$name (not found)")
         return 1
@@ -89,37 +93,75 @@ run_suite() {
     start_time=$(date +%s)
 
     if [ "$VERBOSE" = true ]; then
+        echo "----------------------------------------"
+        echo "Running: $name"
+        echo "----------------------------------------"
+
         if "$script"; then
             PASSED_SUITES=$((PASSED_SUITES + 1))
         else
             FAILED_SUITES=$((FAILED_SUITES + 1))
             FAILED_SUITE_NAMES+=("$name")
         fi
+
+        end_time=$(date +%s)
+        duration=$((end_time - start_time))
+        echo "Duration: ${duration}s"
+        echo ""
     else
-        # Redirect stdout to /dev/null, let stderr (failures) pass through
-        if "$script" > /dev/null; then
+        printf "  %-24s " "$name:"
+
+        local output_file
+        output_file=$(mktemp)
+        local exit_code=0
+
+        # Stream output in real-time: dots for pass, F for fail
+        (
+            set +e
+            set +o pipefail
+            "$script" 2>&1 | while IFS= read -r line; do
+                printf '%s\n' "$line" >> "$output_file"
+                if [[ "$line" == *"✓"* ]]; then
+                    printf "."
+                elif [[ "$line" == *"✗"* ]]; then
+                    printf "F"
+                fi
+            done
+            exit "${PIPESTATUS[0]}"
+        ) || exit_code=$?
+
+        end_time=$(date +%s)
+        duration=$((end_time - start_time))
+
+        if [[ $exit_code -eq 0 ]]; then
             PASSED_SUITES=$((PASSED_SUITES + 1))
-            echo "PASSED"
+            printf " OK (%ds)\n" "$duration"
         else
             FAILED_SUITES=$((FAILED_SUITES + 1))
             FAILED_SUITE_NAMES+=("$name")
-            echo "FAILED"
+            printf " FAILED (%ds)\n" "$duration"
+            while IFS= read -r line; do
+                if [[ "$line" == *"✗"* ]]; then
+                    printf "      %s\n" "$line"
+                fi
+            done < "$output_file"
         fi
-    fi
 
-    end_time=$(date +%s)
-    duration=$((end_time - start_time))
-    echo "Duration: ${duration}s"
-    echo ""
+        rm -f "$output_file"
+    fi
 }
 
 # Syntax check all bash scripts
 run_syntax_check() {
-    echo "----------------------------------------"
-    echo "Running: Bash Syntax Check"
-    echo "----------------------------------------"
-
     TOTAL_SUITES=$((TOTAL_SUITES + 1))
+
+    if [ "$VERBOSE" = true ]; then
+        echo "----------------------------------------"
+        echo "Running: Bash Syntax Check"
+        echo "----------------------------------------"
+    else
+        printf "  %-24s " "Syntax Check:"
+    fi
 
     local errors=0
     local checked=0
@@ -128,8 +170,14 @@ run_syntax_check() {
     while IFS= read -r -d '' script; do
         ((++checked))
         if ! bash -n "$script" 2>/dev/null; then
-            echo "Syntax error: $script"
+            if [ "$VERBOSE" = true ]; then
+                echo "Syntax error: $script"
+            else
+                printf "F"
+            fi
             ((++errors))
+        else
+            [ "$VERBOSE" != true ] && printf "."
         fi
     done < <(find "$PROJECT_ROOT/bin" "$PROJECT_ROOT/lib" -name "*.sh" -print0 2>/dev/null)
 
@@ -138,20 +186,34 @@ run_syntax_check() {
         [ -f "$script" ] || continue
         ((++checked))
         if ! bash -n "$script" 2>/dev/null; then
-            echo "Syntax error: $script"
+            if [ "$VERBOSE" = true ]; then
+                echo "Syntax error: $script"
+            else
+                printf "F"
+            fi
             ((++errors))
+        else
+            [ "$VERBOSE" != true ] && printf "."
         fi
     done
 
     if [ $errors -eq 0 ]; then
         PASSED_SUITES=$((PASSED_SUITES + 1))
-        echo "PASSED ($checked files checked)"
+        if [ "$VERBOSE" = true ]; then
+            echo "PASSED ($checked files checked)"
+        else
+            printf " OK (%d files)\n" "$checked"
+        fi
     else
         FAILED_SUITES=$((FAILED_SUITES + 1))
         FAILED_SUITE_NAMES+=("Syntax Check ($errors errors)")
-        echo "FAILED ($errors errors in $checked files)"
+        if [ "$VERBOSE" = true ]; then
+            echo "FAILED ($errors errors in $checked files)"
+        else
+            printf " FAILED (%d errors)\n" "$errors"
+        fi
     fi
-    echo ""
+    [ "$VERBOSE" = true ] && echo "" || true
 }
 
 # Main test execution

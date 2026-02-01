@@ -45,7 +45,7 @@ setup() {
     export CLAUDE="$TESTS_DIR/mocks/mock-claude.sh"
     export MOCK_CLAUDE_DELAY="0"
     export LOG_FILE="$TEST_DIR/test.log"
-    export LOG_LEVEL="DEBUG"
+    export LOG_LEVEL="ERROR"
 
     # Ensure clean state - unset any previous agent state
     unset _MD_AGENT_FILE 2>/dev/null || true
@@ -212,7 +212,7 @@ Task completed successfully.'
 
     # Run the agent
     local exit_code=0
-    agent_run "$WORKER_DIR" "$PROJECT_DIR" || exit_code=$?
+    agent_run "$WORKER_DIR" "$PROJECT_DIR" 2>/dev/null || exit_code=$?
 
     # Check that Claude was invoked at least once
     local invocation_count
@@ -250,7 +250,7 @@ test_once_agent_invokes_claude() {
 
     # Run the agent
     local exit_code=0
-    agent_run "$WORKER_DIR" "$PROJECT_DIR" || exit_code=$?
+    agent_run "$WORKER_DIR" "$PROJECT_DIR" 2>/dev/null || exit_code=$?
 
     # Check Claude was invoked exactly once
     local invocation_count
@@ -281,7 +281,7 @@ test_agent_creates_logs() {
     export WIGGUM_STEP_ID="log-test"
 
     md_agent_init "$agent_file" "test.ralph-agent"
-    agent_run "$WORKER_DIR" "$PROJECT_DIR" || true
+    agent_run "$WORKER_DIR" "$PROJECT_DIR" 2>/dev/null || true
 
     # Check that log files were created
     local log_count
@@ -314,7 +314,7 @@ test_workspace_override_uses_project_dir() {
     md_agent_init "$agent_file" "test.override-agent"
 
     # Capture the workspace that gets set
-    agent_run "$WORKER_DIR" "$PROJECT_DIR" || true
+    agent_run "$WORKER_DIR" "$PROJECT_DIR" 2>/dev/null || true
 
     # Check that mock was invoked with project dir as working directory
     # The mock logs the --cwd argument
@@ -352,7 +352,7 @@ Done!'
     export WIGGUM_STEP_ID="result-test"
 
     md_agent_init "$agent_file" "test.ralph-agent"
-    agent_run "$WORKER_DIR" "$PROJECT_DIR" || true
+    agent_run "$WORKER_DIR" "$PROJECT_DIR" 2>/dev/null || true
 
     # Check that a result file was created
     local result_count
@@ -396,7 +396,7 @@ test_agent_runs_without_immediate_exit() {
 
     # Run and capture exit code
     local exit_code=0
-    agent_run "$WORKER_DIR" "$PROJECT_DIR" || exit_code=$?
+    agent_run "$WORKER_DIR" "$PROJECT_DIR" 2>/dev/null || exit_code=$?
 
     # Check invocation count - if 0, agent exited before running
     local invocation_count
@@ -436,9 +436,9 @@ test_md_agent_run_is_executed() {
 
     md_agent_init "$agent_file" "test.ralph-agent"
 
-    # Capture stderr which includes debug logs
+    # Capture stderr which includes debug logs (temporarily enable DEBUG level)
     local output
-    output=$(agent_run "$WORKER_DIR" "$PROJECT_DIR" 2>&1) || true
+    output=$(LOG_LEVEL=DEBUG agent_run "$WORKER_DIR" "$PROJECT_DIR" 2>&1) || true
 
     # Check for the debug log that indicates md_agent_run was entered
     if echo "$output" | grep -q "md_agent_run: starting\|Running markdown agent"; then
@@ -488,7 +488,7 @@ All tests passed.
     if load_agent "test.pipeline-agent"; then
         # Run agent_run as pipeline runner would
         local exit_code=0
-        agent_run "$WORKER_DIR" "$PROJECT_DIR" || exit_code=$?
+        agent_run "$WORKER_DIR" "$PROJECT_DIR" 2>/dev/null || exit_code=$?
 
         # Verify Claude was invoked
         local invocation_count
@@ -573,7 +573,7 @@ The task has been completed successfully.'
     md_agent_init "$agent_file" "test.status-file-agent"
 
     # Run the agent - should run at least one iteration
-    agent_run "$WORKER_DIR" "$PROJECT_DIR" || true
+    agent_run "$WORKER_DIR" "$PROJECT_DIR" 2>/dev/null || true
 
     # Find the result file
     local result_file

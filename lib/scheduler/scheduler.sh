@@ -343,7 +343,7 @@ scheduler_is_complete() {
 
     # Check for tasks needing fixes (populated by PR optimization)
     # In merge-only mode, skip this check - we're not fixing tasks
-    if [[ "$run_mode" != "merge-only" ]]; then
+    if [[ "$run_mode" != "merge-only" && "$run_mode" != "resume-only" ]]; then
         local tasks_needing_fix="$_SCHED_RALPH_DIR/orchestrator/tasks-needing-fix.txt"
         if [ -s "$tasks_needing_fix" ]; then
             return 1
@@ -361,16 +361,25 @@ scheduler_is_complete() {
             git_state=$(jq -r '.current_state // ""' "$worker_dir/git-state.json" 2>/dev/null)
             case "$git_state" in
                 needs_fix|fixing)
-                    # In merge-only mode, don't wait for fix tasks
-                    [[ "$run_mode" == "merge-only" ]] && continue
+                    # In merge-only/resume-only mode, don't wait for fix tasks
+                    [[ "$run_mode" == "merge-only" || "$run_mode" == "resume-only" ]] && continue
                     return 1
                     ;;
                 needs_resolve|needs_multi_resolve|resolving)
+                    [[ "$run_mode" == "resume-only" ]] && continue
                     return 1
                     ;;
             esac
         fi
     done
+
+    # In resume-only mode, stay alive while there are pending resumes or resumable workers
+    if [[ "$run_mode" == "resume-only" ]]; then
+        [[ ${#_PENDING_RESUMES[@]} -gt 0 ]] && return 1
+        local resumable
+        resumable=$(get_resumable_workers "$_SCHED_RALPH_DIR")
+        [[ -n "$resumable" ]] && return 1
+    fi
 
     return 0
 }

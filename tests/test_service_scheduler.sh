@@ -201,7 +201,7 @@ test_state_save_and_restore() {
 
 test_is_due_returns_true_when_never_run() {
     create_test_config
-    service_load "$TEST_DIR/services.json"
+    service_load "$TEST_DIR/services.json" 2>/dev/null
     service_state_init "$TEST_DIR/.ralph"
 
     # Service never run, should be due
@@ -213,7 +213,7 @@ test_is_due_returns_true_when_never_run() {
 
 test_is_due_returns_false_when_recently_run() {
     create_test_config
-    service_load "$TEST_DIR/services.json"
+    service_load "$TEST_DIR/services.json" 2>/dev/null
     service_state_init "$TEST_DIR/.ralph"
 
     # Mark as just run
@@ -229,7 +229,7 @@ test_is_due_returns_false_when_recently_run() {
 
 test_is_due_returns_true_when_interval_passed() {
     create_test_config
-    service_load "$TEST_DIR/services.json"
+    service_load "$TEST_DIR/services.json" 2>/dev/null
     service_state_init "$TEST_DIR/.ralph"
 
     # Mark as run 10 seconds ago (interval is 5)
@@ -249,7 +249,7 @@ test_is_due_returns_true_when_interval_passed() {
 
 test_trigger_event_calls_matching_service() {
     create_test_config
-    service_load "$TEST_DIR/services.json"
+    service_load "$TEST_DIR/services.json" 2>/dev/null
     service_state_init "$TEST_DIR/.ralph"
     service_runner_init "$TEST_DIR/.ralph" "$TEST_DIR"
 
@@ -273,7 +273,7 @@ test_trigger_event_calls_matching_service() {
 
 test_trigger_event_ignores_non_matching() {
     create_test_config
-    service_load "$TEST_DIR/services.json"
+    service_load "$TEST_DIR/services.json" 2>/dev/null
     service_state_init "$TEST_DIR/.ralph"
     service_runner_init "$TEST_DIR/.ralph" "$TEST_DIR"
 
@@ -298,7 +298,7 @@ test_scheduler_init_loads_config() {
     mkdir -p "$WIGGUM_HOME/config"
     cp "$TEST_DIR/services.json" "$WIGGUM_HOME/config/services.json.test"
 
-    service_load "$TEST_DIR/services.json"
+    service_load "$TEST_DIR/services.json" 2>/dev/null
     service_state_init "$TEST_DIR/.ralph"
     service_runner_init "$TEST_DIR/.ralph" "$TEST_DIR"
     _SCHED_RALPH_DIR="$TEST_DIR/.ralph"
@@ -317,7 +317,7 @@ test_scheduler_init_loads_config() {
 
 test_scheduler_status_returns_json() {
     create_test_config
-    service_load "$TEST_DIR/services.json"
+    service_load "$TEST_DIR/services.json" 2>/dev/null
     service_state_init "$TEST_DIR/.ralph"
     _SCHED_INITIALIZED=true
 
@@ -334,7 +334,7 @@ test_scheduler_status_returns_json() {
 
 test_scheduler_service_status_returns_details() {
     create_test_config
-    service_load "$TEST_DIR/services.json"
+    service_load "$TEST_DIR/services.json" 2>/dev/null
     service_state_init "$TEST_DIR/.ralph"
 
     service_state_mark_started "test-interval"
@@ -370,7 +370,7 @@ test_concurrency_skip_when_running() {
 }
 JSON
 
-    service_load "$TEST_DIR/services.json"
+    service_load "$TEST_DIR/services.json" 2>/dev/null
     service_state_init "$TEST_DIR/.ralph"
     service_runner_init "$TEST_DIR/.ralph" "$TEST_DIR"
     _SCHED_INITIALIZED=true

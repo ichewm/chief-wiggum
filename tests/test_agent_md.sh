@@ -1134,8 +1134,8 @@ PRDEOF
     _MD_WORKSPACE="$worker_dir/workspace"
     declare -gA _MD_VALID_RESULTS=([0]="PASS" [1]="FAIL" [2]="FIX")
 
-    # Run the extraction
-    _md_extract_and_write_result "$worker_dir"
+    # Run the extraction (suppress expected supervisor override warning)
+    _md_extract_and_write_result "$worker_dir" 2>/dev/null
 
     # Check result file
     local result_file

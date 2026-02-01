@@ -872,6 +872,21 @@ The default `config/services.json` defines services organized by phase:
 
 ---
 
+## Run Modes
+
+The orchestrator supports run modes that restrict which services are active. Modes are mutually exclusive with each other, with `plan`, and with `--smart`.
+
+| Mode | Flag | Services Disabled | Behavior |
+|------|------|-------------------|----------|
+| `default` | *(none)* | *(none)* | Full orchestration: spawn, fix, resolve, merge |
+| `fix-only` | `--fix-only` | `task-spawner` (via condition) | Fix existing PRs and merge them |
+| `merge-only` | `--merge-only` | `task-spawner` (via condition), `fix-workers`, `multi-pr-planner` | Only merge ready PRs and resolve conflicts |
+| `resume-only` | `--resume-only` | `task-spawner` (via condition), `fix-workers`, `resolve-workers`, `multi-pr-planner`, `orphan-workspace` | Only resume previously stopped workers |
+
+In all non-default modes, `task-spawner` is automatically disabled by its `condition.env_equals` check (`WIGGUM_RUN_MODE` must equal `"default"`). Additional services are disabled programmatically in `wiggum-run`.
+
+---
+
 ## API Reference
 
 ### Loader Functions (`service-loader.sh`)

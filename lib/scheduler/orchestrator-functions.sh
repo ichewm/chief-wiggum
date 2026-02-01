@@ -1117,7 +1117,7 @@ _schedule_resume_workers() {
         [ -n "$worker_dir" ] || continue
 
         # Skip workers not applicable to the current run mode
-        if [[ "$WIGGUM_RUN_MODE" != "default" && "$worker_type" != "fix" && "$worker_type" != "resolve" ]]; then
+        if [[ "$WIGGUM_RUN_MODE" != "default" && "$WIGGUM_RUN_MODE" != "resume-only" && "$worker_type" != "fix" && "$worker_type" != "resolve" ]]; then
             log_debug "Skipping resume of main worker $task_id ($WIGGUM_RUN_MODE mode)"
             continue
         fi

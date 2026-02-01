@@ -282,8 +282,8 @@ test_git_safety_restore_discards_changes() {
     echo "accidental change" > "$WORKSPACE/accidental.txt"
     echo "modified" >> "$WORKSPACE/README.md"
 
-    # Restore to checkpoint
-    git_safety_restore "$WORKSPACE" "$checkpoint"
+    # Restore to checkpoint (suppress expected warnings about discarding changes)
+    git_safety_restore "$WORKSPACE" "$checkpoint" 2>/dev/null
     local result=$?
 
     assert_equals "0" "$result" "Restore should succeed"
@@ -336,8 +336,8 @@ test_git_safety_restore_resets_commits() {
     fi
     ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
 
-    # Restore to checkpoint
-    git_safety_restore "$WORKSPACE" "$checkpoint"
+    # Restore to checkpoint (suppress expected warnings about HEAD reset)
+    git_safety_restore "$WORKSPACE" "$checkpoint" 2>/dev/null
 
     # Verify HEAD is back to checkpoint
     cd "$WORKSPACE" || return 1

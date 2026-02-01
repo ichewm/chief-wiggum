@@ -89,7 +89,7 @@ test_git_commit_push_agent_sources() {
 
 test_git_commit_push_no_changes_passes() {
     # Create a branch first
-    git -C "$WORKER_DIR/workspace" checkout -b test-branch
+    git -C "$WORKER_DIR/workspace" checkout -b test-branch 2>/dev/null
 
     source "$WIGGUM_HOME/lib/agents/workflow/git-commit-push.sh"
     agent_run "$WORKER_DIR" "$TEST_DIR" 2>/dev/null
@@ -107,7 +107,7 @@ test_git_commit_push_no_changes_passes() {
 
 test_git_commit_push_commits_changes() {
     # Create a branch and make changes
-    git -C "$WORKER_DIR/workspace" checkout -b test-branch
+    git -C "$WORKER_DIR/workspace" checkout -b test-branch 2>/dev/null
     echo "modified" > "$WORKER_DIR/workspace/file.txt"
 
     source "$WIGGUM_HOME/lib/agents/workflow/git-commit-push.sh"
@@ -140,7 +140,7 @@ test_git_commit_push_detects_unpushed_commits() {
     git init --bare "$bare_remote" >/dev/null 2>&1
 
     # Set up workspace with remote tracking
-    git -C "$WORKER_DIR/workspace" checkout -b test-branch
+    git -C "$WORKER_DIR/workspace" checkout -b test-branch 2>/dev/null
     git -C "$WORKER_DIR/workspace" remote add origin "$bare_remote"
     git -C "$WORKER_DIR/workspace" push -u origin test-branch >/dev/null 2>&1
 
