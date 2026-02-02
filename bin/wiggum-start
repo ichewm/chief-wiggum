@@ -42,6 +42,10 @@ source "$WIGGUM_HOME/lib/worker/agent-registry.sh"
 source "$WIGGUM_HOME/lib/runtime/runtime.sh"
 source "$WIGGUM_HOME/lib/backend/claude/usage-tracker.sh"
 source "$WIGGUM_HOME/lib/github/issue-sync.sh"
+source "$WIGGUM_HOME/lib/core/defaults.sh"
+source "$WIGGUM_HOME/lib/worker/git-state.sh"
+source "$WIGGUM_HOME/lib/git/pr-comments.sh"
+source "$WIGGUM_HOME/lib/scheduler/merge-manager.sh"
 
 # Default configuration
 MAX_ITERATIONS=20
@@ -50,6 +54,8 @@ AGENT_TYPE="system.task-worker"
 WORKER_DIR=""
 QUIET_MODE=false
 FOREGROUND_MODE=false
+SUBCOMMAND=""         # "", "plan", "fix", "merge"
+QUICK_MODE=false      # --quick flag for fix subcommand
 
 # Output message respecting quiet mode
 _msg() {
@@ -61,14 +67,26 @@ show_help() {
 wiggum start - Manually start a worker for a task
 
 Usage:
-  wiggum start <id>         Start a new worker for the specified task
-  wiggum start <id> plan    Start with planning phase first
+  wiggum start <id>               Start a new worker for the specified task
+  wiggum start <id> plan          Start with planning phase first
+  wiggum start <id> fix [--quick] Start a fix worker for PR review comments
+  wiggum start <id> merge         Attempt to merge a task's PR
 
 Task ID Resolution:
   Task IDs can be partial as long as they match exactly one task:
   - 030                (number only)
   - K-030              (partial task ID)
   - TASK-030           (full task ID)
+
+Subcommands:
+  plan              Run the plan-mode agent before execution
+  fix               Start a fix worker to address PR review comments.
+                    Requires an existing worker with a PR. Uses the fix pipeline
+                    (with test verification) by default.
+  fix --quick       Start a quick fix agent (no pipeline, no test verification).
+                    Faster but riskier - use for trivial comment fixes.
+  merge             Attempt to merge the task's PR. Synchronous operation.
+                    Reports conflicts or errors if merge fails.
 
 Options:
   --max-iters N     Maximum iterations per worker (default: 20)
@@ -77,6 +95,7 @@ Options:
   --pipeline NAME   Pipeline config to use (from config/pipelines/ or .ralph/pipelines/)
   --worker-dir DIR  Use existing worker directory instead of creating new one.
                     Useful for running a different pipeline on an existing worker.
+  --quick           Use quick fix mode (only with 'fix' subcommand)
   -v, --verbose     Verbose output (same as default)
   -vv               Debug output (detailed diagnostics)
   -vvv              Trace output (very detailed tracing)
@@ -85,16 +104,23 @@ Options:
   -h, --help        Show this help message
 
 Examples:
-  wiggum start TASK-030          # Start worker for TASK-030
-  wiggum start 030               # Start worker matching "030"
-  wiggum start FEAT-001          # Start worker for FEAT-001
-  wiggum start TASK-030 plan     # Start with planning phase
+  wiggum start TASK-030              # Start worker for TASK-030
+  wiggum start 030                   # Start worker matching "030"
+  wiggum start FEAT-001              # Start worker for FEAT-001
+  wiggum start TASK-030 plan         # Start with planning phase
+  wiggum start TASK-030 fix          # Fix PR comments (with tests)
+  wiggum start fix TASK-030          # Same (subcommand-first ordering)
+  wiggum start TASK-030 fix --quick  # Quick fix (no tests)
+  wiggum start TASK-030 merge        # Merge the task's PR
+  wiggum start merge TASK-030        # Same (subcommand-first ordering)
   wiggum start TASK-030 --worker-dir .ralph/workers/worker-TASK-030-123 --pipeline fast
 
 Notes:
   - The task must exist in .ralph/kanban.md
   - Use 'plan' to run the plan-mode agent before execution
   - If a plan already exists in .ralph/plans/, it will be used automatically
+  - 'fix' requires an existing worker with PR comments
+  - 'merge' requires an existing worker with a PR
   - Use 'wiggum run' for automated orchestration of multiple tasks
   - Use 'wiggum resume <id>' to resume a stopped worker
 
@@ -284,6 +310,247 @@ do_start() {
     fi
 }
 
+# Start a fix worker for PR review comments
+do_start_fix() {
+    local input_id="$1"
+
+    # Check .ralph directory exists
+    if [ ! -d "$RALPH_DIR" ]; then
+        echo "Error: No .ralph directory found. Run 'wiggum init' first."
+        exit $EXIT_WORKER_NO_RALPH_DIR
+    fi
+
+    mkdir -p "$RALPH_DIR/logs"
+
+    if [ -z "$input_id" ]; then
+        echo "Error: Task ID required"
+        echo "Usage: wiggum start <TASK-ID> fix [--quick]"
+        exit $EXIT_USAGE
+    fi
+
+    # Check if kanban exists
+    if [ ! -f "$RALPH_DIR/kanban.md" ]; then
+        echo "Error: No kanban.md found at $RALPH_DIR/kanban.md"
+        exit $EXIT_WORKER_NO_KANBAN
+    fi
+
+    # Resolve partial task ID to full task ID
+    local task_id
+    task_id=$(resolve_task_id "$RALPH_DIR/kanban.md" "$input_id") || exit $EXIT_WORKER_TASK_NOT_FOUND
+
+    # Find existing worker directory for this task
+    local worker_dir
+    worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$task_id")
+
+    if [ -z "$worker_dir" ] || [ ! -d "$worker_dir" ]; then
+        echo "Error: No worker directory found for $task_id"
+        echo "A worker must exist before running fix. Use 'wiggum start $task_id' first."
+        exit $EXIT_ERROR
+    fi
+
+    # Validate workspace exists
+    if [ ! -d "$worker_dir/workspace" ]; then
+        echo "Error: Workspace not found at $worker_dir/workspace"
+        exit $EXIT_ERROR
+    fi
+
+    # Guard: check if agent is already running
+    if [ -f "$worker_dir/agent.pid" ]; then
+        local existing_pid
+        existing_pid=$(cat "$worker_dir/agent.pid")
+        if kill -0 "$existing_pid" 2>/dev/null; then
+            echo "Agent already running for $(basename "$worker_dir") (PID: $existing_pid)"
+            exit $EXIT_ERROR
+        fi
+        # Stale PID file - remove it
+        rm -f "$worker_dir/agent.pid"
+    fi
+
+    # Auto-sync PR comments if task-comments.md missing
+    if [ ! -f "$worker_dir/task-comments.md" ]; then
+        _msg "Syncing PR comments for $task_id..."
+        sync_pr_comments "$task_id" "$worker_dir" > /dev/null || true
+    fi
+
+    # Verify comments file exists after sync attempt
+    if [ ! -f "$worker_dir/task-comments.md" ]; then
+        echo "Error: No PR comments found for $task_id"
+        echo "Ensure a PR exists and has review comments, then try:"
+        echo "  wiggum review task $task_id sync"
+        exit $EXIT_ERROR
+    fi
+
+    # Set git state: fixing
+    git_state_set "$worker_dir" "fixing" "wiggum-start.do_start_fix" "Manual fix via 'wiggum start $task_id fix'"
+
+    # Determine which agent/pipeline to use
+    # Default: full fix pipeline with test verification
+    # --quick: standalone agent without tests (faster but risky)
+    local agent_type="system.task-worker"
+    local pipeline_name="fix"
+    if [ "$QUICK_MODE" = "true" ]; then
+        agent_type="engineering.pr-comment-fix"
+        pipeline_name=""
+        _msg "Starting quick fix for $task_id (no test verification)"
+    else
+        _msg "Starting fix pipeline for $task_id (with test verification)"
+    fi
+
+    # Recompute usage before starting
+    usage_tracker_write_shared "$RALPH_DIR" > /dev/null 2>&1 || true
+
+    if [ "$FOREGROUND_MODE" = "true" ]; then
+        _msg "Running fix agent in foreground..."
+        [ -n "$pipeline_name" ] && export WIGGUM_PIPELINE="$pipeline_name"
+        source "$WIGGUM_HOME/lib/worker/agent-registry.sh"
+        run_agent "$agent_type" "$worker_dir" "$PROJECT_DIR"
+    else
+        # Export variables for the setsid subprocess (security: no string interpolation)
+        export _WORKER_WIGGUM_HOME="$WIGGUM_HOME"
+        export _WORKER_DIR="$worker_dir"
+        export _WORKER_AGENT_TYPE="$agent_type"
+        export _WORKER_PROJECT_DIR="$PROJECT_DIR"
+        export _WORKER_PIPELINE="$pipeline_name"
+        export _WORKER_RALPH_DIR="$RALPH_DIR"
+        export _WORKER_TASK_ID="$task_id"
+
+        # shellcheck disable=SC2016
+        setsid bash -c '
+            set -euo pipefail
+            _log_ts() { echo "[$(date -Iseconds)] $*"; }
+            _log_ts "INFO: Fix agent subprocess starting for task $_WORKER_TASK_ID"
+
+            export WIGGUM_HOME="$_WORKER_WIGGUM_HOME"
+            [ -n "$_WORKER_PIPELINE" ] && export WIGGUM_PIPELINE="$_WORKER_PIPELINE"
+
+            if ! source "$WIGGUM_HOME/lib/worker/agent-registry.sh" 2>&1; then
+                _log_ts "ERROR: Failed to source agent-registry.sh"
+                exit 1
+            fi
+
+            _log_ts "INFO: Running agent $_WORKER_AGENT_TYPE"
+            _exit_code=0
+            run_agent "$_WORKER_AGENT_TYPE" "$_WORKER_DIR" "$_WORKER_PROJECT_DIR" || _exit_code=$?
+            if [ $_exit_code -ne 0 ]; then
+                _log_ts "ERROR: run_agent failed with exit code $_exit_code"
+                exit 1
+            fi
+            _log_ts "INFO: Fix agent completed successfully"
+        ' >> "$RALPH_DIR/logs/fix-workers.log" 2>&1 &
+
+        # Poll for agent.pid creation (10 × 0.1s)
+        local wait_count=0
+        while [ ! -f "$worker_dir/agent.pid" ] && [ $wait_count -lt 10 ]; do
+            sleep 0.1
+            ((++wait_count))
+        done
+
+        if [ -f "$worker_dir/agent.pid" ]; then
+            local agent_pid
+            agent_pid=$(cat "$worker_dir/agent.pid")
+            _msg "Fix agent running (PID: $agent_pid)"
+        else
+            sleep 0.3
+            if tail -5 "$RALPH_DIR/logs/fix-workers.log" 2>/dev/null | grep -q "ERROR:"; then
+                echo "ERROR: Fix agent failed to start. Check .ralph/logs/fix-workers.log" >&2
+            else
+                _msg "Fix agent started (PID file pending)"
+            fi
+        fi
+        _msg "Use 'wiggum monitor' to follow progress"
+    fi
+}
+
+# Attempt to merge a task's PR (synchronous)
+do_start_merge() {
+    local input_id="$1"
+
+    # Check .ralph directory exists
+    if [ ! -d "$RALPH_DIR" ]; then
+        echo "Error: No .ralph directory found. Run 'wiggum init' first."
+        exit $EXIT_WORKER_NO_RALPH_DIR
+    fi
+
+    if [ -z "$input_id" ]; then
+        echo "Error: Task ID required"
+        echo "Usage: wiggum start <TASK-ID> merge"
+        exit $EXIT_USAGE
+    fi
+
+    # Check if kanban exists
+    if [ ! -f "$RALPH_DIR/kanban.md" ]; then
+        echo "Error: No kanban.md found at $RALPH_DIR/kanban.md"
+        exit $EXIT_WORKER_NO_KANBAN
+    fi
+
+    # Resolve partial task ID to full task ID
+    local task_id
+    task_id=$(resolve_task_id "$RALPH_DIR/kanban.md" "$input_id") || exit $EXIT_WORKER_TASK_NOT_FOUND
+
+    # Find existing worker directory for this task
+    local worker_dir
+    worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$task_id")
+
+    if [ -z "$worker_dir" ] || [ ! -d "$worker_dir" ]; then
+        echo "Error: No worker directory found for $task_id"
+        echo "A worker must exist before merging. Use 'wiggum start $task_id' first."
+        exit $EXIT_ERROR
+    fi
+
+    # Get PR number from git-state.json
+    local pr_number
+    pr_number=$(git_state_get_pr "$worker_dir")
+
+    # Fallback: discover PR from workspace branch
+    if [ "$pr_number" = "null" ] || [ -z "$pr_number" ]; then
+        if [ -d "$worker_dir/workspace" ]; then
+            local branch
+            branch=$(git -C "$worker_dir/workspace" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+            if [ -n "$branch" ] && [ "$branch" != "HEAD" ]; then
+                pr_number=$(gh pr list --head "$branch" --state open --json number -q '.[0].number' 2>/dev/null || true)
+                if [ -n "$pr_number" ]; then
+                    git_state_set_pr "$worker_dir" "$pr_number"
+                fi
+            fi
+        fi
+    fi
+
+    if [ -z "$pr_number" ] || [ "$pr_number" = "null" ]; then
+        echo "Error: No PR found for $task_id"
+        echo "Ensure the worker has created a PR first."
+        exit $EXIT_ERROR
+    fi
+
+    _msg "Attempting to merge PR #$pr_number for $task_id..."
+
+    # Set state to needs_merge
+    git_state_set "$worker_dir" "needs_merge" "wiggum-start.do_start_merge" "Manual merge via 'wiggum start $task_id merge'"
+
+    # Attempt merge (synchronous)
+    local merge_result=0
+    attempt_pr_merge "$worker_dir" "$task_id" "$RALPH_DIR" || merge_result=$?
+
+    case $merge_result in
+        0)
+            _msg "PR #$pr_number merged successfully for $task_id"
+            ;;
+        1)
+            echo "Merge conflict for $task_id (PR #$pr_number)"
+            echo "Resolve conflicts with: wiggum review task $task_id resolve"
+            exit 1
+            ;;
+        *)
+            local last_error
+            last_error=$(git_state_get_error "$worker_dir")
+            echo "Merge failed for $task_id (PR #$pr_number)"
+            if [ "$last_error" != "null" ] && [ -n "$last_error" ]; then
+                echo "Error: $last_error"
+            fi
+            exit 2
+            ;;
+    esac
+}
+
 # Main
 main() {
     # Parse verbose flags first
@@ -348,8 +615,21 @@ main() {
                 shift
                 ;;
             plan)
+                SUBCOMMAND="plan"
                 export WIGGUM_PLAN_MODE=true
                 echo "Using plan mode"
+                shift
+                ;;
+            fix)
+                SUBCOMMAND="fix"
+                shift
+                ;;
+            merge)
+                SUBCOMMAND="merge"
+                shift
+                ;;
+            --quick)
+                QUICK_MODE=true
                 shift
                 ;;
             -*)
@@ -377,7 +657,11 @@ main() {
         exit $EXIT_USAGE
     fi
 
-    do_start "$task_id_arg"
+    case "$SUBCOMMAND" in
+        fix)   do_start_fix "$task_id_arg" ;;
+        merge) do_start_merge "$task_id_arg" ;;
+        *)     do_start "$task_id_arg" ;;
+    esac
 }
 
 main "$@"
