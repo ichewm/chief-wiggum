@@ -334,6 +334,4 @@ github_issue_update_status() {
         github_issue_reopen "$issue_number"
     fi
 
-    # Post transition comment
-    github_issue_post_transition_comment "$issue_number" "$old_name" "$new_name"
 }
