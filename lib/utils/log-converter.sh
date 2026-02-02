@@ -253,19 +253,31 @@ convert_dir() {
 
     mkdir -p "$conv_dir"
 
-    local converted=0
+    local converted=0 skipped=0
 
     # Process all agent logs in time order (searches subdirectories)
     # Matches any log file with format: {step-id}-{iteration}[-{timestamp}].log
     # Excludes summary logs which have different structure
     while IFS= read -r log_file; do
         [ -f "$log_file" ] || continue
+        local local_name
         local_name=$(basename "$log_file" .log)
+
+        # Skip already-converted files (log files are written once, never modified)
+        if [ -f "$conv_dir/${local_name}.md" ]; then
+            ((++skipped))
+            continue
+        fi
+
         convert_log "$log_file" "$conv_dir/${local_name}.md"
         ((++converted))
     done < <(find_sorted_by_mtime "$logs_dir" -name "*.log" ! -name "*summary*")
 
-    echo "Converted $converted log files to conversations in $conv_dir" >&2
+    if [ "$skipped" -gt 0 ]; then
+        echo "Converted $converted log files ($skipped already converted) to conversations in $conv_dir" >&2
+    else
+        echo "Converted $converted log files to conversations in $conv_dir" >&2
+    fi
 }
 
 # --- Main ---
