@@ -402,7 +402,6 @@ _sort_kanban_impl() {
     local header=""
     local footer=""
     local in_tasks_section=false
-    local past_tasks_section=false
     local tasks_header=""
 
     # Arrays to hold task blocks
@@ -419,33 +418,17 @@ _sort_kanban_impl() {
             continue
         fi
 
-        # Check for next section after TASKS (## something else)
-        if [ "$in_tasks_section" = true ] && [[ "$line" =~ ^##[[:space:]] ]] && [[ ! "$line" =~ ^##[[:space:]]+TASKS ]]; then
-            in_tasks_section=false
-            past_tasks_section=true
-            # Save any pending block
-            if [ -n "$current_block" ]; then
-                task_blocks+=("$current_block")
-                current_block=""
-            fi
-            footer="$line"
-            continue
-        fi
-
-        if [ "$in_tasks_section" = false ] && [ "$past_tasks_section" = false ]; then
+        if [ "$in_tasks_section" = false ]; then
             # Before TASKS section - accumulate header
             if [ -n "$header" ]; then
                 header="$header"$'\n'"$line"
             else
                 header="$line"
             fi
-        elif [ "$past_tasks_section" = true ]; then
-            # After TASKS section - accumulate footer
-            footer="$footer"$'\n'"$line"
         else
             # Inside TASKS section
-            # Skip existing section headers (### lines) - we'll add our own
-            if [[ "$line" =~ ^###[[:space:]] ]]; then
+            # Skip existing section headers (## and ### lines) - we'll add our own
+            if [[ "$line" =~ ^#{2,}[[:space:]] ]]; then
                 continue
             fi
 
@@ -588,7 +571,6 @@ _cleanup_kanban_impl() {
     local header=""
     local footer=""
     local in_tasks_section=false
-    local past_tasks_section=false
     local tasks_header=""
 
     # Section tracking — section 0 is the top-level (before any ###)
@@ -616,36 +598,18 @@ _cleanup_kanban_impl() {
             continue
         fi
 
-        # Check for next section after TASKS (## something else)
-        if [ "$in_tasks_section" = true ] && [[ "$line" =~ ^##[[:space:]] ]] && [[ ! "$line" =~ ^##[[:space:]]+TASKS ]]; then
-            in_tasks_section=false
-            past_tasks_section=true
-            if [ -n "$current_block" ]; then
-                task_blocks+=("$current_block")
-                task_statuses+=("$current_status")
-                block_ids+=("$current_id")
-                task_sections+=("$current_section")
-                current_block=""
-            fi
-            footer="$line"
-            continue
-        fi
-
-        if [ "$in_tasks_section" = false ] && [ "$past_tasks_section" = false ]; then
+        if [ "$in_tasks_section" = false ]; then
             # Before TASKS section - accumulate header
             if [ -n "$header" ]; then
                 header="$header"$'\n'"$line"
             else
                 header="$line"
             fi
-        elif [ "$past_tasks_section" = true ]; then
-            # After TASKS section - accumulate footer
-            footer="$footer"$'\n'"$line"
         else
             # Inside TASKS section
 
-            # Check for ### sub-heading — starts a new section
-            if [[ "$line" =~ ^###[[:space:]] ]]; then
+            # Check for sub-heading (## or ###) — starts a new section
+            if [[ "$line" =~ ^#{2,}[[:space:]] ]]; then
                 # Save any pending block to current section
                 if [ -n "$current_block" ]; then
                     task_blocks+=("$current_block")
