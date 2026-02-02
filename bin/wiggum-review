@@ -87,23 +87,17 @@ Examples:
 EOF
 }
 
-log() {
-    echo "[$(date -Iseconds)] $*"
-}
-
-error() {
-    echo "[$(date -Iseconds)] ERROR: $*" >&2
-}
+# log() and log_error() provided by lib/core/logger.sh (sourced above)
 
 # Check if gh CLI is installed
 if ! command -v gh &> /dev/null; then
-    error "gh CLI is not installed. Install it from: https://cli.github.com/"
+    log_error "gh CLI is not installed. Install it from: https://cli.github.com/"
     exit $EXIT_ERROR
 fi
 
 # Check if we're in a git repository
 if ! git rev-parse --git-dir > /dev/null 2>&1; then
-    error "Not in a git repository"
+    log_error "Not in a git repository"
     exit $EXIT_REVIEW_NO_RALPH_DIR
 fi
 
@@ -118,7 +112,7 @@ review_pr() {
     local pr_number="$1"
 
     if [ -z "$pr_number" ]; then
-        error "PR number required"
+        log_error "PR number required"
         return 1
     fi
 
@@ -135,7 +129,7 @@ merge_pr() {
     local merge_method="${2:-merge}"  # merge, squash, or rebase
 
     if [ -z "$pr_number" ]; then
-        error "PR number required"
+        log_error "PR number required"
         return 1
     fi
 
@@ -160,7 +154,7 @@ merge_pr() {
         log "✓ Merged PR #$pr_number"
         return 0
     else
-        error "Failed to merge PR #$pr_number"
+        log_error "Failed to merge PR #$pr_number"
         return 1
     fi
 }
@@ -275,13 +269,13 @@ show_status() {
 # Global sync: update merged PRs to [x], detect new comments for open PRs
 cmd_global_sync() {
     if [ ! -d "$RALPH_DIR" ]; then
-        error ".ralph/ directory not found"
+        log_error ".ralph/ directory not found"
         return 1
     fi
 
     local kanban="$RALPH_DIR/kanban.md"
     if [ ! -f "$kanban" ]; then
-        error ".ralph/kanban.md not found"
+        log_error ".ralph/kanban.md not found"
         return 1
     fi
 
@@ -408,7 +402,7 @@ cmd_task_sync() {
     local patterns="$1"
 
     if [ -z "$patterns" ]; then
-        error "Task pattern(s) required"
+        log_error "Task pattern(s) required"
         echo "Usage: wiggum review task <patterns> sync"
         return 1
     fi
@@ -467,7 +461,7 @@ cmd_task_fix() {
     local quick_mode="${2:-false}"
 
     if [ -z "$pattern" ]; then
-        error "Task pattern required"
+        log_error "Task pattern required"
         echo "Usage: wiggum review task <pattern> fix [--quick]"
         return 1
     fi
@@ -480,7 +474,7 @@ cmd_task_fix() {
         # Try the review directory as fallback
         worker_dir="$RALPH_DIR/review"
         if [ ! -f "$worker_dir/task-comments.md" ]; then
-            error "No worker or review directory found for pattern: $pattern"
+            log_error "No worker or review directory found for pattern: $pattern"
             echo "Ensure a worker exists for this task or run sync first:"
             echo "  wiggum review task $pattern sync"
             return 1
@@ -490,7 +484,7 @@ cmd_task_fix() {
 
     # Verify comments file exists
     if [ ! -f "$worker_dir/task-comments.md" ]; then
-        error "No comments file found. Run sync first:"
+        log_error "No comments file found. Run sync first:"
         echo "  wiggum review task $pattern sync"
         return 1
     fi
@@ -564,7 +558,7 @@ cmd_task_fix() {
         # Brief wait then check if agent failed
         sleep 0.3
         if tail -5 "$RALPH_DIR/logs/fix-workers.log" 2>/dev/null | grep -q "ERROR:"; then
-            error "Fix agent failed to start. Check $RALPH_DIR/logs/fix-workers.log"
+            log_error "Fix agent failed to start. Check $RALPH_DIR/logs/fix-workers.log"
         else
             log "Fix agent started (PID file pending)"
         fi
@@ -577,7 +571,7 @@ cmd_task_resolve() {
     local no_fetch="$2"
 
     if [ -z "$pattern" ]; then
-        error "Task pattern required"
+        log_error "Task pattern required"
         echo "Usage: wiggum review task <pattern> resolve [--no-fetch]"
         return 1
     fi
@@ -587,20 +581,20 @@ cmd_task_resolve() {
     worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$pattern")
 
     if [ -z "$worker_dir" ] || [ ! -d "$worker_dir" ]; then
-        error "No worker directory found for pattern: $pattern"
+        log_error "No worker directory found for pattern: $pattern"
         return 1
     fi
 
     local workspace="$worker_dir/workspace"
     if [ ! -d "$workspace" ]; then
-        error "Workspace not found: $workspace"
+        log_error "Workspace not found: $workspace"
         return 1
     fi
 
     # Verify workspace is a functional git repository (catches broken worktrees)
     if ! git -C "$workspace" rev-parse HEAD &>/dev/null; then
-        error "Workspace is not a functional git repository (broken worktree?): $workspace"
-        error "The worktree may need to be recreated. Mark worker as failed or delete and restart."
+        log_error "Workspace is not a functional git repository (broken worktree?): $workspace"
+        log_error "The worktree may need to be recreated. Mark worker as failed or delete and restart."
         return 1
     fi
 
@@ -609,7 +603,7 @@ cmd_task_resolve() {
         log "Fetching and merging origin/main..."
 
         if ! git -C "$workspace" fetch origin main 2>&1; then
-            error "Failed to fetch origin/main"
+            log_error "Failed to fetch origin/main"
             return 1
         fi
 
@@ -719,7 +713,7 @@ cmd_task_commit() {
     local pattern="$1"
 
     if [ -z "$pattern" ]; then
-        error "Task pattern required"
+        log_error "Task pattern required"
         echo "Usage: wiggum review task <pattern> commit"
         return 1
     fi
@@ -729,13 +723,13 @@ cmd_task_commit() {
     worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$pattern")
 
     if [ -z "$worker_dir" ] || [ ! -d "$worker_dir" ]; then
-        error "No worker directory found for pattern: $pattern"
+        log_error "No worker directory found for pattern: $pattern"
         return 1
     fi
 
     local workspace="$worker_dir/workspace"
     if [ ! -d "$workspace" ]; then
-        error "Workspace not found: $workspace"
+        log_error "Workspace not found: $workspace"
         return 1
     fi
 
@@ -761,7 +755,7 @@ cmd_task_commit() {
         log "✓ Commit created on branch: $GIT_COMMIT_BRANCH"
         return 0
     else
-        error "Failed to create commit"
+        log_error "Failed to create commit"
         return 1
     fi
 }
@@ -771,7 +765,7 @@ cmd_task_push() {
     local pattern="$1"
 
     if [ -z "$pattern" ]; then
-        error "Task pattern required"
+        log_error "Task pattern required"
         echo "Usage: wiggum review task <pattern> push"
         return 1
     fi
@@ -781,13 +775,13 @@ cmd_task_push() {
     worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$pattern")
 
     if [ -z "$worker_dir" ] || [ ! -d "$worker_dir" ]; then
-        error "No worker directory found for pattern: $pattern"
+        log_error "No worker directory found for pattern: $pattern"
         return 1
     fi
 
     local workspace="$worker_dir/workspace"
     if [ ! -d "$workspace" ]; then
-        error "Workspace not found: $workspace"
+        log_error "Workspace not found: $workspace"
         return 1
     fi
 
@@ -798,7 +792,7 @@ cmd_task_push() {
     branch_name=$(git rev-parse --abbrev-ref HEAD)
 
     if [ "$branch_name" = "HEAD" ]; then
-        error "Not on a branch (detached HEAD). Run 'commit' first."
+        log_error "Not on a branch (detached HEAD). Run 'commit' first."
         return 1
     fi
 
@@ -808,7 +802,7 @@ cmd_task_push() {
         log "✓ Pushed branch $branch_name"
         return 0
     else
-        error "Failed to push branch"
+        log_error "Failed to push branch"
         return 1
     fi
 }
@@ -818,7 +812,7 @@ cmd_task_pr() {
     local pattern="$1"
 
     if [ -z "$pattern" ]; then
-        error "Task pattern required"
+        log_error "Task pattern required"
         echo "Usage: wiggum review task <pattern> pr"
         return 1
     fi
@@ -828,13 +822,13 @@ cmd_task_pr() {
     worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$pattern")
 
     if [ -z "$worker_dir" ] || [ ! -d "$worker_dir" ]; then
-        error "No worker directory found for pattern: $pattern"
+        log_error "No worker directory found for pattern: $pattern"
         return 1
     fi
 
     local workspace="$worker_dir/workspace"
     if [ ! -d "$workspace" ]; then
-        error "Workspace not found: $workspace"
+        log_error "Workspace not found: $workspace"
         return 1
     fi
 
@@ -850,7 +844,7 @@ cmd_task_pr() {
     branch_name=$(git rev-parse --abbrev-ref HEAD)
 
     if [ "$branch_name" = "HEAD" ]; then
-        error "Not on a branch (detached HEAD). Run 'commit' first."
+        log_error "Not on a branch (detached HEAD). Run 'commit' first."
         return 1
     fi
 
@@ -858,7 +852,7 @@ cmd_task_pr() {
     if ! git ls-remote --exit-code --heads origin "$branch_name" >/dev/null 2>&1; then
         log "Branch not pushed. Pushing now..."
         if ! git push -u origin "$branch_name" 2>&1; then
-            error "Failed to push branch"
+            log_error "Failed to push branch"
             return 1
         fi
     fi
@@ -875,7 +869,7 @@ cmd_task_pr() {
         log "✓ PR created: $GIT_PR_URL"
         return 0
     else
-        error "Failed to create PR (branch may already have a PR)"
+        log_error "Failed to create PR (branch may already have a PR)"
         return 1
     fi
 }
@@ -886,7 +880,7 @@ cmd_task_reset() {
     local target_state="${2:-needs_resolve}"
 
     if [ -z "$pattern" ]; then
-        error "Task pattern required"
+        log_error "Task pattern required"
         echo "Usage: wiggum review task <pattern> reset [state]"
         echo "States: needs_resolve (default), needs_fix, needs_merge"
         return 1
@@ -897,7 +891,7 @@ cmd_task_reset() {
     worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$pattern")
 
     if [ -z "$worker_dir" ] || [ ! -d "$worker_dir" ]; then
-        error "No worker directory found for pattern: $pattern"
+        log_error "No worker directory found for pattern: $pattern"
         return 1
     fi
 
@@ -906,7 +900,7 @@ cmd_task_reset() {
     local git_state_file="$worker_dir/git-state.json"
 
     if [ ! -f "$git_state_file" ]; then
-        error "No git-state.json found in $worker_dir"
+        log_error "No git-state.json found in $worker_dir"
         return 1
     fi
 
@@ -953,7 +947,7 @@ cmd_task_reset() {
         log "  git-state.json updated"
     else
         rm -f "$tmp_file"
-        error "Failed to update git-state.json"
+        log_error "Failed to update git-state.json"
         return 1
     fi
 
@@ -1020,12 +1014,12 @@ case "$COMMAND" in
         PR_NUMBER="${ARGS[0]:-}"
         PR_ACTION="${ARGS[1]:-}"
         if [ -z "$PR_NUMBER" ]; then
-            error "PR number required"
+            log_error "PR number required"
             echo "Usage: wiggum review pr [PR#] [view|merge]"
             exit $EXIT_USAGE
         fi
         if [ -z "$PR_ACTION" ]; then
-            error "Action required"
+            log_error "Action required"
             echo "Usage: wiggum review pr [PR#] [view|merge]"
             exit $EXIT_USAGE
         fi
@@ -1037,7 +1031,7 @@ case "$COMMAND" in
                 merge_pr "$PR_NUMBER" "$MERGE_METHOD"
                 ;;
             *)
-                error "Unknown PR action: $PR_ACTION"
+                log_error "Unknown PR action: $PR_ACTION"
                 echo "Usage: wiggum review pr [PR#] [view|merge]"
                 exit $EXIT_USAGE
                 ;;
@@ -1048,7 +1042,7 @@ case "$COMMAND" in
         TASK_ACTION="${ARGS[1]}"
 
         if [ -z "$TASK_PATTERNS" ]; then
-            error "Task pattern(s) required"
+            log_error "Task pattern(s) required"
             echo "Usage: wiggum review task <patterns> [sync|fix]"
             exit $EXIT_USAGE
         fi
@@ -1086,7 +1080,7 @@ case "$COMMAND" in
                 cmd_task_reset "$TASK_PATTERNS" "$TARGET_STATE"
                 ;;
             *)
-                error "Unknown task action: $TASK_ACTION"
+                log_error "Unknown task action: $TASK_ACTION"
                 echo "Valid actions: sync, fix, resolve, commit, push, pr, reset"
                 exit $EXIT_USAGE
                 ;;
@@ -1105,7 +1099,7 @@ case "$COMMAND" in
         show_help
         ;;
     *)
-        error "Unknown command: $COMMAND"
+        log_error "Unknown command: $COMMAND"
         echo ""
         show_help
         exit $EXIT_USAGE

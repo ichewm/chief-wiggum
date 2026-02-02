@@ -436,7 +436,7 @@ github_plan_sync_all() {
         esac
     done
 
-    echo "Plan sync: $synced synced, $skipped skipped, $conflicts conflicts, $errors errors"
+    log_info "Plan sync: $synced synced, $skipped skipped, $conflicts conflicts, $errors errors"
 
     if [ "$had_conflict" = "true" ]; then
         return 1
