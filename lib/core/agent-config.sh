@@ -280,15 +280,3 @@ agent_get_runtime_config() {
         echo "{}"
     fi
 }
-
-# Read step config from pipeline-config.json
-# DEPRECATED: Use agent_get_step_config instead
-#
-# Args:
-#   worker_dir - Worker directory path
-#
-# Returns: JSON content of step config, or "{}" if not found
-agent_read_step_config() {
-    local worker_dir="$1"
-    agent_get_step_config "$worker_dir"
-}

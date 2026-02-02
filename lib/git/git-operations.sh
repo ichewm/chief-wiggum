@@ -11,6 +11,7 @@ source "$WIGGUM_HOME/lib/utils/calculate-cost.sh"
 source "$WIGGUM_HOME/lib/worker/git-state.sh"
 source "$WIGGUM_HOME/lib/github/issue-state.sh"
 source "$WIGGUM_HOME/lib/core/platform.sh"
+source "$WIGGUM_HOME/lib/utils/event-emitter.sh"
 
 # =============================================================================
 # CONFLICT MARKER DETECTION
@@ -528,6 +529,9 @@ ${closes_section}${metrics_section}
         else
             log_warn "Could not determine PR number - conflict resolution may not work"
         fi
+
+        # Emit structured event for observability
+        emit_pr_created "$task_id" "$GIT_PR_URL" "$branch_name"
 
         return 0
     else

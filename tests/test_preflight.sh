@@ -171,8 +171,8 @@ test_check_config_files_valid_json() {
     (
         export WIGGUM_HOME="$TEST_DIR/wiggum_cfg"
         mkdir -p "$WIGGUM_HOME/config"
-        echo '{"key": "value"}' > "$WIGGUM_HOME/config/config.json"
-        echo '{"agents": []}' > "$WIGGUM_HOME/config/agents.json"
+        echo '{"workers": {"max_iterations": 10, "sleep_seconds": 2}}' > "$WIGGUM_HOME/config/config.json"
+        echo '{"agents": {}, "defaults": {"max_iterations": 10, "max_turns": 30}}' > "$WIGGUM_HOME/config/agents.json"
         # Need to re-source logger in subshell since WIGGUM_HOME changed
         source "$TESTS_DIR/../lib/core/logger.sh" 2>/dev/null || true
         check_config_files >/dev/null 2>&1

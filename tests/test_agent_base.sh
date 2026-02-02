@@ -26,9 +26,6 @@ test_exit_codes_are_defined() {
     assert_equals "58" "$EXIT_AGENT_READY_FAILED" "EXIT_AGENT_READY_FAILED should be 58"
     assert_equals "59" "$EXIT_AGENT_OUTPUT_MISSING" "EXIT_AGENT_OUTPUT_MISSING should be 59"
     assert_equals "60" "$EXIT_AGENT_VALIDATION_FAILED" "EXIT_AGENT_VALIDATION_FAILED should be 60"
-    assert_equals "61" "$EXIT_AGENT_VIOLATION" "EXIT_AGENT_VIOLATION should be 61"
-    assert_equals "62" "$EXIT_AGENT_TIMEOUT" "EXIT_AGENT_TIMEOUT should be 62"
-    assert_equals "63" "$EXIT_AGENT_MAX_ITERATIONS" "EXIT_AGENT_MAX_ITERATIONS should be 63"
 }
 
 test_exit_codes_under_64() {
@@ -40,9 +37,6 @@ test_exit_codes_under_64() {
         "$EXIT_AGENT_READY_FAILED"
         "$EXIT_AGENT_OUTPUT_MISSING"
         "$EXIT_AGENT_VALIDATION_FAILED"
-        "$EXIT_AGENT_VIOLATION"
-        "$EXIT_AGENT_TIMEOUT"
-        "$EXIT_AGENT_MAX_ITERATIONS"
     )
 
     for code in "${codes[@]}"; do

@@ -5,6 +5,9 @@
 # Events follow a consistent schema with type, timestamp, and context.
 set -euo pipefail
 
+[ -n "${_EVENT_EMITTER_LOADED:-}" ] && return 0
+_EVENT_EMITTER_LOADED=1
+
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/file-lock.sh"
 source "$WIGGUM_HOME/lib/core/platform.sh"

@@ -7,6 +7,7 @@ set -euo pipefail
 
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
+source "$WIGGUM_HOME/lib/core/config-validator.sh"
 
 # Terminal colors (if supported)
 if [ -t 1 ]; then
@@ -254,14 +255,15 @@ check_config_files() {
         return 0
     fi
 
-    # Validate JSON syntax
-    if ! jq empty "$WIGGUM_HOME/config/config.json" 2>/dev/null; then
-        _print_check "fail" "$name" "config.json has invalid JSON"
+    # Validate config.json structure and values
+    if ! validate_config "$WIGGUM_HOME/config/config.json" 2>/dev/null; then
+        _print_check "fail" "$name" "config.json validation failed"
         return 1
     fi
 
-    if ! jq empty "$WIGGUM_HOME/config/agents.json" 2>/dev/null; then
-        _print_check "fail" "$name" "agents.json has invalid JSON"
+    # Validate agents.json structure and values
+    if ! validate_agents_config "$WIGGUM_HOME/config/agents.json" 2>/dev/null; then
+        _print_check "fail" "$name" "agents.json validation failed"
         return 1
     fi
 

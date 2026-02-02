@@ -8,6 +8,9 @@
 # subprocess overhead from 25+ jq invocations to 2-3 per file.
 set -euo pipefail
 
+[ -n "${_CONFIG_VALIDATOR_LOADED:-}" ] && return 0
+_CONFIG_VALIDATOR_LOADED=1
+
 source "$WIGGUM_HOME/lib/core/logger.sh"
 
 # Validate a JSON file exists and is valid JSON

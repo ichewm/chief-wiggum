@@ -28,13 +28,10 @@ export EXIT_INIT_NOT_GIT_REPO=3
 
 # === Worker start errors (10-19) ===
 export EXIT_WORKER_MISSING_TASK_ID=10
-export EXIT_WORKER_INVALID_TASK_FORMAT=11
 export EXIT_WORKER_NO_RALPH_DIR=12
 export EXIT_WORKER_NO_KANBAN=13
 export EXIT_WORKER_TASK_NOT_FOUND=14
 export EXIT_WORKER_ALREADY_EXISTS=15
-export EXIT_WORKER_NOT_RUNNING=16
-export EXIT_WORKER_PID_NOT_CREATED=17
 
 # === Run/orchestration errors (20-29) ===
 export EXIT_RUN_NO_RALPH_DIR=20
@@ -61,15 +58,12 @@ export EXIT_CLEAN_NO_RALPH_DIR=50
 export EXIT_CLEAN_WORKERS_RUNNING=51
 export EXIT_CLEAN_PATTERN_NOT_FOUND=52
 
-# === Agent errors (56-63) ===
+# === Agent errors (56-60) ===
 export EXIT_AGENT_INIT_FAILED=56       # agent_on_init hook failed
 export EXIT_AGENT_PREREQ_FAILED=57     # Required paths missing before agent run
 export EXIT_AGENT_READY_FAILED=58      # agent_on_ready hook failed
 export EXIT_AGENT_OUTPUT_MISSING=59    # Required output files missing/empty after run
 export EXIT_AGENT_VALIDATION_FAILED=60 # Agent validation review returned FAIL
-export EXIT_AGENT_VIOLATION=61         # Workspace boundary violation detected
-export EXIT_AGENT_TIMEOUT=62           # Agent exceeded timeout_seconds
-export EXIT_AGENT_MAX_ITERATIONS=63    # Agent hit max_iterations limit
 
 # === Resume decision exit codes (65-68) ===
 export EXIT_RESUME_ABORT=65     # Resume-decide: unrecoverable, mark failed
