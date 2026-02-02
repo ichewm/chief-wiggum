@@ -248,6 +248,160 @@ test_export_metrics_valid_json_structure() {
 }
 
 # =============================================================================
+# Cache Tests
+# =============================================================================
+
+test_export_metrics_creates_cache_files() {
+    local ralph_dir="$TEST_DIR/.ralph"
+    mkdir -p "$ralph_dir/workers"
+
+    local w1
+    w1=$(_create_worker "$ralph_dir" "worker-TASK-010-10101" "success")
+    _create_iteration_log "$w1" 1 2000 1000 120000 0.10
+
+    export_metrics "$ralph_dir" > /dev/null 2>&1
+
+    local cache_dir="$ralph_dir/cache/metrics"
+    assert_file_exists "$cache_dir/worker-TASK-010-10101.json" "Cache file should be created"
+
+    # Cache file should contain fingerprint and data
+    local has_fp has_data
+    has_fp=$(jq 'has("fingerprint")' "$cache_dir/worker-TASK-010-10101.json")
+    has_data=$(jq 'has("data")' "$cache_dir/worker-TASK-010-10101.json")
+    assert_equals "true" "$has_fp" "Cache should have fingerprint"
+    assert_equals "true" "$has_data" "Cache should have data"
+}
+
+test_export_metrics_cache_hit_produces_same_output() {
+    local ralph_dir="$TEST_DIR/.ralph"
+    mkdir -p "$ralph_dir/workers"
+
+    local w1
+    w1=$(_create_worker "$ralph_dir" "worker-TASK-011-11111" "success")
+    _create_iteration_log "$w1" 1 3000 1500 180000 0.15
+
+    # First export
+    export_metrics "$ralph_dir" > /dev/null 2>&1
+    local first_output
+    first_output=$(jq -cS '.' "$ralph_dir/metrics.json")
+
+    # Second export (should hit cache)
+    export_metrics "$ralph_dir" > /dev/null 2>&1
+    local second_output
+    second_output=$(jq -cS '.' "$ralph_dir/metrics.json")
+
+    assert_equals "$first_output" "$second_output" "Cached export should produce identical output"
+}
+
+test_export_metrics_cache_invalidation_on_new_log() {
+    local ralph_dir="$TEST_DIR/.ralph"
+    mkdir -p "$ralph_dir/workers"
+
+    local w1
+    w1=$(_create_worker "$ralph_dir" "worker-TASK-012-12121" "success")
+    _create_iteration_log "$w1" 1 2000 1000 120000 0.10
+
+    # First export
+    export_metrics "$ralph_dir" > /dev/null 2>&1
+    local first_cost
+    first_cost=$(jq '.summary.total_cost' "$ralph_dir/metrics.json")
+
+    # Add another log file (sleep 1s to ensure different mtime)
+    sleep 1
+    _create_iteration_log "$w1" 2 3000 1500 180000 0.20
+
+    # Second export should pick up new log
+    export_metrics "$ralph_dir" > /dev/null 2>&1
+    local second_cost
+    second_cost=$(jq '.summary.total_cost' "$ralph_dir/metrics.json")
+
+    # Cost should have increased (0.10 -> 0.30)
+    local cost_increased
+    cost_increased=$(echo "$second_cost > $first_cost" | bc)
+    assert_equals "1" "$cost_increased" "Cost should increase after adding log (was $first_cost, now $second_cost)"
+}
+
+test_export_metrics_cache_invalidation_on_prd_change() {
+    local ralph_dir="$TEST_DIR/.ralph"
+    mkdir -p "$ralph_dir/workers"
+
+    local w1
+    w1=$(_create_worker "$ralph_dir" "worker-TASK-013-13131" "in_progress")
+    _create_iteration_log "$w1" 1 2000 1000 120000 0.10
+
+    # First export — worker is in_progress
+    export_metrics "$ralph_dir" > /dev/null 2>&1
+    local first_status
+    first_status=$(jq -r '.workers[0].status' "$ralph_dir/metrics.json")
+    assert_equals "in_progress" "$first_status" "Should be in_progress initially"
+
+    # Update PRD to mark success (sleep 1s to ensure different mtime)
+    sleep 1
+    cat > "$w1/prd.md" << 'EOF'
+# Task PRD
+- [x] Implement feature
+- [x] Write tests
+EOF
+
+    # Second export should pick up status change
+    export_metrics "$ralph_dir" > /dev/null 2>&1
+    local second_status
+    second_status=$(jq -r '.workers[0].status' "$ralph_dir/metrics.json")
+    assert_equals "success" "$second_status" "Should be success after PRD update"
+}
+
+test_export_metrics_cache_cleanup_stale_entries() {
+    local ralph_dir="$TEST_DIR/.ralph"
+    mkdir -p "$ralph_dir/workers"
+
+    local w1 w2
+    w1=$(_create_worker "$ralph_dir" "worker-TASK-014-14141" "success")
+    w2=$(_create_worker "$ralph_dir" "worker-TASK-015-15151" "success")
+
+    # Export to create cache for both
+    export_metrics "$ralph_dir" > /dev/null 2>&1
+
+    local cache_dir="$ralph_dir/cache/metrics"
+    assert_file_exists "$cache_dir/worker-TASK-014-14141.json" "Cache for worker 014 should exist"
+    assert_file_exists "$cache_dir/worker-TASK-015-15151.json" "Cache for worker 015 should exist"
+
+    # Remove one worker
+    rm -rf "$ralph_dir/workers/worker-TASK-014-14141"
+
+    # Export again — stale cache should be cleaned up
+    export_metrics "$ralph_dir" > /dev/null 2>&1
+
+    [ ! -f "$cache_dir/worker-TASK-014-14141.json" ]
+    local exit_code=$?
+    assert_equals "0" "$exit_code" "Stale cache for removed worker should be cleaned up"
+    assert_file_exists "$cache_dir/worker-TASK-015-15151.json" "Cache for remaining worker should still exist"
+}
+
+test_export_metrics_cache_invalidation_on_pr_url() {
+    local ralph_dir="$TEST_DIR/.ralph"
+    mkdir -p "$ralph_dir/workers"
+
+    local w1
+    w1=$(_create_worker "$ralph_dir" "worker-TASK-016-16161" "success")
+
+    # First export — no PR URL
+    export_metrics "$ralph_dir" > /dev/null 2>&1
+    local first_pr
+    first_pr=$(jq -r '.workers[0].pr_url' "$ralph_dir/metrics.json")
+    assert_equals "" "$first_pr" "PR URL should be empty initially"
+
+    # Add PR URL (sleep 1s to ensure different mtime)
+    sleep 1
+    echo "https://github.com/example/repo/pull/42" > "$w1/pr_url.txt"
+
+    # Second export should pick up PR URL
+    export_metrics "$ralph_dir" > /dev/null 2>&1
+    local second_pr
+    second_pr=$(jq -r '.workers[0].pr_url' "$ralph_dir/metrics.json")
+    assert_equals "https://github.com/example/repo/pull/42" "$second_pr" "PR URL should be set after update"
+}
+
+# =============================================================================
 # Run All Tests
 # =============================================================================
 
@@ -257,6 +411,12 @@ run_test test_export_metrics_one_successful_worker
 run_test test_export_metrics_with_failed_worker
 run_test test_export_metrics_summary_includes_total_workers
 run_test test_export_metrics_valid_json_structure
+run_test test_export_metrics_creates_cache_files
+run_test test_export_metrics_cache_hit_produces_same_output
+run_test test_export_metrics_cache_invalidation_on_new_log
+run_test test_export_metrics_cache_invalidation_on_prd_change
+run_test test_export_metrics_cache_cleanup_stale_entries
+run_test test_export_metrics_cache_invalidation_on_pr_url
 
 print_test_summary
 exit_with_test_result
