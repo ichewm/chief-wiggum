@@ -184,6 +184,17 @@ WORKSPACE: $workspace
 COMMENTS: ../task-comments.md (read-only)
 STATUS: ../reports/comment-status.md (update as you fix)
 
+## Pre-Flight: Merge Conflict Markers
+
+Before addressing PR comments, check the workspace for unresolved git merge
+conflict markers (<<<<<<< / ======= / >>>>>>>). These MUST be resolved first
+or your commits will be rejected.
+
+To find them: git grep -n '<<<<<<<' -- ':(exclude)*.lock'
+To resolve: read both sides, choose the correct code (usually keep HEAD changes
+that implement the task, integrate any non-conflicting upstream changes), remove
+all marker lines. Verify the file compiles/parses correctly after resolution.
+
 ## Fix Philosophy
 
 * ADDRESS THE ACTUAL CONCERN - Understand what the reviewer wants, not just the literal words
@@ -217,6 +228,10 @@ Address feedback from PR review comments.
 
 ## Process
 
+0. **Resolve conflicts**: Run \`git grep -rn '<<<<<<<' -- ':(exclude)*.lock'\` in
+   the workspace. If any conflict markers exist, resolve them FIRST by editing
+   each file to remove \`<<<<<<<\`, \`=======\`, \`>>>>>>>\` lines and keep the
+   correct code. Verify no markers remain before proceeding.
 1. **Read comments**: @../task-comments.md - understand what reviewers want
 2. **Check status**: @../reports/comment-status.md - skip [x] items, fix [ ] items
 3. **For each pending comment**:

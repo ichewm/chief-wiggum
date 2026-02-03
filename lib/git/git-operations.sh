@@ -45,6 +45,28 @@ git_staged_has_conflict_markers() {
     return 1
 }
 
+# Check if tracked files in the working tree contain conflict markers
+#
+# Unlike git_staged_has_conflict_markers (which requires staged files),
+# this checks the working tree directly. Use when staging area may have
+# been reset.
+#
+# Args:
+#   workspace - Directory containing the git repository
+#
+# Returns: 0 if conflict markers found, 1 if clean
+# Echoes: list of files with markers (one per line)
+git_has_conflict_markers() {
+    local workspace="$1"
+    local marker_files
+    marker_files=$(git -C "$workspace" grep -l '^<\{7\} \|^=\{7\}$\|^>\{7\} ' 2>/dev/null || true)
+    if [ -n "$marker_files" ]; then
+        echo "$marker_files"
+        return 0
+    fi
+    return 1
+}
+
 # Check if conflict markers are from an active git merge/rebase (not just stale markers in code)
 #
 # Returns: 0 if an active merge/rebase is in progress, 1 otherwise
@@ -94,8 +116,17 @@ git_classify_commit_failure() {
     # Check if the conflict markers exist in files that differ from origin/main
     # If the markers exist in files that diverge from main, it's likely from
     # a merge that was resolved poorly (markers left behind from prior merge)
+    #
+    # Check staged area first, then fall back to working tree (staging may have
+    # been reset by the time classification runs)
     local marker_files
     if marker_files=$(git_staged_has_conflict_markers "$workspace"); then
+        :  # markers found in staged area
+    elif marker_files=$(git_has_conflict_markers "$workspace"); then
+        :  # markers found in working tree (staging was reset)
+    fi
+
+    if [ -n "${marker_files:-}" ]; then
         # Check if any conflicted files also show up in `git diff origin/main`
         local main_diff_files
         main_diff_files=$(git -C "$workspace" diff --name-only origin/main 2>/dev/null || true)
