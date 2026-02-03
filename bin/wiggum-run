@@ -206,9 +206,6 @@ main() {
     # Initialize activity log
     activity_init "$PROJECT_DIR"
 
-    # Initialize structured event logging
-    events_init "$PROJECT_DIR"
-
     # Acquire lock and setup signals (extracted to lib/orchestrator/lifecycle.sh)
     _acquire_lock
     _setup_signals
