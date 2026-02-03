@@ -91,6 +91,17 @@
       }
     },
     {
+      "id": "meta-init",
+      "description": "Initialize meta-agent state directory",
+      "phase": "startup",
+      "order": 75,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_meta_init"
+      }
+    },
+    {
       "id": "init-startup-display",
       "description": "Display startup info and run initial status",
       "phase": "startup",
@@ -398,6 +409,62 @@
       "execution": {
         "type": "function",
         "function": "svc_memory_analyze_complete"
+      }
+    },
+
+    {
+      "id": "meta-dispatch",
+      "description": "Track worker completions and dispatch meta-agent analysis",
+      "phase": "periodic",
+      "schedule": {
+        "type": "event",
+        "trigger": "worker.completed"
+      },
+      "execution": {
+        "type": "function",
+        "function": "svc_meta_count_completion"
+      },
+      "concurrency": {
+        "max_instances": 1,
+        "if_running": "skip"
+      }
+    },
+    {
+      "id": "meta-pipeline",
+      "description": "Run meta-agent analysis pipeline (rotates: health, todo, improve)",
+      "phase": "periodic",
+      "triggers": {
+        "on_complete": ["meta-dispatch"]
+      },
+      "condition": {
+        "file_exists": ".ralph/meta/.current-meta-context.json"
+      },
+      "execution": {
+        "type": "pipeline",
+        "pipeline": "meta-active",
+        "workspace": true
+      },
+      "timeout": 1800,
+      "concurrency": {
+        "max_instances": 1,
+        "if_running": "skip"
+      },
+      "circuit_breaker": {
+        "enabled": true,
+        "threshold": 3,
+        "cooldown": 1800
+      }
+    },
+    {
+      "id": "meta-complete",
+      "description": "Post-process meta-agent results: create tasks and PRs",
+      "phase": "periodic",
+      "triggers": {
+        "on_finish": ["meta-pipeline"]
+      },
+      "execution": {
+        "type": "function",
+        "function": "svc_meta_complete"
       }
     },
     {

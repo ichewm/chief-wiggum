@@ -167,8 +167,8 @@ if [[ "$CMD" == "pr" ]]; then
         
         # Update state to MERGED
         TMP_DB=$(mktemp)
-        jq --argjson num "$PR_NUM"aries \
-           '(.prs[] | select(.number == $num).state) = "MERGED"' \
+        jq --argjson num "$PR_NUM" \
+           '.prs |= map(if .number == $num then .state = "MERGED" else . end)' \
            "$DB_FILE" > "$TMP_DB" && mv "$TMP_DB" "$DB_FILE"
            
         echo "Merged pull request #$PR_NUM"

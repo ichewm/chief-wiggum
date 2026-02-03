@@ -23,6 +23,9 @@ _SERVICE_HANDLERS_ORCH_LOADED=1
 # Source memory service handlers
 source "$WIGGUM_HOME/lib/services/memory-handlers.sh"
 
+# Source meta-agent service handlers
+source "$WIGGUM_HOME/lib/services/meta-handlers.sh"
+
 # =============================================================================
 # Orchestrator Service Handlers
 #

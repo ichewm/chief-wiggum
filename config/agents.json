@@ -181,6 +181,33 @@
         "FAIL": { "status": "failure", "exit_code": 10, "default_jump": "abort" }
       }
     },
+    "system.codebase-health": {
+      "max_iterations": 1,
+      "max_turns": 40,
+      "timeout_seconds": 1200,
+      "result_mappings": {
+        "PASS": { "status": "success", "exit_code": 0, "default_jump": "next" },
+        "FAIL": { "status": "failure", "exit_code": 10, "default_jump": "abort" }
+      }
+    },
+    "system.todo-hunter": {
+      "max_iterations": 1,
+      "max_turns": 40,
+      "timeout_seconds": 1200,
+      "result_mappings": {
+        "PASS": { "status": "success", "exit_code": 0, "default_jump": "next" },
+        "FAIL": { "status": "failure", "exit_code": 10, "default_jump": "abort" }
+      }
+    },
+    "system.self-improver": {
+      "max_iterations": 1,
+      "max_turns": 50,
+      "timeout_seconds": 1800,
+      "result_mappings": {
+        "PASS": { "status": "success", "exit_code": 0, "default_jump": "next" },
+        "FAIL": { "status": "failure", "exit_code": 10, "default_jump": "abort" }
+      }
+    },
     "workflow.git-sync-main": {
       "max_iterations": 1,
       "max_turns": 5,
