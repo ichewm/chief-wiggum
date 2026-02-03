@@ -267,6 +267,11 @@ Options:
   -f, --foreground  Run in foreground (blocking)
   -h, --help        Show this help message
 
+Examples:
+  wiggum worker start TASK-030
+  wiggum worker start TASK-030 plan --max-iters 10
+  wiggum worker start TASK-030 --foreground
+
 EOF
                 exit $EXIT_OK
                 ;;
@@ -275,6 +280,7 @@ EOF
                     echo "Error: --max-iters requires a number argument"
                     exit $EXIT_USAGE
                 fi
+                # shellcheck disable=SC2034
                 MAX_ITERATIONS="$2"
                 shift 2
                 ;;
@@ -343,8 +349,10 @@ EOF
         exit $EXIT_USAGE
     fi
 
-    # Set globals used by do_start
+    # Set globals used by do_start (sourced cmd-start.sh)
+    # shellcheck disable=SC2034
     AGENT_TYPE="$agent_type"
+    # shellcheck disable=SC2034
     WORKER_DIR="$worker_dir_arg"
 
     do_start "$task_id_arg"
@@ -387,6 +395,7 @@ EOF
                     echo "Error: --max-iters requires a number argument"
                     exit $EXIT_USAGE
                 fi
+                # shellcheck disable=SC2034
                 MAX_ITERATIONS="$2"
                 shift 2
                 ;;
@@ -395,6 +404,7 @@ EOF
                     echo "Error: --max-turns requires a number argument"
                     exit $EXIT_USAGE
                 fi
+                # shellcheck disable=SC2034
                 MAX_TURNS="$2"
                 shift 2
                 ;;
@@ -469,10 +479,12 @@ EOF
                 exit $EXIT_OK
                 ;;
             --quick)
+                # shellcheck disable=SC2034
                 QUICK_MODE=true
                 shift
                 ;;
             -f|--foreground)
+                # shellcheck disable=SC2034
                 FOREGROUND_MODE=true
                 shift
                 ;;
@@ -556,6 +568,7 @@ main() {
 
     # Map LOG_LEVEL=WARN to QUIET_MODE for backward compatibility
     if [[ "${LOG_LEVEL:-}" == "WARN" ]]; then
+        # shellcheck disable=SC2034
         QUIET_MODE=true
     fi
 
