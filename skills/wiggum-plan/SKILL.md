@@ -74,14 +74,26 @@ For task format details, see `/kanban` skill references:
 
 ---
 
-### Phase 1: Discovery
+### Phase 1: Research
 
-**Goal:** Establish clarity on what needs to be built before exploring code.
+**Goal:** Deep understanding of the requirements, the system, and the specifications before touching any code. This is NOT just reading the task — it is understanding how the system works and how the new requirements fit within it.
 
 **Read the task requirements:**
 - Read `.ralph/kanban.md` and find the task entry for the given ID
 - Extract Description, Scope, Acceptance Criteria, Dependencies
 - Check dependent tasks to understand what they provide
+- Classify the task: is this a bug fix, a new feature, a refactor, or a behavioral change?
+
+**Read project-level instructions:**
+- Read `CLAUDE.md` or `AGENTS.md` at the project root (if they exist) for conventions and constraints
+- Explore `docs/` for analysis, research, references, and developer documentation
+
+**Discover and read specifications:**
+- Explore `spec/` — this is the source of truth for specifications. Do not assume any internal structure; list what you find and read each spec relevant to the task
+- Determine how the new requirements fit within the existing specifications
+- Identify which interfaces, contracts, or schemas are affected
+- Does the spec already accommodate this requirement, or does it need to be extended?
+- Flag any cases where current code already deviates from spec — the plan should correct drift, not entrench it
 
 **Ask initial clarifying questions:**
 - What problem does this solve?
@@ -89,28 +101,40 @@ For task format details, see `/kanban` skill references:
 - Are there any constraints or requirements not in the task?
 - What does success look like?
 
-**Output:** Clear understanding of requirements and constraints before diving into code.
+**Output:** Clear understanding of requirements, specifications, and constraints before diving into code.
 
 ---
 
 ### Phase 2: Codebase Exploration (Parallel Analysis)
 
-**Goal:** Build comprehensive understanding of relevant existing code through parallel exploration of three dimensions.
+**Goal:** Build comprehensive understanding of relevant existing code through parallel exploration of four dimensions.
 
 **Dimension A - Similar Features:**
 - Search for existing features that solve similar problems
 - Trace execution paths from entry points through data transformations
 - Document how existing features are structured
+- **For bug fixes**: Trace the failure path, identify root cause (not just symptoms), find sibling bugs sharing the same cause, check why existing tests missed it
+- **For new features**: Map every component the feature will touch, find analogous features as implementation references
 
 **Dimension B - Architecture & Patterns:**
 - Map abstraction layers and module boundaries
 - Identify design patterns used in the codebase
 - Understand technology stack and conventions
+- Study how the system works end-to-end for the area this task touches
+- Understand existing abstractions — what they encapsulate and what assumptions they encode
 
 **Dimension C - Integration Points:**
 - Find code that will interact with the new feature
 - Identify shared utilities, services, and data models
 - Understand testing patterns and coverage expectations
+
+**Dimension D - Interfaces & Coupling:**
+- What is the current interface surface between the modules this task touches?
+- Can the integration surface be *reduced* rather than extended? Fewer touch-points is better
+- Are the affected modules orthogonal — independent concerns, or hidden coupling?
+- If modules share state, configuration, or implicit contracts, can these be made explicit and narrow?
+- Would an explicit interface (function contract, file format, schema) make two modules less entangled?
+- Prefer designs where a change in one module does not ripple into unrelated modules
 
 **Exploration tools (READ-ONLY):**
 - **Glob**: Find files by pattern
@@ -118,7 +142,7 @@ For task format details, see `/kanban` skill references:
 - **Read**: Examine specific files in detail
 - **Bash** (read-only): `ls`, `git log`, `git diff`
 
-**Output:** Identify 5-10 key files for reference with specific insights from each.
+**Output:** Identify key files for reference with specific insights from each. Catalog every file that will need to change, with specific line ranges.
 
 ---
 
@@ -128,22 +152,25 @@ For task format details, see `/kanban` skill references:
 
 > ⚠️ **This is one of the most important phases. Do not skip it.**
 
-**Consolidate questions from exploration into categories:**
+**Consolidate questions from exploration into categories (ask in this order):**
 
-1. **Edge Cases**: What happens when X fails? What if Y is empty?
-2. **Error Handling**: How should errors be surfaced? Retry logic?
-3. **Integration Points**: How should this interact with existing system X?
-4. **Design Preferences**: Performance vs simplicity? Explicit vs convention?
+1. **Architectural Direction** *(always first)*: Present any architectural improvements the new requirements make possible — consolidation, decoupling, simplification. Ground options in Phase 1-2 findings. If no changes are warranted, state why.
+2. **Integration Points**: How should this interact with existing systems?
+3. **Design Preferences**: Performance vs simplicity? Explicit vs convention?
+4. **Edge Cases & Error Handling**: Failure modes, empty states, retry logic
 5. **Scope Boundaries**: What's explicitly out of scope?
 
 **AskUserQuestion Format:**
-```
-- question: Clear, specific question ending with ?
-- header: Short label (max 12 chars)
-- multiSelect: false (unless choices aren't mutually exclusive)
-- options: 2-4 specific choices grounded in codebase findings
-  - label: Concise choice text (1-5 words)
-  - description: Context from exploration (file paths, patterns found)
+```yaml
+questions:
+  - question: Should we consolidate modules X and Y behind a shared interface?
+    header: Architecture
+    multiSelect: false
+    options:
+      - label: Consolidate (Recommended)
+        description: "Reduces coupling. X (src/x.sh:40) and Y (src/y.sh:15) share 3 implicit contracts"
+      - label: Keep separate
+        description: "Lower risk, but interface surface stays wide"
 ```
 
 **Guidelines:**
@@ -160,6 +187,12 @@ For task format details, see `/kanban` skill references:
 
 **Goal:** Present 2-3 architecture approaches with trade-off analysis, then recommend the best fit.
 
+**Reflect on best practices first:**
+- How is this kind of problem solved in well-tested production systems?
+- What are established patterns in the broader ecosystem for this functionality?
+- Are there known pitfalls, anti-patterns, or scaling concerns with the naive approach?
+- What would a senior architect critique about the simplest possible implementation?
+
 **Generate approaches:**
 
 | Approach | Description | When to Use |
@@ -173,6 +206,8 @@ For task format details, see `/kanban` skill references:
 - Component design with file paths and responsibilities
 - Data flow from entry points through transformations
 - Files to CREATE vs MODIFY vs REFERENCE
+- Specification impact: which specs need modification, interface surface changes (narrower/same/wider)
+- Whether modules can be consolidated or simplified, or whether new abstractions are justified
 - Pros and cons
 
 **Present trade-off analysis:**
@@ -215,9 +250,14 @@ questions:
 
 **Plan must include:**
 - Selected architecture approach and rationale
+- Specification impact: specs consulted, spec modifications required, interface changes, existing drift
 - Patterns discovered during exploration (with file references)
-- Step-by-step implementation sequence
-- Critical files table (CREATE/MODIFY/REFERENCE)
+- Step-by-step implementation sequence with file paths, line numbers, current code snippets, and precise change descriptions
+- Module impact summary and whether modules should be combined or reorganized
+- Critical files table (CREATE/MODIFY/REFERENCE with line ranges)
+- Optimization goals: whether this simplifies or adds complexity
+- Future considerations: migration, compatibility, follow-up work
+- Testing plan: specific tests to add/modify/run, with success criteria
 - Potential challenges and mitigations
 - Decisions made during clarifying questions
 
@@ -232,314 +272,27 @@ For plan structure and format, see references/plan-format.md.
 **Present summary to user:**
 - What was planned and why
 - Key architectural decisions made
+- Specification changes required (if any)
+- Interface surface impact (narrower/same/wider)
 - Critical files identified
 - Potential challenges flagged
 - Suggested next steps (run worker, need more planning, etc.)
 
 **Output:** User has clear understanding of the plan and confidence to proceed.
 
-## Examples
-
-### Example 1: Planning an Existing Task (Full 7-Phase Workflow)
-
-**User**: `/wiggum-plan TASK-015`
-
----
-
-**Phase 1: Discovery**
-
-**Assistant**: I'll create an implementation plan for TASK-015 using the 7-phase workflow. Let me start with discovery.
-
-*[Reads .ralph/kanban.md]*
-
-Found TASK-015:
-```
-- [ ] **[TASK-015]** Create auth routes (login/register)
-  - Description: Create POST /auth/login and POST /auth/register endpoints
-  - Priority: HIGH
-  - Dependencies: TASK-013, TASK-014, TASK-010
-```
-
-*[Uses AskUserQuestion]*
-```yaml
-questions:
-  - question: What is the primary goal for these auth routes?
-    header: Goal
-    multiSelect: false
-    options:
-      - label: User authentication
-        description: Standard login/register for existing user base
-      - label: OAuth integration
-        description: Third-party auth (Google, GitHub, etc.)
-      - label: API authentication
-        description: Machine-to-machine API access tokens
-```
-
-**User selects**: User authentication
-
----
-
-**Phase 2: Codebase Exploration**
-
-**Assistant**: Now exploring the codebase across three dimensions...
-
-**Dimension A - Similar Features:**
-*[Uses Glob to find route files]*
-*[Uses Read to examine src/routes/users.ts]*
-
-Found route pattern using Express Router with controller separation:
-- `src/routes/users.ts:15` - Route definition pattern
-- `src/controllers/userController.ts` - Controller pattern with error handling
-
-**Dimension B - Architecture & Patterns:**
-*[Uses Grep to find validation patterns]*
-*[Uses Read to examine src/middleware/]*
-
-Found:
-- Validation using `express-validator` in existing routes
-- Error handling middleware at `src/middleware/errorHandler.ts`
-- Request logging at `src/middleware/logger.ts`
-
-**Dimension C - Integration Points:**
-*[Uses Read to examine dependent tasks' outputs]*
-
-Dependencies provide:
-- TASK-013: JWT utilities at `src/utils/jwt.ts`
-- TASK-014: Auth middleware at `src/middleware/auth.ts`
-- TASK-010: API routing base at `src/routes/index.ts`
-
-**Key files identified (8 total):**
-| File | Insight |
-|------|---------|
-| `src/routes/users.ts` | Route pattern to follow |
-| `src/controllers/userController.ts` | Controller structure |
-| `src/middleware/auth.ts` | Auth middleware from TASK-014 |
-| `src/utils/jwt.ts` | JWT utils from TASK-013 |
-| `src/middleware/rate-limit.ts` | Existing rate limiter |
-| `src/middleware/errorHandler.ts` | Error handling pattern |
-| `src/models/User.ts` | User model structure |
-| `src/validators/index.ts` | Validation patterns |
-
----
-
-**Phase 3: Clarifying Questions**
-
-**Assistant**: Based on exploration, I have clarifying questions across key decision areas.
-
-*[Uses AskUserQuestion]*
-```yaml
-questions:
-  - question: Should registration require email verification?
-    header: Email verify
-    multiSelect: false
-    options:
-      - label: No verification (Recommended)
-        description: User gets immediate access. Simpler, matches existing user flow
-      - label: Email verification
-        description: Requires email service integration (not currently in codebase)
-  - question: What password requirements should we enforce?
-    header: Password
-    multiSelect: false
-    options:
-      - label: Minimum 8 chars
-        description: Simple requirement, good UX, found in similar apps
-      - label: Complex rules
-        description: Upper, lower, number, special char - more secure but friction
-  - question: Should failed logins be rate-limited?
-    header: Rate limit
-    multiSelect: false
-    options:
-      - label: Yes, use existing pattern (Recommended)
-        description: Found rate-limiter at src/middleware/rate-limit.ts
-      - label: No rate limiting
-        description: Simpler but vulnerable to brute force
-  - question: How should login errors be reported?
-    header: Errors
-    multiSelect: false
-    options:
-      - label: Generic message
-        description: "Invalid credentials" - security best practice
-      - label: Specific message
-        description: "Wrong password" vs "User not found" - better UX, info leak risk
-```
-
-**User selects**: No verification, Minimum 8 chars, Yes use existing pattern, Generic message
-
-**Assistant**: Decisions recorded. All ambiguities resolved.
-
----
-
-**Phase 4: Architecture Design**
-
-**Assistant**: I'll present three architecture approaches with trade-offs.
-
-### Approach 1: Minimal Changes
-- Add routes directly to existing `src/routes/index.ts`
-- Inline validation logic
-- Reuse existing patterns exactly
-- **Pros**: Fast, low risk, familiar patterns
-- **Cons**: Larger single file, less separation
-
-### Approach 2: Clean Architecture
-- New `src/routes/auth.ts` with dedicated router
-- New `src/controllers/authController.ts` with separated concerns
-- New `src/validators/auth.ts` for validation schemas
-- New `src/services/authService.ts` for business logic
-- **Pros**: Proper separation, testable, maintainable
-- **Cons**: More files, higher initial effort
-
-### Approach 3: Pragmatic Balance
-- New `src/routes/auth.ts` with dedicated router
-- New `src/controllers/authController.ts`
-- Reuse existing validator patterns inline
-- **Pros**: Good separation without over-engineering
-- **Cons**: Validation not reusable
-
-*[Uses AskUserQuestion]*
-```yaml
-questions:
-  - question: Which architecture approach should we use?
-    header: Approach
-    multiSelect: false
-    options:
-      - label: Pragmatic Balance (Recommended)
-        description: New auth router + controller, inline validation. Good balance
-      - label: Clean Architecture
-        description: Full separation with service layer. Best for complex auth
-      - label: Minimal Changes
-        description: Add to existing routes. Fast but less organized
-```
-
-**User selects**: Pragmatic Balance
-
-*[Uses AskUserQuestion]*
-```yaml
-questions:
-  - question: Ready to finalize the implementation plan with Pragmatic Balance approach?
-    header: Confirm
-    multiSelect: false
-    options:
-      - label: Yes, write the plan
-        description: Finalize plan with selected architecture
-      - label: Explore more
-        description: I have more questions
-```
-
-**User selects**: Yes, write the plan
-
----
-
-**Phase 5: Write the Plan**
-
-**Assistant**: Writing the implementation plan...
-
-*[Writes to .ralph/plans/TASK-015.md]*
-
-Plan written with:
-- Pragmatic Balance architecture
-- Route at `src/routes/auth.ts`
-- Controller at `src/controllers/authController.ts`
-- Rate limiting on login endpoint
-- Password validation (min 8 chars)
-- Generic error messages
-
----
-
-**Phase 6: Summary**
-
-**Assistant**: ✓ Implementation plan complete for TASK-015.
-
-**What was planned:**
-- POST `/auth/login` and POST `/auth/register` endpoints
-- Following Pragmatic Balance architecture
-
-**Key decisions made:**
-- No email verification (immediate access)
-- 8-char minimum password
-- Rate limiting on login (using existing middleware)
-- Generic error messages for security
-
-**Critical files:**
-| File | Action |
-|------|--------|
-| `src/routes/auth.ts` | CREATE |
-| `src/controllers/authController.ts` | CREATE |
-| `src/routes/index.ts` | MODIFY (mount auth routes) |
-
-**Next steps:**
-- Run `wiggum run TASK-015` to execute with a worker
-- Or review plan at `.ralph/plans/TASK-015.md` first
-
----
-
-### Example 2: Creating Task and Plan Together
-
-**User**: `/wiggum-plan Add a dark mode toggle to the settings page`
-
-**Phase 0: Task Creation**
-
-**Assistant**: Since no task ID was provided, I'll first create the task.
-
-*[Reads .ralph/kanban.md]*
-
-Found 15 tasks. Highest ID is TASK-015. TASK-012 (Settings page) is complete `[x]`.
-
-*[Uses AskUserQuestion]*
-```yaml
-questions:
-  - question: What priority level for dark mode?
-    header: Priority
-    multiSelect: false
-    options:
-      - label: MEDIUM (Recommended)
-        description: Nice-to-have UX enhancement
-      - label: HIGH
-        description: Important, blocking other work
-      - label: LOW
-        description: Low priority
-  - question: What should be included in dark mode scope?
-    header: Scope
-    multiSelect: true
-    options:
-      - label: Settings toggle
-        description: UI toggle in settings page
-      - label: System preference
-        description: Auto-detect OS dark/light preference
-      - label: Persist choice
-        description: Remember selection across sessions
-```
-
-**User selects**: MEDIUM, Settings toggle, Persist choice
-
-*[Creates TASK-016 in kanban, then proceeds through Phases 1-6]*
-
-...
-
-**Phase 6: Summary**
-
-**Assistant**: ✓ Created TASK-016 and implementation plan.
-
-**Task created:** TASK-016 - Add dark mode toggle to settings page (MEDIUM)
-
-**Architecture:** CSS variables approach with body class toggle
-
-**Key decisions:**
-- Theme stored in localStorage
-- No system preference detection (out of scope)
-- Immediate toggle effect (no animation)
-
-**Plan saved to:** `.ralph/plans/TASK-016.md`
-
 ## Key Principles
 
-1. **Follow the 7 phases** - Discovery → Exploration → Questions → Architecture → Plan → Summary
-2. **Parallel exploration** - Analyze similar features, architecture, and integration points together
-3. **Questions are critical** - Phase 3 is one of the most important; never skip it
-4. **Multiple approaches** - Present 2-3 architecture options with trade-off analysis
-5. **Get approval** - Confirm architecture choice before writing plan
-6. **Ground in findings** - Every option must reference actual codebase patterns
-7. **Always write plan** - Session must end with `.ralph/plans/TASK-ID.md`
-8. **Never implement** - Planning only, no code changes
+1. **Research before exploring** - Understand requirements, specs, and system architecture before diving into code
+2. **Specs are source of truth** - Explore `spec/` to understand existing specifications; plan must account for spec fit and required changes
+3. **Follow the 7 phases** - Research → Exploration → Questions → Architecture → Plan → Summary
+4. **Parallel exploration** - Analyze similar features, architecture, integration points, and interfaces/coupling together
+5. **Minimize interface surface** - Prefer designs that reduce coupling between modules, not extend it
+6. **Questions are critical** - Phase 3 is one of the most important; never skip it
+7. **Multiple approaches** - Present 2-3 architecture options with trade-off analysis
+8. **Get approval** - Confirm architecture choice before writing plan
+9. **Ground in findings** - Every option must reference actual codebase patterns and spec documents
+10. **Always write plan** - Session must end with `.ralph/plans/TASK-ID.md`
+11. **Never implement** - Planning only, no code changes
 
 ## Progressive Disclosure
 

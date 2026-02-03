@@ -2,7 +2,38 @@
 
 ## Parallel Exploration Dimensions
 
-Explore the codebase across three dimensions simultaneously to build comprehensive understanding.
+Explore the codebase across four dimensions simultaneously to build comprehensive understanding.
+
+### Dimension 0: Specifications & Contracts
+
+**Goal:** Understand the authoritative specifications that govern the area this task touches.
+
+**Strategy:**
+1. Explore `spec/` — this is the source of truth. Do not assume internal structure; list what exists and read relevant files
+2. Read `CLAUDE.md` or `AGENTS.md` at the project root for project-wide conventions
+3. Explore `docs/` for analysis, research, references, and developer documentation
+4. Identify which specs define the interfaces, schemas, or contracts affected by this task
+
+**Search patterns:**
+```bash
+# Discover spec structure
+Glob: "spec/**/*"
+
+# Find project instructions
+Glob: "{CLAUDE,AGENTS}.md"
+
+# Explore documentation
+Glob: "docs/**/*"
+
+# Find schemas and contracts
+Grep: "interface|schema|contract|protocol" in spec/
+```
+
+**What to document:**
+- Which specs govern the area this task touches
+- Whether current code aligns with or drifts from specs
+- Which interfaces or contracts will need modification
+- Whether the spec already accommodates the new requirements or needs extension
 
 ### Dimension A: Similar Features
 
@@ -96,6 +127,36 @@ Grep: "Repository|Model\.|prisma\.|knex\."
 - Events to emit or listen to
 - APIs to call
 
+### Dimension D: Interfaces & Coupling
+
+**Goal:** Evaluate the interface surface between modules and identify opportunities to reduce coupling.
+
+**Strategy:**
+1. Map the current interface surface between modules this task touches
+2. Identify shared state, configuration, or implicit contracts between modules
+3. Assess whether modules have independent concerns (orthogonal) or hidden dependencies
+4. Look for opportunities to narrow the interface rather than extend it
+
+**Search patterns:**
+```bash
+# Find module boundaries
+Glob: "src/*/index.{ts,js,sh}"
+Glob: "lib/*/index.{ts,js,sh}"
+
+# Find cross-module imports
+Grep: "source|import|require" across module boundaries
+
+# Find shared state or config
+Grep: "global|shared|common" in relevant modules
+```
+
+**What to document:**
+- Current interface contracts between affected modules (function signatures, file formats, schemas)
+- Whether the interface surface can be reduced rather than extended
+- Implicit contracts that should be made explicit
+- Coupling points where a change in one module ripples into others
+- Opportunities to make modules more orthogonal
+
 ## Key Files Identification
 
 After exploration, identify 5-10 key files with specific insights.
@@ -103,10 +164,12 @@ After exploration, identify 5-10 key files with specific insights.
 **Key file categories:**
 | Category | Example | What to Note |
 |----------|---------|--------------|
+| Specification | `spec/pipeline-schema.md` | Authoritative contract this task must conform to or extend |
 | Pattern to follow | `src/routes/users.ts` | Route definition structure |
 | Controller example | `src/controllers/userController.ts` | Error handling, response format |
 | Service pattern | `src/services/emailService.ts` | Dependency injection, async patterns |
 | Model reference | `src/models/User.ts` | Field types, relationships |
+| Interface contract | `src/types/api.ts` | Module boundary definition |
 | Test example | `tests/users.test.ts` | Test structure, mocking patterns |
 | Config reference | `src/config/database.ts` | Configuration access pattern |
 | Utility to reuse | `src/utils/validation.ts` | Shared utilities available |
@@ -146,8 +209,10 @@ After exploration, identify 5-10 key files with specific insights.
 
 **When to stop:**
 - Have 5-10 key files identified
-- Understand all three dimensions
+- Understand all four dimensions (specs, similar features, architecture, integration, interfaces)
+- Know which specs are affected and whether they need modification
 - Can answer: "How would existing code handle this?"
+- Can answer: "Does this make the interface surface narrower or wider?"
 
 ## Anti-Patterns
 
