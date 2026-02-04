@@ -5,6 +5,7 @@
 # Allowed paths:
 #   - ralph_dir/plans       (.ralph/plans/)
 #   - ralph_dir/results     (.ralph/results/)
+#   - ralph_dir/docs        (.ralph/docs/ - read-only, wdoc documentation)
 #   - worker_dir/workspace  (the git worktree)
 #   - worker_dir/*          with restrictions below
 #
@@ -183,7 +184,15 @@ validate_path() {
         esac
     fi
 
-    # 4. worker_dir/* (except blocked paths) - allowed
+    # 5. ralph_dir/docs - read-only access for agents (wdoc documentation)
+    if [[ -n "$ralph_dir_abs" && "$abs_path" == "$ralph_dir_abs/docs"* ]]; then
+        case "$tool" in
+            Read|Glob|Grep) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+
+    # 6. worker_dir/* (except blocked paths) - allowed
     if [[ -n "$worker_dir_abs" && "$abs_path" == "$worker_dir_abs"* ]]; then
         # Check if it's a blocked path (pass tool for read/write distinction)
         if is_blocked_worker_path "$abs_path" "$tool"; then
@@ -224,6 +233,7 @@ emit_block_error() {
         echo "  - worker files         (../reports/, ../prd.md, etc.)" >&2
         echo "  - .ralph/plans/        (implementation plans)" >&2
         echo "  - .ralph/results/      (task results)" >&2
+        echo "  - .ralph/docs/         (wdoc documentation, read-only)" >&2
     fi
 
     if [[ "$path" =~ \.\. ]]; then

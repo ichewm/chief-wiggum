@@ -1,0 +1,231 @@
+#!/usr/bin/env bash
+# wdoc - Documentation tool for agents
+#
+# Query up-to-date package documentation without each agent fetching docs
+# independently. `wdoc add` downloads docs/code once; `wdoc ask` launches
+# a lightweight Claude agent to explore them and answer questions.
+set -euo pipefail
+
+WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
+source "$WIGGUM_HOME/lib/core/bin-common.sh"
+
+source "$WIGGUM_HOME/lib/core/logger.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
+
+show_help() {
+    cat << 'EOF'
+wdoc - Documentation tool for agents
+
+Usage: wdoc <command> [options]
+
+Commands:
+  add       Download documentation and/or clone source for a package
+  ask       Ask a question about a package's documentation
+  list      List all registered packages
+  remove    Remove a package and its documentation
+
+Add options:
+  --name <name>       Package name (required)
+  --doc <url>         Documentation website URL
+  --src <git-url>     Source repository URL (git clone)
+
+Ask options:
+  --name <name>       Package name (required)
+  --ask "<question>"  Question to ask (required)
+  --session-id <id>   Resume a previous session for followup
+
+Remove options:
+  --name <name>       Package name (required)
+
+General options:
+  -v, --verbose       Verbose output
+  -vv                 Debug output
+  -vvv                Trace output
+  -q, --quiet         Quiet mode
+  -h, --help          Show this help
+
+Examples:
+  wdoc add --name textual --doc https://textual.textualize.io --src https://github.com/textualize/textual.git
+  wdoc ask --name textual --ask "How do I create a custom widget?"
+  wdoc ask --name textual --ask "What about styling?" --session-id <uuid>
+  wdoc list
+  wdoc remove --name textual
+
+The subcommand can be omitted when flags are unambiguous:
+  wdoc --name textual --doc https://textual.textualize.io   (inferred: add)
+  wdoc --name textual --ask "How do I create a custom widget?"  (inferred: ask)
+EOF
+}
+
+# =============================================================================
+# SUBCOMMAND: add
+# =============================================================================
+cmd_add() {
+    local name="" doc_url="" src_url=""
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -n|--name) name="${2:-}"; shift 2 ;;
+            --doc) doc_url="${2:-}"; shift 2 ;;
+            --src) src_url="${2:-}"; shift 2 ;;
+            *) log_error "Unknown add option: $1"; show_help; exit "$EXIT_USAGE" ;;
+        esac
+    done
+
+    if [[ -z "$name" ]]; then
+        log_error "Package name required (--name <name>)"
+        exit "$EXIT_USAGE"
+    fi
+
+    if [[ -z "$doc_url" && -z "$src_url" ]]; then
+        log_error "At least one of --doc or --src must be provided"
+        exit "$EXIT_USAGE"
+    fi
+
+    # Lazy-load
+    source "$WIGGUM_HOME/lib/wdoc/wdoc-add.sh"
+
+    wdoc_add "$name" "$doc_url" "$src_url"
+}
+
+# =============================================================================
+# SUBCOMMAND: ask
+# =============================================================================
+cmd_ask() {
+    local name="" question="" session_id=""
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -n|--name) name="${2:-}"; shift 2 ;;
+            -a|--ask) question="${2:-}"; shift 2 ;;
+            --session-id) session_id="${2:-}"; shift 2 ;;
+            *) log_error "Unknown ask option: $1"; show_help; exit "$EXIT_USAGE" ;;
+        esac
+    done
+
+    if [[ -z "$name" ]]; then
+        log_error "Package name required (--name <name>)"
+        exit "$EXIT_USAGE"
+    fi
+
+    if [[ -z "$question" ]]; then
+        log_error "Question required (--ask \"<question>\")"
+        exit "$EXIT_USAGE"
+    fi
+
+    # Lazy-load
+    source "$WIGGUM_HOME/lib/wdoc/wdoc-ask.sh"
+
+    wdoc_ask "$name" "$question" "$session_id"
+}
+
+# =============================================================================
+# SUBCOMMAND: list
+# =============================================================================
+cmd_list() {
+    # Lazy-load
+    source "$WIGGUM_HOME/lib/wdoc/wdoc-registry.sh"
+
+    local output
+    output=$(wdoc_registry_list)
+
+    if [[ -z "$output" ]]; then
+        echo "No packages registered. Use 'wdoc add' to add a package."
+        return 0
+    fi
+
+    # Header
+    printf "%-20s %-12s %-40s %s\n" "PACKAGE" "VERSION" "DOC URL" "SRC URL"
+    printf "%-20s %-12s %-40s %s\n" "-------" "-------" "-------" "-------"
+
+    # Parse RS-delimited output
+    while IFS=$'\x1e' read -r name version doc_url src_url; do
+        version="${version:--}"
+        doc_url="${doc_url:--}"
+        src_url="${src_url:--}"
+        printf "%-20s %-12s %-40s %s\n" "$name" "$version" "$doc_url" "$src_url"
+    done <<< "$output"
+}
+
+# =============================================================================
+# SUBCOMMAND: remove
+# =============================================================================
+cmd_remove() {
+    local name=""
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -n|--name) name="${2:-}"; shift 2 ;;
+            *) log_error "Unknown remove option: $1"; show_help; exit "$EXIT_USAGE" ;;
+        esac
+    done
+
+    if [[ -z "$name" ]]; then
+        log_error "Package name required (--name <name>)"
+        exit "$EXIT_USAGE"
+    fi
+
+    # Lazy-load
+    source "$WIGGUM_HOME/lib/wdoc/wdoc-registry.sh"
+
+    # Remove from registry
+    if ! wdoc_registry_remove "$name"; then
+        log_error "Package '$name' not found in registry"
+        exit 1
+    fi
+
+    # Remove docs directory
+    local docs_dir="$RALPH_DIR/docs/$name"
+    if [[ -d "$docs_dir" ]]; then
+        safe_path "$docs_dir" "docs_dir" || exit 1
+        rm -rf "$docs_dir"
+        log_info "Removed documentation: $docs_dir"
+    fi
+
+    log_info "Package '$name' removed"
+}
+
+# =============================================================================
+# MAIN DISPATCH
+# =============================================================================
+
+# Parse verbose flags first (only touches -v/-vv/-vvv/-q/--quiet/--verbose)
+parse_verbose_flags "$@"
+set -- "${WIGGUM_REMAINING_ARGS[@]}"
+
+# Determine command: explicit first arg, or infer from flags
+COMMAND=""
+case "${1:-}" in
+    add|ask|list|remove|help) COMMAND="$1"; shift ;;
+    -h|--help)                show_help; exit "$EXIT_OK" ;;
+esac
+
+# If no explicit subcommand, infer from flags
+if [[ -z "$COMMAND" ]]; then
+    for arg in "$@"; do
+        case "$arg" in
+            --doc|--src) COMMAND="add"; break ;;
+            -a|--ask)    COMMAND="ask"; break ;;
+            -n|--name)   ;;  # ambiguous alone, keep looking
+        esac
+    done
+fi
+
+if [[ -z "$COMMAND" ]]; then
+    if [[ $# -eq 0 ]]; then
+        show_help
+        exit "$EXIT_OK"
+    fi
+    log_error "Cannot determine command. Specify: add, ask, list, or remove"
+    echo "Usage: wdoc <add|ask|list|remove> [options]"
+    echo "Run 'wdoc help' for details."
+    exit "$EXIT_USAGE"
+fi
+
+case "$COMMAND" in
+    add)     cmd_add "$@" ;;
+    ask)     cmd_ask "$@" ;;
+    list)    cmd_list ;;
+    remove)  cmd_remove "$@" ;;
+    help)    show_help ;;
+esac
