@@ -323,6 +323,81 @@ runtime_backend_extract_session_id() {
 }
 ```
 
+## Prompt Wrappers
+
+The runtime supports configurable pre/post wrappers for system and user prompts. These are applied to **work phase** invocations only (not summary or supervisor phases).
+
+### Configuration
+
+Defined per backend in `config/config.json` under `runtime.backends.<backend>.prompts`:
+
+```json
+{
+  "runtime": {
+    "backends": {
+      "claude": {
+        "prompts": {
+          "pre_system": "",
+          "post_system": "",
+          "pre_user": "",
+          "post_user": ""
+        }
+      }
+    }
+  }
+}
+```
+
+### Resolution Priority
+
+| Priority | Source | Example |
+|----------|--------|---------|
+| 1 | Environment variable | `WIGGUM_PROMPT_PRE_SYSTEM="[prefix]"` |
+| 2 | `.ralph/config.json` | `runtime.backends.claude.prompts.pre_system` |
+| 3 | `config/config.json` | `runtime.backends.claude.prompts.pre_system` |
+| 4 | Default | Empty string (no wrapping) |
+
+### Environment Variables
+
+| Variable | Prompt Key |
+|----------|------------|
+| `WIGGUM_PROMPT_PRE_SYSTEM` | `pre_system` |
+| `WIGGUM_PROMPT_POST_SYSTEM` | `post_system` |
+| `WIGGUM_PROMPT_PRE_USER` | `pre_user` |
+| `WIGGUM_PROMPT_POST_USER` | `post_user` |
+
+### File References
+
+Values starting with `@` are treated as file paths relative to `$WIGGUM_HOME`:
+
+```json
+{
+  "pre_system": "@config/prompts/pre-system.md",
+  "post_user": "@config/prompts/post-user.md"
+}
+```
+
+If the referenced file does not exist, a warning is logged and the wrapper resolves to an empty string.
+
+### Wrapping Scope
+
+| Function | System Wrapped | User Wrapped |
+|----------|---------------|--------------|
+| `run_agent_once()` | Yes | Yes |
+| `run_agent_once_with_session()` | Yes | Yes |
+| `run_agent_resume()` | No | Yes |
+| `run_ralph_loop()` work phase | Yes (once at entry) | Yes (per iteration) |
+| `run_ralph_loop()` summary phase | No | No |
+| `run_ralph_loop()` supervisor phase | No | No |
+
+### Module API
+
+| Function | Description |
+|----------|-------------|
+| `runtime_prompts_init(backend)` | Load and cache prompt config for the active backend. Called automatically by `runtime_init()`. |
+| `runtime_wrap_system(prompt)` | Return system prompt with pre/post wrappers (newline-separated) |
+| `runtime_wrap_user(prompt)` | Return user prompt with pre/post wrappers (newline-separated) |
+
 ## Backend Capabilities Matrix
 
 | Capability | Claude | OpenCode |

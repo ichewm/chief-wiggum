@@ -313,6 +313,9 @@ run_ralph_loop() {
     # Initialize work log
     work_log_init "$output_dir"
 
+    # Apply system prompt wrapper once (work phase only; summary/supervisor are unwrapped)
+    system_prompt=$(runtime_wrap_system "$system_prompt")
+
     # Main iteration loop
     while [ $iteration -lt "$max_iterations" ]; do
         # Check for shutdown request
@@ -357,6 +360,9 @@ run_ralph_loop() {
         local supervisor_dir="$output_dir/supervisors"
         local user_prompt
         user_prompt=$($user_prompt_fn "$iteration" "$output_dir" "$supervisor_dir" "$supervisor_feedback")
+
+        # Apply user prompt wrapper (work phase only; summary/supervisor are unwrapped)
+        user_prompt=$(runtime_wrap_user "$user_prompt")
 
         log_debug "Iteration $iteration: Session $session_id (max $max_turns turns)"
 

@@ -37,7 +37,13 @@
         "max_retries": 3,
         "initial_backoff": 5,
         "max_backoff": 60,
-        "backoff_multiplier": 2
+        "backoff_multiplier": 2,
+        "prompts": {
+          "pre_system": "",
+          "post_system": "",
+          "pre_user": "",
+          "post_user": ""
+        }
       }
     }
   },

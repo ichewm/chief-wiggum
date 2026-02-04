@@ -31,6 +31,7 @@ source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
 source "$WIGGUM_HOME/lib/runtime/runtime-retry.sh"
+source "$WIGGUM_HOME/lib/runtime/runtime-prompts.sh"
 
 # =============================================================================
 # BACKEND DISCOVERY AND LOADING
@@ -86,6 +87,9 @@ runtime_init() {
     export WIGGUM_RUNTIME_BACKEND="$backend"
     _RUNTIME_INITIALIZED=1
 
+    # Initialize prompt wrappers for the active backend
+    runtime_prompts_init "$backend"
+
     log_debug "Runtime initialized with backend: $backend"
 }
 
@@ -138,6 +142,10 @@ run_agent_once() {
         log_error "run_agent_once: failed to cd to workspace: $workspace"
         return 1
     }
+
+    # Apply prompt wrappers
+    system_prompt=$(runtime_wrap_system "$system_prompt")
+    user_prompt=$(runtime_wrap_user "$user_prompt")
 
     log_debug "Running agent once in workspace: $workspace (max_turns: $max_turns)"
 
@@ -221,6 +229,10 @@ run_agent_once_with_session() {
         return 1
     }
 
+    # Apply prompt wrappers
+    system_prompt=$(runtime_wrap_system "$system_prompt")
+    user_prompt=$(runtime_wrap_user "$user_prompt")
+
     log_debug "Running agent with named session in workspace: $workspace (max_turns: $max_turns, session_id: $session_id)"
 
     # Build command arguments via backend (with session_id for creation)
@@ -283,6 +295,9 @@ run_agent_resume() {
         _run_resume_completed_normally=true
         return 1
     fi
+
+    # Apply user prompt wrapper
+    prompt=$(runtime_wrap_user "$prompt")
 
     log_debug "Resuming session $session_id (max_turns: $max_turns)"
 
