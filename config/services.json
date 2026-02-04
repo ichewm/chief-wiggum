@@ -541,9 +541,13 @@
     {
       "id": "orphan-detection",
       "description": "Detect orphan workers without pool entries",
-      "phase": "post",
+      "phase": "periodic",
       "order": 60,
-      "schedule": { "type": "tick" },
+      "schedule": {
+        "type": "interval",
+        "interval": 60,
+        "run_on_startup": false
+      },
       "execution": {
         "type": "function",
         "function": "svc_orch_orphan_detection"

@@ -7,7 +7,7 @@
 #   - fix:     PR comment fix workers
 #   - resolve: Merge conflict resolution workers
 #
-# Worker entries are stored as: "type|task_id|start_time"
+# Worker entries are stored as: "type|task_id|start_time|last_checked"
 #
 # shellcheck disable=SC2034  # Variables are used externally (POOL_CLEANUP_*)
 # shellcheck disable=SC2153  # RALPH_DIR is set by caller (documented requirement)
@@ -17,8 +17,11 @@ set -euo pipefail
 _WORKER_POOL_LOADED=1
 source "$WIGGUM_HOME/lib/core/platform.sh"
 
-# Pool storage - PID -> "type|task_id|start_time"
+# Pool storage - PID -> "type|task_id|start_time|last_checked"
 declare -gA _WORKER_POOL=()
+
+# Minimum seconds between kill -0 checks per worker
+_POOL_PID_CHECK_INTERVAL="${WIGGUM_PID_CHECK_INTERVAL:-5}"
 
 # Detect worker type from pipeline config, directory name, and git-state
 #
@@ -114,7 +117,7 @@ pool_add() {
         return 1
     fi
 
-    _WORKER_POOL[$pid]="$type|$task_id|$start_time"
+    _WORKER_POOL[$pid]="$type|$task_id|$start_time|0"
 
     # Persist to disk so subshell callers are visible to the main process
     if [ -n "${RALPH_DIR:-}" ]; then
@@ -155,7 +158,7 @@ pool_ingest_pending() {
         IFS='|' read -r pid type task_id start_time <<< "$line"
         # Skip if already in pool
         [ -z "${_WORKER_POOL[$pid]+x}" ] || continue
-        _WORKER_POOL[$pid]="$type|$task_id|$start_time"
+        _WORKER_POOL[$pid]="$type|$task_id|$start_time|0"
     done <<< "$lines"
 }
 
@@ -243,7 +246,10 @@ pool_get_start_time() {
         return 1
     fi
 
-    echo "${info##*|}"
+    # Format: type|task_id|start_time|last_checked — extract field 3
+    local rest="${info#*|}"       # task_id|start_time|last_checked
+    rest="${rest#*|}"             # start_time|last_checked
+    echo "${rest%%|*}"
 }
 
 # Find worker PID by task_id
@@ -330,7 +336,8 @@ pool_foreach() {
         local type="${info%%|*}"
         local rest="${info#*|}"
         local task_id="${rest%%|*}"
-        local start_time="${rest##*|}"
+        rest="${rest#*|}"
+        local start_time="${rest%%|*}"
 
         if [ "$filter_type" = "all" ] || [ "$filter_type" = "$type" ]; then
             "$callback" "$pid" "$type" "$task_id" "$start_time"
@@ -406,7 +413,7 @@ pool_cleanup_finished() {
     local on_complete="${3:-}"
     local on_timeout="${4:-}"
     local now
-    now=$(epoch_now)
+    now=$(epoch_tick)
 
     POOL_CLEANUP_COUNT=0
     POOL_CLEANUP_EVENT=false
@@ -420,7 +427,33 @@ pool_cleanup_finished() {
         local type="${info%%|*}"
         local rest="${info#*|}"
         local task_id="${rest%%|*}"
-        local start_time="${rest##*|}"
+        rest="${rest#*|}"
+        local start_time="${rest%%|*}"
+        local last_checked="${rest##*|}"
+        last_checked="${last_checked:-0}"
+
+        # Throttle kill -0 checks: skip if checked recently
+        if (( now - last_checked < _POOL_PID_CHECK_INTERVAL )); then
+            # Still check timeout without PID check (uses cached time)
+            if [ "$timeout" -gt 0 ] && [ $((now - start_time)) -ge "$timeout" ]; then
+                # Timed out — do a real check and kill
+                POOL_CLEANUP_EVENT=true
+                ((++POOL_CLEANUP_COUNT)) || true
+                kill "$pid" 2>/dev/null || true
+                if [ -n "$on_timeout" ]; then
+                    local worker_dir
+                    worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$task_id" 2>/dev/null || true)
+                    if [ -n "$worker_dir" ]; then
+                        "$on_timeout" "$worker_dir" "$task_id" || true
+                    fi
+                fi
+                pool_remove "$pid"
+            fi
+            continue
+        fi
+
+        # Update last_checked timestamp
+        _WORKER_POOL[$pid]="$type|$task_id|$start_time|$now"
 
         if ! kill -0 "$pid" 2>/dev/null; then
             # Worker finished
@@ -498,7 +531,7 @@ pool_restore_from_workers() {
         fi
 
         # Add to pool (skip if already exists)
-        _WORKER_POOL[$worker_pid]="$type|$task_id|$start_time" 2>/dev/null || true
+        _WORKER_POOL[$worker_pid]="$type|$task_id|$start_time|0" 2>/dev/null || true
     done <<< "$scan_output"
 }
 
@@ -513,7 +546,8 @@ pool_dump() {
         local type="${info%%|*}"
         local rest="${info#*|}"
         local task_id="${rest%%|*}"
-        local start_time="${rest##*|}"
+        rest="${rest#*|}"
+        local start_time="${rest%%|*}"
 
         if [ "$first" = true ]; then
             first=false
@@ -542,7 +576,8 @@ pool_save() {
         local type="${info%%|*}"
         local rest="${info#*|}"
         local task_id="${rest%%|*}"
-        local start_time="${rest##*|}"
+        rest="${rest#*|}"
+        local start_time="${rest%%|*}"
 
         if [ "$first" = true ]; then
             first=false
@@ -578,7 +613,7 @@ pool_load() {
         [ -n "$pid" ] || continue
         # Don't overwrite existing in-memory entries
         [ -z "${_WORKER_POOL[$pid]+x}" ] || continue
-        _WORKER_POOL[$pid]="$type|$task_id|$start_time"
+        _WORKER_POOL[$pid]="$type|$task_id|$start_time|0"
     done <<< "$entries"
 
     return 0

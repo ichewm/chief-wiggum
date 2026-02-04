@@ -105,6 +105,20 @@ elif date -r 0 +%s &>/dev/null 2>&1; then
     _DATE_FLAVOR="bsd"
 fi
 
+# Get cached epoch seconds for the current orchestrator tick
+#
+# Returns $_ORCH_TICK_EPOCH if set (avoids repeated syscalls within a single
+# main-loop iteration), otherwise falls back to epoch_now().
+#
+# Returns: epoch seconds on stdout
+epoch_tick() {
+    if [[ -n "${_ORCH_TICK_EPOCH:-}" ]]; then
+        echo "$_ORCH_TICK_EPOCH"
+    else
+        epoch_now
+    fi
+}
+
 # Get current epoch seconds
 #
 # Uses bash built-in printf %()T when available (Linux bash 4.2+),

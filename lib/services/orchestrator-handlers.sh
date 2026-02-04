@@ -92,8 +92,11 @@ svc_orch_cleanup_all_workers() {
     orch_cleanup_all_workers "$@"
 }
 
-# Process orphaned fix_completed/needs_merge workers
+# Process orphaned fix_completed/needs_merge workers (only when state changed)
 svc_orch_process_pending_merges() {
+    [[ "${POOL_CLEANUP_EVENT:-false}" = "true" ]] \
+        || [[ "${SCHED_SCHEDULING_EVENT:-false}" = "true" ]] \
+        || return 0
     orch_process_pending_merges "$@"
 }
 
@@ -322,8 +325,18 @@ svc_orch_worker_cleanup() {
 # Post Phase Handlers (Phase 4)
 # =============================================================================
 
-# Check if all tasks are complete, write exit signal
+# Check if all tasks are complete, write exit signal (throttled)
+_ORCH_COMPLETION_INTERVAL=10
+_ORCH_COMPLETION_LAST=0
+
 svc_orch_check_completion() {
+    local tick="${_ORCH_ITERATION:-0}"
+    if [[ "${POOL_CLEANUP_EVENT:-false}" != "true" ]] \
+        && [[ "${SCHED_SCHEDULING_EVENT:-false}" != "true" ]] \
+        && (( tick - _ORCH_COMPLETION_LAST < _ORCH_COMPLETION_INTERVAL )); then
+        return 0
+    fi
+    _ORCH_COMPLETION_LAST=$tick
     if scheduler_is_complete; then
         touch "$RALPH_DIR/orchestrator/should-exit"
     fi
@@ -344,6 +357,12 @@ svc_orch_rate_limit_guard() {
 
 # Parse kanban and update scheduler state
 svc_orch_scheduler_tick() {
+    # Skip scheduler_tick entirely when kanban hasn't changed
+    local _mtime
+    _mtime=$(stat -c %Y "$RALPH_DIR/kanban.md" 2>/dev/null || stat -f %m "$RALPH_DIR/kanban.md" 2>/dev/null || echo "0")
+    if [[ "$_mtime" == "${_KANBAN_CACHE_MTIME:-}" ]] && [[ -n "${_KANBAN_CACHE:-}" ]]; then
+        return 0
+    fi
     scheduler_tick
 }
 
@@ -518,12 +537,9 @@ svc_orch_task_spawner() {
     done <<< "$SCHED_UNIFIED_QUEUE"
 }
 
-# Detect orphan workers (every 60 ticks)
+# Detect orphan workers (interval-scheduled, every 60s)
 svc_orch_orphan_detection() {
-    _SCHED_ORPHAN_COUNTER=$(( ${_SCHED_ORPHAN_COUNTER:-0} + 1 ))
-    if (( _SCHED_ORPHAN_COUNTER % 60 == 0 )); then
-        scheduler_detect_orphan_workers
-    fi
+    scheduler_detect_orphan_workers
 }
 
 # Update aging tracking after scheduling events
@@ -556,9 +572,17 @@ svc_orch_status_display() {
     fi
 }
 
-# Persist service state to disk
+# Persist service state to disk (throttled: only on dirty or every 10s)
+_ORCH_LAST_STATE_SAVE=0
+
 svc_orch_state_save() {
-    service_state_save 2>/dev/null || true
+    local now="${_ORCH_TICK_EPOCH:-$(epoch_now)}"
+    if [[ "${POOL_CLEANUP_EVENT:-false}" == "true" ]] \
+        || [[ "${SCHED_SCHEDULING_EVENT:-false}" == "true" ]] \
+        || (( now - _ORCH_LAST_STATE_SAVE >= 10 )); then
+        service_state_save 2>/dev/null || true
+        _ORCH_LAST_STATE_SAVE=$now
+    fi
 }
 
 # =============================================================================

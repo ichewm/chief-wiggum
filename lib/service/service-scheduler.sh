@@ -226,9 +226,6 @@ service_scheduler_tick() {
 
     # Run health checks periodically
     _maybe_run_health_checks
-
-    # Periodically save state
-    service_state_save
 }
 
 # Check if an interval service is due to run
@@ -253,7 +250,7 @@ service_is_due() {
     last_run=$(service_state_get_last_run "$id")
 
     local now
-    now=$(epoch_now)
+    now=$(epoch_tick)
 
     local elapsed=$((now - last_run))
 
@@ -516,7 +513,7 @@ _check_completed_services() {
                 # Record metrics
                 local start_time duration_ms
                 start_time=$(service_state_get_last_run "$id")
-                duration_ms=$(( ($(epoch_now) - start_time) * 1000 ))
+                duration_ms=$(( ($(epoch_tick) - start_time) * 1000 ))
                 service_state_record_execution "$id" "$duration_ms" "$exit_code"
 
                 if [ "$exit_code" -eq 0 ]; then
@@ -702,7 +699,7 @@ _update_circuit_breaker() {
 # Run health checks on services that have them configured
 _maybe_run_health_checks() {
     local now
-    now=$(epoch_now)
+    now=$(epoch_tick)
 
     # Only run health checks periodically
     if [ $((now - _SCHED_LAST_HEALTH_CHECK)) -lt "$_SCHED_HEALTH_CHECK_INTERVAL" ]; then

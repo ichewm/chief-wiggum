@@ -299,11 +299,13 @@ main() {
     rm -f "$RALPH_DIR/orchestrator/should-exit"
 
     _ORCH_ITERATION=0
+    _ORCH_TICK_EPOCH=0
     log "Starting service-based scheduler"
 
     # Main loop: service-driven orchestration
     while [ ! -f "$RALPH_DIR/orchestrator/should-exit" ]; do
         ((++_ORCH_ITERATION))
+        _ORCH_TICK_EPOCH=$(epoch_now)
 
         # Handle rate-limit pause from previous session
         _check_rate_limit_pause
@@ -318,7 +320,7 @@ main() {
         #             skip decay, orphan detection, aging, status display, state save
         service_scheduler_run_phase "post"
 
-        sleep 1
+        sleep 5
     done
 
     # Shutdown phase (reverse order: state save, terminal cleanup, lock cleanup)
