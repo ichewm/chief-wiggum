@@ -108,6 +108,72 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _is_orchestrator_process(pid: int) -> bool:
+    """Check if a PID belongs to a wiggum orchestrator (bash or Python)."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "args="],
+            capture_output=True, text=True, timeout=5,
+        )
+        cmdline = result.stdout.strip()
+        return "wiggum-run" in cmdline or "wiggum_orchestrator" in cmdline
+    except Exception:
+        return False
+
+
+def _acquire_lock(pid_file: str, force: bool = False) -> bool:
+    """Write orchestrator PID file, checking for existing lock.
+
+    Returns:
+        True if lock acquired, False if another orchestrator is running.
+    """
+    if os.path.isfile(pid_file):
+        try:
+            existing_pid = int(open(pid_file).read().strip())
+        except (ValueError, OSError):
+            existing_pid = 0
+
+        if existing_pid > 0:
+            try:
+                os.kill(existing_pid, 0)
+                # Process alive — check if it's actually an orchestrator
+                if _is_orchestrator_process(existing_pid):
+                    if force:
+                        log.log(
+                            f"WARNING: Overriding lock held by running "
+                            f"orchestrator (PID: {existing_pid}) due to --force",
+                        )
+                    else:
+                        log.log_error(
+                            f"Another orchestrator is already running "
+                            f"(PID: {existing_pid}). Use --force to override.",
+                        )
+                        return False
+                else:
+                    log.log("Cleaning stale orchestrator lock (PID reused)")
+            except ProcessLookupError:
+                log.log("Cleaning stale orchestrator lock")
+            except PermissionError:
+                log.log_error(
+                    f"Cannot signal existing orchestrator PID {existing_pid}",
+                )
+                return False
+
+    with open(pid_file, "w") as f:
+        f.write(str(os.getpid()))
+    log.log(f"Created orchestrator lock (PID: {os.getpid()})")
+    return True
+
+
+def _release_lock(pid_file: str) -> None:
+    """Remove orchestrator PID file."""
+    try:
+        os.unlink(pid_file)
+    except FileNotFoundError:
+        pass
+
+
 def _get_required_env(name: str) -> str:
     val = os.environ.get(name)
     if not val:
@@ -199,10 +265,18 @@ def run(args: argparse.Namespace) -> int:
     pool = WorkerPool(ralph_dir)
     pool.restore()
 
+    # Acquire orchestrator lock (PID file)
+    orch_dir = os.path.join(ralph_dir, "orchestrator")
+    os.makedirs(orch_dir, exist_ok=True)
+    pid_file = os.path.join(orch_dir, "orchestrator.pid")
+    if not _acquire_lock(pid_file, args.force):
+        return 1
+
     # Startup phase
     log.log("Running startup phase...")
     if not scheduler.run_phase("startup"):
         log.log_error("Startup phase failed, aborting")
+        _release_lock(pid_file)
         return 1
 
     # Clear stale exit signal
@@ -244,6 +318,7 @@ def run(args: argparse.Namespace) -> int:
     scheduler.run_phase("shutdown")
     state.save()
     pool.save()
+    _release_lock(pid_file)
 
     log.log("Python orchestrator stopped")
     return 0

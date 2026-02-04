@@ -149,7 +149,7 @@ orchestrator_pid=""
 if [ -f "$orchestrator_lock" ]; then
     orchestrator_pid=$(cat "$orchestrator_lock" 2>/dev/null)
     if [[ "$orchestrator_pid" =~ ^[0-9]+$ ]] && kill -0 "$orchestrator_pid" 2>/dev/null; then
-        if ps -p "$orchestrator_pid" -o args= 2>/dev/null | grep -q "wiggum-run"; then
+        if ps -p "$orchestrator_pid" -o args= 2>/dev/null | grep -qE "wiggum-run|wiggum_orchestrator"; then
             orchestrator_running=true
         fi
     fi

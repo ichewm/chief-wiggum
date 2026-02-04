@@ -62,7 +62,7 @@ _acquire_lock() {
         # Validate PID is a number
         if [[ "$existing_pid" =~ ^[0-9]+$ ]]; then
             if kill -0 "$existing_pid" 2>/dev/null; then
-                if ps -p "$existing_pid" -o args= 2>/dev/null | grep -q "wiggum-run"; then
+                if ps -p "$existing_pid" -o args= 2>/dev/null | grep -qE "wiggum-run|wiggum_orchestrator"; then
                     if [ "$FORCE_LOCK" = true ]; then
                         log "WARNING: Overriding lock held by running orchestrator (PID: $existing_pid) due to --force"
                         rm -f "$orchestrator_lock"
