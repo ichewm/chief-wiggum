@@ -59,30 +59,26 @@ source "$WIGGUM_HOME/lib/core/log-rotation.sh"
 # Initialize activity log
 activity_init "$PROJECT_DIR"
 
-# Initialize service state for handler functions that use it
-service_state_init "$RALPH_DIR"
+# -----------------------------------------------------------------------------
+# Minimal init for bridge mode.
+#
+# Python manages service scheduling and state persistence. The bridge only
+# needs library functions sourced so svc_* handlers can call them. We
+# deliberately skip:
+#   - service_state_init/restore  (would load state.json via jq on every call)
+#   - service_scheduler_init      (would load services.json + state via jq)
+#
+# _SERVICE_STATE_FILE stays empty (""), so bash service_state_save() returns
+# early at its [ -n "$_SERVICE_STATE_FILE" ] guard — no risk of overwriting
+# the state file that Python manages.
+# -----------------------------------------------------------------------------
 
-# Try to restore state for continuity
-service_state_restore 2>/dev/null || true
-
-# Initialize scheduler state (needed by scheduler_tick, etc.)
-# Only initialize if not already done — some functions depend on this
-if [[ "${_SCHED_INITIALIZED:-false}" != "true" ]]; then
-    service_scheduler_init "$RALPH_DIR" "$PROJECT_DIR"
-fi
-
-# Load log rotation config
+# Load configs that handler functions depend on at call time
 load_log_rotation_config 2>/dev/null || true
 log_rotation_init "$RALPH_DIR/logs" 2>/dev/null || true
-
-# Load rate limit config
 load_rate_limit_config 2>/dev/null || true
-
-# Load workers config
 load_workers_config 2>/dev/null || true
 FIX_WORKER_LIMIT="${FIX_WORKER_LIMIT:-${WIGGUM_FIX_WORKER_LIMIT:-2}}"
-
-# Load resume configs
 load_resume_queue_config 2>/dev/null || true
 load_resume_config 2>/dev/null || true
 
