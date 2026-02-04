@@ -1,6 +1,6 @@
 | name | description |
 |------|-------------|
-| wiggum-plan | Create implementation plans through systematic 7-phase workflow: discovery, exploration, clarifying questions, architecture design, plan writing, and summary. Planning only - never implements. Always writes plan to `.ralph/plans/TASK-ID.md`. |
+| wiggum-plan | Create implementation plans through systematic multi-phase workflow: discovery, exploration, clarifying questions, architecture design, plan writing, kanban entry, and summary. Planning only - never implements. Always writes plan to `.ralph/plans/TASK-ID.md` before adding task to kanban. |
 
 # Wiggum Plan
 
@@ -13,8 +13,9 @@ Create implementation plans through a systematic 7-phase workflow that ensures d
 **Mode 1 - Existing Task**: A task ID from `.ralph/kanban.md` (e.g., `TASK-015`, `FEATURE-042`).
 
 **Mode 2 - New Task**: A description of work to be done (e.g., "Add user authentication with JWT"). When no valid task ID is provided, the skill will:
-1. Create the task in `.ralph/kanban.md`
-2. Then create the implementation plan
+1. Design the task and determine the task ID
+2. Create the implementation plan in `.ralph/plans/TASK-ID.md`
+3. Add the task to `.ralph/kanban.md`
 
 ## When This Skill is Invoked
 
@@ -32,12 +33,12 @@ Create implementation plans through a systematic 7-phase workflow that ensures d
 2. **ALWAYS write the plan file** - Every session must end with writing `.ralph/plans/TASK-ID.md`
 3. **Multiple iterations allowed** - Explore, ask questions, explore more as needed
 4. **READ-ONLY exploration** - Only modify the kanban file (when creating tasks) and plan file
-5. **Create task when needed** - If no valid task ID is provided, create the task in kanban first
+5. **Create task when needed** - If no valid task ID is provided, design the task and determine the ID first, but write the kanban entry only after the plan is written
 6. **Clarifying questions are critical** - Never skip Phase 3; it's one of the most important phases
 
 ## Core Workflow: 7 Phases
 
-### Phase 0: Task Creation (when no task ID provided)
+### Phase 0: Task Design (when no task ID provided)
 
 **Skip this phase if a valid task ID was provided.**
 
@@ -58,19 +59,16 @@ When the input is a description rather than a task ID:
 - Determine if it should be one task or multiple
 - If multiple tasks needed, break down with proper dependencies (use Scope field for sub-items within a single task)
 - Each task should be completable by one worker in one session
+- Assign the task ID(s) now — you need them for plan file paths
 
-**Create the task in kanban:**
-- Add properly formatted task entry to `.ralph/kanban.md`
-- Include all required fields: Description, Priority, Dependencies
-- Use optional fields (Scope, Acceptance Criteria) when helpful
-- Confirm with user before writing via AskUserQuestion
+**Do NOT write to kanban yet.** The kanban entry is written after the plan (Phase 5.5). Hold the task details (ID, description, priority, dependencies, scope) in memory and carry them through the planning phases.
 
 For task format details, see `/kanban` skill references:
 - Task format: `skills/kanban/references/task-format.md`
 - Dependency patterns: `skills/kanban/references/dependency-patterns.md`
 - Sizing guidelines: `skills/kanban/references/sizing-guidelines.md`
 
-**After task creation, continue to Phase 1 with the newly created task ID.**
+**After task design, continue to Phase 1 with the determined task ID.**
 
 ---
 
@@ -79,7 +77,8 @@ For task format details, see `/kanban` skill references:
 **Goal:** Deep understanding of the requirements, the system, and the specifications before touching any code. This is NOT just reading the task — it is understanding how the system works and how the new requirements fit within it.
 
 **Read the task requirements:**
-- Read `.ralph/kanban.md` and find the task entry for the given ID
+- For existing tasks: Read `.ralph/kanban.md` and find the task entry for the given ID
+- For new tasks (from Phase 0): Use the task details held in memory from the design phase
 - Extract Description, Scope, Acceptance Criteria, Dependencies
 - Check dependent tasks to understand what they provide
 - Classify the task: is this a bug fix, a new feature, a refactor, or a behavioral change?
@@ -265,6 +264,21 @@ For plan structure and format, see references/plan-format.md.
 
 ---
 
+### Phase 5.5: Add Task to Kanban (when task was designed in Phase 0)
+
+**Skip this phase if the task already existed in kanban.**
+
+Now that the plan is written, add the task entry to `.ralph/kanban.md`:
+
+- Add properly formatted task entry using the ID determined in Phase 0
+- Include all required fields: Description, Priority, Dependencies
+- Use optional fields (Scope, Acceptance Criteria) when helpful
+- Confirm with user before writing via AskUserQuestion
+
+**Why plan-first?** Writing the plan before the kanban entry ensures the task is fully thought through before it becomes visible to the scheduler. A task with a plan already attached is immediately actionable by workers.
+
+---
+
 ### Phase 6: Summary
 
 **Goal:** Document accomplishments and provide clear next steps.
@@ -284,7 +298,7 @@ For plan structure and format, see references/plan-format.md.
 
 1. **Research before exploring** - Understand requirements, specs, and system architecture before diving into code
 2. **Specs are source of truth** - Explore `spec/` to understand existing specifications; plan must account for spec fit and required changes
-3. **Follow the 7 phases** - Research → Exploration → Questions → Architecture → Plan → Summary
+3. **Follow the phases** - Task Design → Research → Exploration → Questions → Architecture → Plan → Kanban → Summary
 4. **Parallel exploration** - Analyze similar features, architecture, integration points, and interfaces/coupling together
 5. **Minimize interface surface** - Prefer designs that reduce coupling between modules, not extend it
 6. **Questions are critical** - Phase 3 is one of the most important; never skip it
