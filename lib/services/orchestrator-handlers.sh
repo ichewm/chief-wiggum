@@ -292,6 +292,8 @@ svc_orch_resume_decide() {
                 "Step interrupted, direct resume"
             if resume_state_max_exceeded "$worker_dir"; then
                 update_kanban_failed "$RALPH_DIR/kanban.md" "$task_id" || true
+                source "$WIGGUM_HOME/lib/github/issue-sync.sh"
+                github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*" || true
                 resume_state_set_terminal "$worker_dir" "Max resume attempts exceeded (direct RETRY)"
                 log_error "Task $task_id marked FAILED — max resume attempts exceeded at step $current_step"
                 activity_log "worker.resume_failed" "$(basename "$worker_dir")" "$task_id" \
@@ -487,6 +489,8 @@ svc_orch_task_spawner() {
             elif [ "$spawn_rc" -ne 0 ]; then
                 log_error "Failed to spawn worker for $task_id"
                 update_kanban_status "$RALPH_DIR/kanban.md" "$task_id" "*"
+                source "$WIGGUM_HOME/lib/github/issue-sync.sh"
+                github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*" || true
                 export WIGGUM_PIPELINE="$_saved_pipeline"
                 export WIGGUM_PLAN_MODE="$_saved_plan_mode"
                 continue

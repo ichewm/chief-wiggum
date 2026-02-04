@@ -33,6 +33,11 @@ agent_output_files() {
     echo "resume-step.txt"
 }
 
+# Valid decision values for backup extraction
+agent_valid_results() {
+    echo "COMPLETE|RETRY|ABORT|DEFER"
+}
+
 # Global variable to track report path across functions
 declare -g _RESUME_DECIDE_REPORT_PATH=""
 

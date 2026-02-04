@@ -5,11 +5,10 @@
 # Covers all terminal failure classification criteria:
 #   1. resume-state marks terminal (COMPLETE/ABORT)
 #   2. Last pipeline step with FAIL result
-#   3. Last pipeline step with MERGE_CONFLICT result
-#   4. NOT terminal: mid-pipeline step
-#   5. NOT terminal: last step with PASS
-#   6. NOT terminal: no pipeline-config.json
-#   7. NOT terminal: no result file
+#   3. NOT terminal: mid-pipeline step
+#   4. NOT terminal: last step with PASS
+#   5. NOT terminal: no pipeline-config.json
+#   6. NOT terminal: no result file
 # =============================================================================
 
 set -euo pipefail
@@ -115,19 +114,6 @@ test_terminal_when_last_step_fails() {
 }
 
 # =============================================================================
-# Test: Terminal when last step has MERGE_CONFLICT result
-# =============================================================================
-test_terminal_when_last_step_merge_conflict() {
-    local worker_dir="$TEST_DIR/worker-3"
-    # 2 steps, current at last (idx 1), result MERGE_CONFLICT
-    _create_worker "$worker_dir" 2 1 "step-1" "MERGE_CONFLICT"
-
-    local result=0
-    _is_terminal_failure "$worker_dir" || result=$?
-    assert_equals "0" "$result" "Should be terminal when last step result is MERGE_CONFLICT"
-}
-
-# =============================================================================
 # Test: NOT terminal when mid-pipeline (not at last step)
 # =============================================================================
 test_not_terminal_when_mid_pipeline() {
@@ -196,7 +182,6 @@ test_not_terminal_when_last_step_fix() {
 # =============================================================================
 run_test test_terminal_when_resume_state_terminal
 run_test test_terminal_when_last_step_fails
-run_test test_terminal_when_last_step_merge_conflict
 run_test test_not_terminal_when_mid_pipeline
 run_test test_not_terminal_when_last_step_pass
 run_test test_not_terminal_when_no_config

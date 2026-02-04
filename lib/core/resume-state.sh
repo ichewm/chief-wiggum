@@ -34,7 +34,7 @@ resume_state_read() {
         # Return default state
         jq -n '{
             attempt_count: 0,
-            max_attempts: 5,
+            max_attempts: 3,
             last_attempt_at: 0,
             cooldown_until: 0,
             terminal: false,
@@ -88,7 +88,7 @@ resume_state_increment() {
         --arg step "$step" \
         --arg reason "$reason" \
         --argjson now "$now" \
-        --argjson max_attempts "${MAX_RESUME_ATTEMPTS:-5}" \
+        --argjson max_attempts "${MAX_RESUME_ATTEMPTS:-3}" \
         '.attempt_count += 1
         | .last_attempt_at = $now
         | .max_attempts = $max_attempts
@@ -221,8 +221,8 @@ resume_state_max_exceeded() {
     local attempts max
     attempts=$(jq -r '.attempt_count // 0' "$state_file" 2>/dev/null)
     attempts="${attempts:-0}"
-    max=$(jq -r '.max_attempts // 5' "$state_file" 2>/dev/null)
-    max="${max:-${MAX_RESUME_ATTEMPTS:-5}}"
+    max=$(jq -r '.max_attempts // 3' "$state_file" 2>/dev/null)
+    max="${max:-${MAX_RESUME_ATTEMPTS:-3}}"
 
     [ "$attempts" -ge "$max" ]
 }

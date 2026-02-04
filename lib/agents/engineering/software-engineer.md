@@ -84,6 +84,11 @@ Task: Search .ralph/docs/<package>/web/ for docs about <topic>
 
 Alternatively, use `wdoc ask --name <pkg> --ask "..."` (can be slow, takes a few minutes).
 
+## Conflict Marker Resolution
+If you find Git conflict markers (<<<<<<< / ======= / >>>>>>>) in any file, resolve them
+immediately. Keep the version that makes sense for the current task. These are stale markers
+from a previous merge and must be cleaned up before work can be committed.
+
 ## Workspace Security
 
 CRITICAL: You MUST NOT access files outside your workspace.

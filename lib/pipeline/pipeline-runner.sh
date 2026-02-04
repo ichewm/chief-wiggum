@@ -191,6 +191,17 @@ _pipeline_backup_result_extraction() {
     fi
     valid_values="${valid_values:-PASS|FAIL|FIX|SKIP}"
 
+    # Fallback: read valid_results from agent markdown front matter (more precise)
+    if [ -z "$valid_values" ] || [ "$valid_values" = "PASS|FAIL|FIX|SKIP" ]; then
+        local agent_md="$WIGGUM_HOME/lib/agents/${step_agent//.//}.md"
+        if [ -f "$agent_md" ]; then
+            local fm_values
+            fm_values=$(sed -n '/^---$/,/^---$/p' "$agent_md" | grep 'valid_results:' | \
+                sed 's/.*\[//;s/\].*//;s/,/|/g;s/ //g')
+            [ -n "$fm_values" ] && valid_values="$fm_values"
+        fi
+    fi
+
     log "Pipeline backup: attempting session resume for step '$step_id' (session: ${session_id:0:8}...)"
 
     local recovered
@@ -324,6 +335,72 @@ _clear_step_context() {
     unset WIGGUM_PARENT_STEP_ID WIGGUM_PARENT_RUN_ID WIGGUM_PARENT_SESSION_ID
     unset WIGGUM_PARENT_RESULT WIGGUM_PARENT_REPORT WIGGUM_PARENT_OUTPUT_DIR
     unset WIGGUM_NEXT_STEP_ID
+}
+
+# =============================================================================
+# PER-WORKER COST BUDGETING
+# =============================================================================
+
+# Update incremental cost tracking after a pipeline step completes
+#
+# Reads total_cost_usd from the step's log files and appends to
+# the worker's cost-tracker.json. Skips silently if no cost data found.
+#
+# Args:
+#   worker_dir - Worker directory path
+#   step_id    - Pipeline step ID that just completed
+_update_step_cost() {
+    local worker_dir="$1"
+    local step_id="$2"
+    local tracker="$worker_dir/cost-tracker.json"
+
+    local log_dir
+    log_dir=$(find "$worker_dir/logs" -maxdepth 1 -type d -name "${step_id}-*" 2>/dev/null | sort | tail -1)
+    [ -n "$log_dir" ] || return 0
+
+    local step_cost
+    step_cost=$(find "$log_dir" -name "*.log" ! -name "*summary*" ! -name "*backup*" \
+        -exec grep '"type":"result"' {} \; 2>/dev/null | \
+        jq -s '[.[] | .total_cost_usd // 0] | add // 0' 2>/dev/null)
+    step_cost="${step_cost:-0}"
+
+    if [ ! -f "$tracker" ]; then
+        jq -n --argjson cost "$step_cost" --arg step "$step_id" \
+            '{total_cost: $cost, steps: [{id: $step, cost: $cost}]}' > "$tracker"
+    else
+        jq --argjson cost "$step_cost" --arg step "$step_id" \
+            '.total_cost += $cost | .steps += [{id: $step, cost: $cost}]' \
+            "$tracker" > "${tracker}.tmp" && mv "${tracker}.tmp" "$tracker"
+    fi
+}
+
+# Check if the worker's accumulated cost exceeds the budget
+#
+# Args:
+#   worker_dir - Worker directory path
+#
+# Returns: 0 if within budget (or no limit set), 1 if over budget
+_check_cost_budget() {
+    local worker_dir="$1"
+    local limit="${WIGGUM_WORKER_COST_LIMIT:-}"
+    [ -n "$limit" ] || return 0
+
+    local tracker="$worker_dir/cost-tracker.json"
+    [ -f "$tracker" ] || return 0
+
+    local current_cost
+    current_cost=$(jq -r '.total_cost // 0' "$tracker" 2>/dev/null)
+    current_cost="${current_cost:-0}"
+
+    local cost_cents limit_cents
+    cost_cents=$(awk "BEGIN {printf \"%d\", $current_cost * 100}")
+    limit_cents=$(awk "BEGIN {printf \"%d\", $limit * 100}")
+
+    if [ "${cost_cents:-0}" -gt "${limit_cents:-0}" ]; then
+        log_error "Worker cost \$${current_cost} exceeds limit \$${limit}"
+        return 1
+    fi
+    return 0
 }
 
 # =============================================================================
@@ -613,6 +690,15 @@ pipeline_run_all() {
     # Track start index for resume context propagation
     export _PIPELINE_START_IDX="$current_idx"
 
+    # Resolve per-task cost limit override (pipeline JSON > env > default)
+    if [ -n "${_PIPELINE_JSON_FILE:-}" ] && [ -f "$_PIPELINE_JSON_FILE" ]; then
+        local task_cost_limit
+        task_cost_limit=$(jq -r '.cost_limit // empty' "$_PIPELINE_JSON_FILE" 2>/dev/null) || true
+        if [ -n "$task_cost_limit" ]; then
+            WIGGUM_WORKER_COST_LIMIT="$task_cost_limit"
+        fi
+    fi
+
     # Main state machine loop
     while [ "$current_idx" -ge 0 ] && [ "$current_idx" -lt "$step_count" ]; do
         local step_id
@@ -633,6 +719,12 @@ pipeline_run_all() {
         # Check workspace still exists
         if [ ! -d "$workspace" ]; then
             log_error "Workspace no longer exists, aborting pipeline at step '$step_id'"
+            return 1
+        fi
+
+        # Check cost budget before each step
+        if ! _check_cost_budget "$worker_dir"; then
+            log_error "Pipeline aborted: cost budget exceeded"
             return 1
         fi
 
@@ -675,6 +767,9 @@ pipeline_run_all() {
 
         # Run the step (agent execution only)
         _pipeline_run_step "$current_idx" "$worker_dir" "$project_dir" "$workspace"
+
+        # Track incremental cost after step completes
+        _update_step_cost "$worker_dir" "$step_id"
 
         # Read the gate result (using cache - subsequent calls use cached value)
         local gate_result
@@ -845,8 +940,8 @@ _pipeline_run_step() {
 
     # Override gate_result when commit failed due to conflict markers.
     # The agent may report PASS but the work is uncommittable.
-    # Classify the failure: MERGE_CONFLICT aborts (fix agent can't resolve
-    # merge conflicts), FIX jumps to the fix agent for code-level issues.
+    # Classify the failure as FIX so the previous agent retries and
+    # resolves any conflict markers.
     if [ "$commit_failed" = true ] && [ "$gate_result" = "PASS" ]; then
         local failure_type
         failure_type=$(git_classify_commit_failure "$workspace")

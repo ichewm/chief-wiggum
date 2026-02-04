@@ -94,6 +94,10 @@ export WIGGUM_MAX_RECOVERY_ATTEMPTS
 WIGGUM_PRE_WORKER_MAX_COOLDOWN="${WIGGUM_PRE_WORKER_MAX_COOLDOWN:-300}"
 export WIGGUM_PRE_WORKER_MAX_COOLDOWN
 
+# Per-worker cost limit in USD (0 or empty = unlimited)
+WIGGUM_WORKER_COST_LIMIT="${WIGGUM_WORKER_COST_LIMIT:-}"
+export WIGGUM_WORKER_COST_LIMIT
+
 # Orchestrator and service state directories
 ORCH_STATE_DIR="$RALPH_DIR/orchestrator"
 SVC_STATE_DIR="$RALPH_DIR/services"
@@ -140,7 +144,7 @@ _load_config_cache() {
         (.log_rotation.enabled // true),
         (.log_rotation.max_lines // 10000),
         (.log_rotation.max_archives // 10),
-        (.resume.max_attempts // 5),
+        (.resume.max_attempts // 3),
         (.resume.cooldown_seconds // 3600),
         (.resume.initial_bonus // 20000),
         (.resume.fail_penalty // 8000),
@@ -246,7 +250,7 @@ load_resume_config() {
     RESUME_MAX_DECIDE_CONCURRENT="${WIGGUM_RESUME_MAX_DECIDE_CONCURRENT:-${_CACHE_RESUME_MAX_DECIDE:-}}"
 
     # Fallback defaults if config doesn't exist or parsing fails
-    MAX_RESUME_ATTEMPTS="${MAX_RESUME_ATTEMPTS:-5}"
+    MAX_RESUME_ATTEMPTS="${MAX_RESUME_ATTEMPTS:-3}"
     RESUME_COOLDOWN_SECONDS="${RESUME_COOLDOWN_SECONDS:-3600}"
     RESUME_MAX_DECIDE_CONCURRENT="${RESUME_MAX_DECIDE_CONCURRENT:-20}"
     export MAX_RESUME_ATTEMPTS

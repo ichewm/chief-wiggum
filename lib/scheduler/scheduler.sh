@@ -578,10 +578,10 @@ _has_repeated_step_failures() {
 # 1. resume-state marks it terminal (COMPLETE or ABORT decision from resume-decide)
 #    - Checked via resume_state_is_terminal()
 #
-# 2. Pipeline reached the LAST step AND that step's result is FAIL or MERGE_CONFLICT
+# 2. Pipeline reached the LAST step AND that step's result is FAIL
 #    - All pipeline steps exhausted, nothing left to retry
 #    - Requires: pipeline-config.json with valid current.step_idx at last step
-#    - Requires: result file for current step with gate_result = FAIL or MERGE_CONFLICT
+#    - Requires: result file for current step with gate_result = FAIL
 #
 # NOT terminal (worker is resumable):
 # - No pipeline-config.json (worker never started pipeline — can retry from scratch)
@@ -634,8 +634,7 @@ _is_terminal_failure() {
     [ -f "$result_file" ] || return 1
 
     gate_result=$(jq -r '.outputs.gate_result // ""' "$result_file" 2>/dev/null)
-    # FAIL and MERGE_CONFLICT are both terminal at the last step
-    [ "$gate_result" = "FAIL" ] || [ "$gate_result" = "MERGE_CONFLICT" ]
+    [ "$gate_result" = "FAIL" ]
 }
 
 # Find workers that can be resumed

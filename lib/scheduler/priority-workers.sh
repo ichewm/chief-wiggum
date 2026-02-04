@@ -172,6 +172,8 @@ _check_permanent_failure() {
 
     if [ "$_recovery_count" -ge "${WIGGUM_MAX_RECOVERY_ATTEMPTS:-2}" ]; then
         update_kanban_failed "$kanban_file" "$task_id"
+        source "$WIGGUM_HOME/lib/github/issue-sync.sh"
+        github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*" || true
         log_error "$task_id: permanently failed after $_recovery_count recovery attempts"
     fi
 }
@@ -224,6 +226,8 @@ recover_failed_workers() {
 
         if [ "$recovery_count" -ge "$max_recovery" ]; then
             update_kanban_failed "$kanban_file" "$task_id"
+            source "$WIGGUM_HOME/lib/github/issue-sync.sh"
+            github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*" || true
             log_error "$task_id: permanently failed after $recovery_count recovery attempts - marking [*]"
             continue
         fi

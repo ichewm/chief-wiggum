@@ -95,56 +95,22 @@ git_is_merge_in_progress() {
     return 1
 }
 
-# Classify a commit failure as either a merge conflict or a code issue
+# Classify a commit failure for pipeline dispatch
 #
-# When conflict markers are detected after a commit attempt, this determines
-# whether they are from an unresolved git merge (MERGE_CONFLICT) or from
-# the agent having introduced/left conflict markers in code (FIX).
+# All commit failures with conflict markers are treated as FIX. The previous
+# agent (via default_jump: prev) will be re-run and is responsible for
+# resolving any conflict markers in the workspace.
 #
 # Args:
 #   workspace - Directory containing the git repository
 #
-# Returns: echoes "MERGE_CONFLICT" or "FIX"
+# Returns: always echoes "FIX"
 git_classify_commit_failure() {
     local workspace="$1"
-
-    # If a merge/rebase is actively in progress, it's a merge conflict
-    if git_is_merge_in_progress "$workspace"; then
-        echo "MERGE_CONFLICT"
-        return 0
-    fi
-
-    # Check if the conflict markers exist in files that differ from origin/main
-    # If the markers exist in files that diverge from main, it's likely from
-    # a merge that was resolved poorly (markers left behind from prior merge)
-    #
-    # Check staged area first, then fall back to working tree (staging may have
-    # been reset by the time classification runs)
-    local marker_files
-    if marker_files=$(git_staged_has_conflict_markers "$workspace"); then
-        :  # markers found in staged area
-    elif marker_files=$(git_has_conflict_markers "$workspace"); then
-        :  # markers found in working tree (staging was reset)
-    fi
-
-    if [ -n "${marker_files:-}" ]; then
-        # Check if any conflicted files also show up in `git diff origin/main`
-        local main_diff_files
-        main_diff_files=$(git -C "$workspace" diff --name-only origin/main 2>/dev/null || true)
-
-        if [ -n "$main_diff_files" ]; then
-            local overlap
-            overlap=$(comm -12 <(echo "$marker_files" | sort) <(echo "$main_diff_files" | sort) 2>/dev/null || true)
-            if [ -n "$overlap" ]; then
-                # Markers in files that diverge from main — likely merge residue
-                echo "MERGE_CONFLICT"
-                return 0
-            fi
-        fi
-    fi
-
-    # Default: treat as a code issue fixable by the fix agent
+    # All commit failures are treated as FIX — agents are responsible for
+    # resolving any conflict markers in the workspace.
     echo "FIX"
+    return 0
 }
 
 # =============================================================================

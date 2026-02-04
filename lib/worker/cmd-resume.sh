@@ -21,6 +21,7 @@ source "$WIGGUM_HOME/lib/backend/claude/usage-tracker.sh"
 source "$WIGGUM_HOME/lib/pipeline/pipeline-loader.sh"
 source "$WIGGUM_HOME/lib/core/resume-state.sh"
 source "$WIGGUM_HOME/lib/core/safe-path.sh"
+source "$WIGGUM_HOME/lib/github/issue-sync.sh"
 
 # Check if a step completed (has a result file) vs was interrupted (no result)
 #
@@ -189,6 +190,16 @@ do_resume() {
         # Step completed (has result file) or no current step recorded
         # Need LLM to analyze what happened and decide resume point
         _msg "Step '${current_step:-unknown}' completed - running resume-decide agent"
+    fi
+
+    # === STEP 1b: Check cost budget before proceeding ===
+    source "$WIGGUM_HOME/lib/pipeline/pipeline-runner.sh"
+    if ! _check_cost_budget "$worker_dir"; then
+        source "$WIGGUM_HOME/lib/core/resume-state.sh"
+        resume_state_set_terminal "$worker_dir" "Cost budget exceeded"
+        update_kanban_failed "$RALPH_DIR/kanban.md" "$task_id" || true
+        log_error "Task $task_id marked FAILED — cost budget exceeded"
+        exit $EXIT_ERROR
     fi
 
     # === STEP 2: Convert logs to conversations (if needed for resume-decide) ===
@@ -438,7 +449,7 @@ _read_resume_decision() {
 
     # Read from structured JSON (preferred) or fallback to text file
     if [ -f "$worker_dir/resume-decision.json" ]; then
-        decision=$(jq -r '.decision // "ABORT"' "$worker_dir/resume-decision.json")
+        decision=$(jq -r '.decision // ""' "$worker_dir/resume-decision.json")
         resume_pipeline=$(jq -r '.pipeline // ""' "$worker_dir/resume-decision.json")
         resume_step_id=$(jq -r '.resume_step // ""' "$worker_dir/resume-decision.json")
         # Normalize null to empty
@@ -447,7 +458,7 @@ _read_resume_decision() {
     else
         # Backward compat: old resume-step.txt
         local raw
-        raw=$(cat "$worker_dir/resume-step.txt" 2>/dev/null || echo "ABORT")
+        raw=$(cat "$worker_dir/resume-step.txt" 2>/dev/null || echo "")
         raw=$(echo "$raw" | tr -d '[:space:]')
         if [[ "$raw" == RETRY:* ]]; then
             decision="RETRY"
@@ -455,11 +466,16 @@ _read_resume_decision() {
             resume_step_id=$(echo "$raw" | cut -d: -f3)
         elif [[ "$raw" == "COMPLETE" || "$raw" == "ABORT" || "$raw" == "DEFER" ]]; then
             decision="$raw"
-        else
+        elif [ -n "$raw" ]; then
             # Legacy: bare step_id → treat as RETRY with current pipeline
             decision="RETRY"
             resume_step_id="$raw"
         fi
+    fi
+
+    if [ -z "$decision" ]; then
+        log_error "Resume-decide produced no parseable decision after all extraction attempts"
+        exit $EXIT_ERROR
     fi
 }
 
@@ -568,6 +584,7 @@ _handle_abort() {
 
     # Mark task as [*] failed
     update_kanban_failed "$RALPH_DIR/kanban.md" "$task_id" || true
+    github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*" || true
 
     # Mark resume state as terminal
     resume_state_set_terminal "$worker_dir" "Unrecoverable failure — aborted by resume-decide"

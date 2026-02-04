@@ -78,6 +78,11 @@ Avoid:
 * Trust that existing unit tests prove spec compliance
 * Change existing tests unless they test modified code
 
+## Conflict Marker Resolution
+If you find Git conflict markers (<<<<<<< / ======= / >>>>>>>) in any file, resolve them
+immediately. Keep the version that makes sense for the current task. These are stale markers
+from a previous merge and must be cleaned up before work can be committed.
+
 ## Git Restrictions (CRITICAL)
 
 The workspace contains uncommitted work from other agents. You MUST NOT destroy it.

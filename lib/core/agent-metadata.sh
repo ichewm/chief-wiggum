@@ -94,6 +94,15 @@ Follow links to explore relevant patterns, agent notes, and task analyses.
 EOF
 }
 
+# Shell agents can override this to declare their valid result values.
+# Used by pipeline backup result extraction when markdown front matter
+# is not available (shell-only agents).
+#
+# Returns: pipe-separated valid result values (e.g., "PASS|FAIL")
+agent_valid_results() {
+    echo "PASS|FAIL"
+}
+
 # =============================================================================
 # DEPENDENCY SOURCING
 # =============================================================================

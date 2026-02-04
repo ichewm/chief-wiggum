@@ -494,8 +494,8 @@ _update_kanban_status() {
         if ! update_kanban_failed "$RALPH_DIR/kanban.md" "$task_id"; then
             log_error "Failed to update kanban.md after retries"
         fi
-        # Update PR label to failed
-        github_pr_sync_task_status "$RALPH_DIR" "$task_id" "*" "=" || true
+        # Update GitHub issue and PR labels to failed
+        github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*" || true
         log_error "Task worker $worker_id failed task $task_id"
     fi
 

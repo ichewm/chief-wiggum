@@ -36,6 +36,7 @@
 _ORCHESTRATOR_FUNCTIONS_LOADED=1
 
 source "$WIGGUM_HOME/lib/core/safe-path.sh"
+source "$WIGGUM_HOME/lib/github/issue-sync.sh"
 
 # These functions depend on scheduler module components
 # They should be sourced after the scheduler modules are loaded
@@ -596,6 +597,7 @@ orch_spawn_ready_tasks() {
         if ! _orch_spawn_worker "$task_id" "$max_iterations" "$max_turns" "$agent_type"; then
             log_error "Failed to spawn worker for $task_id"
             update_kanban_status "$ralph_dir/kanban.md" "$task_id" "*"
+            github_issue_sync_task_status "$ralph_dir" "$task_id" "*" || true
             continue
         fi
 
@@ -1292,6 +1294,7 @@ _resume_decide_handle_abort() {
 
     resume_state_increment "$worker_dir" "ABORT" "" "" "Auto-abort: $reason"
     update_kanban_failed "$RALPH_DIR/kanban.md" "$task_id" || true
+    github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*" || true
     resume_state_set_terminal "$worker_dir" "$reason"
     rm -f "$worker_dir/resume-decision.json"
     activity_log "worker.resume_abort" "$(basename "$worker_dir")" "$task_id"
@@ -1461,6 +1464,7 @@ _resume_decide_for_worker() {
         ABORT)
             resume_state_increment "$worker_dir" "ABORT" "" "" "Resume-decide: unrecoverable failure"
             update_kanban_failed "$RALPH_DIR/kanban.md" "$task_id" || true
+            github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*" || true
             resume_state_set_terminal "$worker_dir" "Unrecoverable failure — aborted by resume-decide"
             rm -f "$worker_dir/resume-decision.json"
             log_error "Task $task_id marked FAILED by resume-decide (unrecoverable)"
@@ -1478,6 +1482,7 @@ _resume_decide_for_worker() {
         *)
             resume_state_increment "$worker_dir" "ABORT" "" "" "Unknown decision: $decision"
             update_kanban_failed "$RALPH_DIR/kanban.md" "$task_id" || true
+            github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*" || true
             resume_state_set_terminal "$worker_dir" "Unknown decision '$decision' — treated as ABORT"
             rm -f "$worker_dir/resume-decision.json"
             log_error "Task $task_id: unknown resume decision '$decision' — treated as ABORT"
@@ -1643,6 +1648,7 @@ _poll_pending_decides() {
                 resume_state_set_terminal "$worker_dir" \
                     "Max resume attempts exceeded after decide errors (last exit: $decide_exit)"
                 update_kanban_failed "$RALPH_DIR/kanban.md" "$task_id" || true
+                github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*" || true
                 log_error "Task $task_id marked FAILED — max resume attempts exceeded (decide exit: $decide_exit)"
                 activity_log "worker.resume_failed" "$(basename "$worker_dir")" "$task_id" \
                     "exit_code=$decide_exit reason=max_attempts_exceeded"
@@ -1738,10 +1744,12 @@ _recover_stranded_decisions() {
 
                 if [ -n "$pr_url" ] || [ -d "$worker_dir/workspace" ]; then
                     update_kanban_pending_approval "$RALPH_DIR/kanban.md" "$task_id" || true
+                    github_issue_sync_task_status "$RALPH_DIR" "$task_id" "P" || true
                     resume_state_set_terminal "$worker_dir" "Recovered: work complete, task marked [P]"
                 else
                     # No workspace, no PR — work was lost
                     update_kanban_failed "$RALPH_DIR/kanban.md" "$task_id" || true
+                    github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*" || true
                     resume_state_set_terminal "$worker_dir" "Recovered: COMPLETE but no workspace or PR — work lost"
                     log_error "Task $task_id COMPLETE decision but no workspace or PR — marking failed"
                 fi
@@ -1753,6 +1761,7 @@ _recover_stranded_decisions() {
             ABORT)
                 resume_state_increment "$worker_dir" "ABORT" "" "" "Recovered stranded ABORT"
                 update_kanban_failed "$RALPH_DIR/kanban.md" "$task_id" || true
+                github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*" || true
                 resume_state_set_terminal "$worker_dir" "Recovered: aborted by resume-decide"
                 rm -f "$worker_dir/resume-decision.json"
                 activity_log "worker.resume_abort" "$worker_id" "$task_id" "recovered=true"
@@ -1768,6 +1777,7 @@ _recover_stranded_decisions() {
             *)
                 resume_state_increment "$worker_dir" "ABORT" "" "" "Recovered unknown decision: $decision"
                 update_kanban_failed "$RALPH_DIR/kanban.md" "$task_id" || true
+                github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*" || true
                 resume_state_set_terminal "$worker_dir" "Recovered: unknown decision '$decision'"
                 rm -f "$worker_dir/resume-decision.json"
                 scheduler_mark_event
@@ -2012,6 +2022,7 @@ _poll_pending_resumes() {
                     resume_state_set_terminal "$worker_dir" \
                         "Max resume attempts exceeded after repeated errors (last exit: $resume_exit)"
                     update_kanban_failed "$RALPH_DIR/kanban.md" "$task_id" || true
+                    github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*" || true
                     log_error "Task $task_id marked FAILED — max resume attempts exceeded (exit code: $resume_exit)"
                     activity_log "worker.resume_failed" "$(basename "$worker_dir")" "$task_id" \
                         "exit_code=$resume_exit reason=max_attempts_exceeded"
