@@ -10,6 +10,8 @@ set -euo pipefail
 [ -n "${_GITHUB_ISSUE_PARSER_LOADED:-}" ] && return 0
 _GITHUB_ISSUE_PARSER_LOADED=1
 
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
+
 # =============================================================================
 # Task ID Extraction
 # =============================================================================
@@ -206,6 +208,7 @@ github_issue_parse_body_json() {
     [ -f "$tmp_dir/out_of_scope" ] && out_of_scope=$(sed '/./,$!d' "$tmp_dir/out_of_scope" | sed -e :a -e '/^[[:space:]]*$/{ $d; N; ba; }')
     [ -f "$tmp_dir/acceptance_criteria" ] && acceptance_criteria=$(sed '/./,$!d' "$tmp_dir/acceptance_criteria" | sed -e :a -e '/^[[:space:]]*$/{ $d; N; ba; }')
 
+    safe_path "$tmp_dir" "tmp_dir" || return 1
     rm -rf "$tmp_dir"
 
     jq -n \

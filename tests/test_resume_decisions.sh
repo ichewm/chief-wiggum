@@ -22,7 +22,7 @@ setup() {
 }
 
 teardown() {
-    rm -rf "$TEST_WORKER_DIR"
+    [ -n "$TEST_WORKER_DIR" ] && rm -rf "$TEST_WORKER_DIR"
 }
 
 # ============================================================================

@@ -18,7 +18,7 @@ setup() {
 }
 
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # Source the module under test (after setup defines AUDIT_LOG)

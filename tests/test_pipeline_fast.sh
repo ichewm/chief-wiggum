@@ -24,7 +24,7 @@ setup() {
     PIPELINE_NAME=""
 }
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # =============================================================================

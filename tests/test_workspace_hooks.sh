@@ -106,7 +106,7 @@ setup() {
 
 teardown() {
     if [ -n "$TEST_WORKSPACE" ] && [ -d "$TEST_WORKSPACE" ]; then
-        rm -rf "$TEST_WORKSPACE"
+        [ -n "$TEST_WORKSPACE" ] && rm -rf "$TEST_WORKSPACE"
     fi
 }
 
@@ -378,7 +378,7 @@ test_hook_worker_workspace_takes_priority() {
     run_validate_hook "$json" "$TEST_WORKSPACE" "$other_dir" || rc=$?
     assert_equals "0" "$rc" "WORKER_WORKSPACE should take priority over CLAUDE_PROJECT_DIR"
 
-    rm -rf "$other_dir"
+    [ -n "$other_dir" ] && rm -rf "$other_dir"
 }
 
 # =============================================================================

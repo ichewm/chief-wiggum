@@ -359,6 +359,13 @@ count="${count:-0}"
 [ "$count" -gt 0 ]
 ```
 
+### `safe_path` Guards for Filesystem Operations
+- **Guard variable-derived paths before `rm -rf`, `mkdir -p`, `mv`** — empty variables collapse `"$var/xxx"` to `"/xxx"`. `set -euo pipefail` catches unset but not set-but-empty.
+- Production code: `source "$WIGGUM_HOME/lib/core/safe-path.sh"`, then `safe_path "$var" "var_name" || return 1` once per function at entry
+- Tests/standalone: `[ -n "$VAR" ] && rm -rf "$VAR"`
+- Globs: `[[ -n "$RALPH_DIR" ]] && rm -rf "$RALPH_DIR/batches"/batch-*`
+- `safe_path()` rejects: empty, `"null"`, `"/"`, `"//"`, absolute paths <2 components. Stderr only, no logger dependency.
+
 ### Platform Compatibility
 - Code must work on both Linux and macOS — use `lib/core/platform.sh` for OS-specific operations (e.g., `stat`, `date`, `sed -i`)
 - Never use GNU-only flags directly; call the platform abstraction instead

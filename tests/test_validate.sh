@@ -197,7 +197,7 @@ test_cleanup_collapses_completed() {
     # IDs preserved in done comment
     assert_file_contains "$tmp_dir/kanban.md" "<!-- done: TASK-001, TASK-004 -->" "Done comment should list collapsed IDs"
 
-    rm -rf "$tmp_dir"
+    [ -n "$tmp_dir" ] && rm -rf "$tmp_dir"
 }
 
 test_cleanup_keeps_non_completed() {
@@ -211,7 +211,7 @@ test_cleanup_keeps_non_completed() {
     assert_file_contains "$tmp_dir/kanban.md" "**[TASK-003]**" "TASK-003 (pending) should remain"
     assert_file_contains "$tmp_dir/kanban.md" "**[TASK-005]**" "TASK-005 (in-progress) should remain"
 
-    rm -rf "$tmp_dir"
+    [ -n "$tmp_dir" ] && rm -rf "$tmp_dir"
 }
 
 test_cleanup_all_completed() {
@@ -228,7 +228,7 @@ test_cleanup_all_completed() {
     assert_file_contains "$tmp_dir/kanban.md" "<!-- done: TASK-001, TASK-002 -->" "Done comment should list all IDs"
     assert_file_not_contains "$tmp_dir/kanban.md" "- [x]" "No [x] task blocks should remain"
 
-    rm -rf "$tmp_dir"
+    [ -n "$tmp_dir" ] && rm -rf "$tmp_dir"
 }
 
 test_cleanup_no_completed() {
@@ -253,7 +253,7 @@ EOF
     assert_equals "0" "$exit_code" "Cleanup should exit 0 when no completed tasks"
     assert_output_contains "$output" "No completed tasks to clean up" "Should report no completed tasks"
 
-    rm -rf "$tmp_dir"
+    [ -n "$tmp_dir" ] && rm -rf "$tmp_dir"
 }
 
 test_cleanup_quiet_mode() {
@@ -266,7 +266,7 @@ test_cleanup_quiet_mode() {
 
     assert_equals "" "$output" "Quiet mode should produce no output on success"
 
-    rm -rf "$tmp_dir"
+    [ -n "$tmp_dir" ] && rm -rf "$tmp_dir"
 }
 
 test_cleanup_file_not_found() {
@@ -287,7 +287,7 @@ test_cleanup_reports_collapsed_ids() {
     assert_output_contains "$output" "TASK-001" "Should list collapsed TASK-001"
     assert_output_contains "$output" "TASK-004" "Should list collapsed TASK-004"
 
-    rm -rf "$tmp_dir"
+    [ -n "$tmp_dir" ] && rm -rf "$tmp_dir"
 }
 
 # =============================================================================
@@ -319,7 +319,7 @@ test_cleanup_sections_collapses_per_section() {
     assert_file_contains "$tmp_dir/kanban.md" "**[TASK-005]**" "TASK-005 (pending) should remain"
     assert_file_contains "$tmp_dir/kanban.md" "**[TASK-006]**" "TASK-006 (pending) should remain"
 
-    rm -rf "$tmp_dir"
+    [ -n "$tmp_dir" ] && rm -rf "$tmp_dir"
 }
 
 test_cleanup_sections_all_completed_in_section() {
@@ -360,7 +360,7 @@ EOF
     assert_file_contains "$tmp_dir/kanban.md" "### Phase 2" "Phase 2 heading should remain"
     assert_file_contains "$tmp_dir/kanban.md" "**[TASK-003]**" "Pending task should remain"
 
-    rm -rf "$tmp_dir"
+    [ -n "$tmp_dir" ] && rm -rf "$tmp_dir"
 }
 
 test_cleanup_sections_no_headings_still_works() {
@@ -376,7 +376,7 @@ test_cleanup_sections_no_headings_still_works() {
     assert_file_contains "$tmp_dir/kanban.md" "<!-- done: TASK-001, TASK-004 -->" "Done comment should list collapsed IDs"
     assert_file_contains "$tmp_dir/kanban.md" "**[TASK-002]**" "Non-completed tasks should remain"
 
-    rm -rf "$tmp_dir"
+    [ -n "$tmp_dir" ] && rm -rf "$tmp_dir"
 }
 
 test_cleanup_sections_reports_all_collapsed() {
@@ -392,7 +392,7 @@ test_cleanup_sections_reports_all_collapsed() {
     assert_output_contains "$output" "TASK-003" "Should list TASK-003"
     assert_output_contains "$output" "TASK-004" "Should list TASK-004"
 
-    rm -rf "$tmp_dir"
+    [ -n "$tmp_dir" ] && rm -rf "$tmp_dir"
 }
 
 # =============================================================================
@@ -457,7 +457,7 @@ EOF
     # Report collapsed count
     assert_output_contains "$output" "Collapsed 3 completed task(s)" "Should report 3 collapsed tasks"
 
-    rm -rf "$tmp_dir"
+    [ -n "$tmp_dir" ] && rm -rf "$tmp_dir"
 }
 
 test_cleanup_mixed_h2_h3_sections() {
@@ -508,7 +508,7 @@ EOF
     assert_file_contains "$tmp_dir/kanban.md" "**[TASK-001]**" "TASK-001 (pending) should remain"
     assert_file_contains "$tmp_dir/kanban.md" "**[TASK-004]**" "TASK-004 (pending) should remain"
 
-    rm -rf "$tmp_dir"
+    [ -n "$tmp_dir" ] && rm -rf "$tmp_dir"
 }
 
 # =============================================================================

@@ -101,7 +101,7 @@ test_config_loading_task_worker() {
     assert_equals "20" "$AGENT_CONFIG_MAX_ITERATIONS" "system.task-worker max_iterations should be 20"
     assert_equals "50" "$AGENT_CONFIG_MAX_TURNS" "system.task-worker max_turns should be 50"
     assert_equals "3600" "$AGENT_CONFIG_TIMEOUT_SECONDS" "system.task-worker timeout_seconds should be 3600"
-    rm -rf "$fixture_home"
+    [ -n "$fixture_home" ] && rm -rf "$fixture_home"
 }
 
 test_config_loading_pr_comment_fix() {
@@ -114,7 +114,7 @@ test_config_loading_pr_comment_fix() {
     assert_equals "10" "$AGENT_CONFIG_MAX_ITERATIONS" "engineering.pr-comment-fix max_iterations should be 10"
     assert_equals "30" "$AGENT_CONFIG_MAX_TURNS" "engineering.pr-comment-fix max_turns should be 30"
     assert_equals "true" "$AGENT_CONFIG_AUTO_COMMIT" "engineering.pr-comment-fix auto_commit should be true"
-    rm -rf "$fixture_home"
+    [ -n "$fixture_home" ] && rm -rf "$fixture_home"
 }
 
 test_config_loading_validation_review() {
@@ -126,7 +126,7 @@ test_config_loading_validation_review() {
 
     assert_equals "5" "$AGENT_CONFIG_MAX_ITERATIONS" "engineering.validation-review max_iterations should be 5"
     assert_equals "50" "$AGENT_CONFIG_MAX_TURNS" "engineering.validation-review max_turns should be 50"
-    rm -rf "$fixture_home"
+    [ -n "$fixture_home" ] && rm -rf "$fixture_home"
 }
 
 test_config_loading_unknown_agent_uses_defaults() {
@@ -138,7 +138,7 @@ test_config_loading_unknown_agent_uses_defaults() {
 
     assert_equals "10" "$AGENT_CONFIG_MAX_ITERATIONS" "unknown agent should use default max_iterations"
     assert_equals "30" "$AGENT_CONFIG_MAX_TURNS" "unknown agent should use default max_turns"
-    rm -rf "$fixture_home"
+    [ -n "$fixture_home" ] && rm -rf "$fixture_home"
 }
 
 # =============================================================================
@@ -194,7 +194,7 @@ test_agent_write_result_creates_epoch_file() {
         assert_failure "epoch-named result file should be created in results/" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_agent_write_result_valid_json() {
@@ -218,7 +218,7 @@ test_agent_write_result_valid_json() {
         assert_failure "result file should be valid JSON" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_agent_read_result_status() {
@@ -238,7 +238,7 @@ test_agent_read_result_status() {
 
     assert_equals "success" "$status" "Should read back status as success"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_agent_result_is_success() {
@@ -259,7 +259,7 @@ test_agent_result_is_success() {
         assert_failure "agent_result_is_success should return true for success" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_agent_result_is_success_failure() {
@@ -280,7 +280,7 @@ test_agent_result_is_success_failure() {
         assert_success "agent_result_is_success should return false for failure" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_agent_get_output() {
@@ -301,7 +301,7 @@ test_agent_get_output() {
 
     assert_equals "https://github.com/test/pr/123" "$pr_url" "Should read pr_url from outputs"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 # =============================================================================
@@ -326,7 +326,7 @@ test_agent_find_latest_result() {
     assert_equals "$tmpdir/results/2000-engineering.security-audit-result.json" "$found" \
         "Should find the latest (most recent) result file"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_agent_find_latest_result_not_found() {
@@ -341,7 +341,7 @@ test_agent_find_latest_result_not_found() {
 
     assert_equals "" "$found" "Should return empty for nonexistent agent"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_agent_find_latest_report() {
@@ -361,7 +361,7 @@ test_agent_find_latest_report() {
     assert_equals "$tmpdir/reports/2000-engineering.security-audit-report.md" "$found" \
         "Should find the latest report file"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_agent_write_report() {
@@ -389,7 +389,7 @@ test_agent_write_report() {
         assert_failure "Report should have epoch-named path" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_agent_read_subagent_result() {
@@ -407,7 +407,7 @@ test_agent_read_subagent_result() {
 
     assert_equals "PASS" "$result" "Should read gate_result from sub-agent result"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_agent_read_subagent_result_unknown() {
@@ -422,7 +422,7 @@ test_agent_read_subagent_result_unknown() {
 
     assert_equals "UNKNOWN" "$result" "Should return UNKNOWN for missing agent result"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 # =============================================================================
@@ -440,7 +440,7 @@ test_agent_create_directories() {
     assert_dir_exists "$tmpdir/logs" "logs directory should be created"
     assert_dir_exists "$tmpdir/summaries" "summaries directory should be created"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 # =============================================================================

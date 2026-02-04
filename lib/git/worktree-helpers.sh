@@ -8,6 +8,7 @@ set -euo pipefail
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/git/git-operations.sh"
 source "$WIGGUM_HOME/lib/core/platform.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # Global variable set by setup_worktree
 WORKTREE_PATH=""
@@ -102,6 +103,7 @@ setup_worktree() {
             log_error "Aborting worker setup to avoid wasting pipeline stages on unresolvable conflicts"
             # Clean up the worktree we just created
             cd "$project_dir" || true
+            safe_path "$workspace" "workspace" || return 1
             git worktree remove "$workspace" --force 2>/dev/null || rm -rf "$workspace"
             return 1
         fi

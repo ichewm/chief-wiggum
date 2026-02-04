@@ -127,7 +127,7 @@ run_test_file() {
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
 
     # Cleanup
-    rm -rf "$TEST_TEMP_DIR"
+    [ -n "$TEST_TEMP_DIR" ] && rm -rf "$TEST_TEMP_DIR"
     echo ""
 }
 

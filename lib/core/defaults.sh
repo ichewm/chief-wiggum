@@ -10,6 +10,20 @@ WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
 PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
 RALPH_DIR="${RALPH_DIR:-$PROJECT_DIR/.ralph}"
 
+# Validate core paths are not empty after defaulting
+if [[ -z "$WIGGUM_HOME" || "$WIGGUM_HOME" == "/" ]]; then
+    echo "[FATAL] WIGGUM_HOME is empty or root — aborting" >&2
+    exit 1
+fi
+if [[ -z "$PROJECT_DIR" || "$PROJECT_DIR" == "/" ]]; then
+    echo "[FATAL] PROJECT_DIR is empty or root — aborting" >&2
+    exit 1
+fi
+if [[ -z "$RALPH_DIR" || "$RALPH_DIR" == "/" ]]; then
+    echo "[FATAL] RALPH_DIR is empty or root — aborting" >&2
+    exit 1
+fi
+
 # Claude binary (allows specifying a different binary or path)
 CLAUDE="${CLAUDE:-claude}"
 

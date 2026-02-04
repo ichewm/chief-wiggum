@@ -36,7 +36,7 @@ setup() {
 }
 
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
     cd "$TESTS_DIR" || return 1
 }
 

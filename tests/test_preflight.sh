@@ -27,7 +27,7 @@ setup() {
     CHECK_WARNED=0
 }
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # =============================================================================

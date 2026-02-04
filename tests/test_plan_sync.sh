@@ -31,7 +31,7 @@ setup() {
 
 teardown() {
     export PATH="$ORIG_PATH"
-    rm -rf "$TEST_DIR" "$MOCK_BIN"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR" "$MOCK_BIN"
 }
 
 # =============================================================================

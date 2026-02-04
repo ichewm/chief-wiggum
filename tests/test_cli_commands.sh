@@ -26,7 +26,7 @@ setup() {
 
 teardown() {
     cd /
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # =============================================================================
@@ -222,7 +222,7 @@ test_init_in_non_git_directory_fails() {
     local output exit_code
     output=$(cd "$non_git_dir" && wiggum-init 2>&1) || exit_code=$?
     exit_code=${exit_code:-0}
-    rm -rf "$non_git_dir"
+    [ -n "$non_git_dir" ] && rm -rf "$non_git_dir"
 
     assert_equals "$EXIT_INIT_NOT_GIT_REPO" "$exit_code" \
         "wiggum-init in non-git dir should exit with EXIT_INIT_NOT_GIT_REPO ($EXIT_INIT_NOT_GIT_REPO)"

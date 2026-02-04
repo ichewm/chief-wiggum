@@ -24,7 +24,7 @@ setup() {
     PIPELINE_NAME=""
 }
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # =============================================================================
@@ -518,7 +518,7 @@ test_resolve_returns_empty_for_builtin_fallback() {
     if [ "$had_default" -eq 1 ]; then
         mv "$WIGGUM_HOME/config/pipelines/default.json.bak" "$WIGGUM_HOME/config/pipelines/default.json"
     fi
-    rm -rf "$isolated_dir"
+    [ -n "$isolated_dir" ] && rm -rf "$isolated_dir"
 }
 
 # =============================================================================

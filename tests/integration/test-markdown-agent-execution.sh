@@ -55,7 +55,7 @@ setup() {
 
 teardown() {
     mock_teardown
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # =============================================================================
@@ -505,7 +505,7 @@ All tests passed.
     fi
 
     # Cleanup
-    rm -rf "$WIGGUM_HOME/lib/agents/test"
+    [ -n "$WIGGUM_HOME" ] && rm -rf "$WIGGUM_HOME/lib/agents/test"
     unset WIGGUM_STEP_ID
 }
 

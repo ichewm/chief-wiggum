@@ -43,7 +43,7 @@ setup() {
 }
 
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # Helper: create a worker directory with pipeline config and result

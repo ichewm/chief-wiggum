@@ -18,7 +18,7 @@ setup() {
     export RALPH_RUN_ID="test"
 }
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # =============================================================================

@@ -5,6 +5,7 @@ set -euo pipefail
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
 source "$WIGGUM_HOME/lib/core/bin-common.sh"
 source "$WIGGUM_HOME/lib/core/file-lock.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 source "$WIGGUM_HOME/lib/worker/worker-lifecycle.sh"
 source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 
@@ -122,6 +123,7 @@ clean_worker_workspace() {
 clean_worker_full() {
     local worker_name="$1"
     local worker_dir="$RALPH_DIR/workers/$worker_name"
+    safe_path "$worker_dir" "worker_dir" || return 1
 
     if [ -d "$worker_dir/workspace" ]; then
         log "Removing worktree: $worker_dir/workspace"
@@ -390,6 +392,7 @@ clean_stale_batches() {
     [ -d "$RALPH_DIR/batches" ] || return 0
 
     for batch_dir in "$RALPH_DIR/batches"/batch-*; do
+        safe_path "$batch_dir" "batch_dir" || continue
         [ -d "$batch_dir" ] || continue
 
         local coord_file="$batch_dir/coordination.json"
@@ -445,6 +448,7 @@ clean_planners() {
 
     for planner_dir in "$RALPH_DIR/workers"/planner-batch-*; do
         [ -d "$planner_dir" ] || continue
+        safe_path "$planner_dir" "planner_dir" || continue
 
         local batch_id
         batch_id=$(basename "$planner_dir" | sed 's/^planner-//')
@@ -488,7 +492,7 @@ do_batch_all() {
     if [ -d "$RALPH_DIR/batches" ]; then
         local batch_count
         batch_count=$(find "$RALPH_DIR/batches" -maxdepth 1 -type d -name "batch-*" 2>/dev/null | wc -l)
-        rm -rf "$RALPH_DIR/batches"/batch-*
+        [[ -n "$RALPH_DIR" ]] && rm -rf "$RALPH_DIR/batches"/batch-*
         log "Removed $batch_count batch coordination director(ies)"
     fi
 
@@ -505,7 +509,7 @@ do_batch_all() {
     # Clean planner directories
     local planner_count
     planner_count=$(find "$RALPH_DIR/workers" -maxdepth 1 -type d -name "planner-batch-*" 2>/dev/null | wc -l)
-    rm -rf "$RALPH_DIR/workers"/planner-batch-*
+    [[ -n "$RALPH_DIR" ]] && rm -rf "$RALPH_DIR/workers"/planner-batch-*
     log "Removed $planner_count planner director(ies)"
 
     log "Batch cleanup complete"
@@ -531,6 +535,7 @@ do_batch_specific() {
     [[ "$batch_id" != batch-* ]] && batch_id="batch-$batch_id"
 
     local batch_dir="$RALPH_DIR/batches/$batch_id"
+    safe_path "$batch_dir" "batch_dir" || return 1
 
     if [ ! -d "$batch_dir" ]; then
         echo "Batch not found: $batch_id"
@@ -579,7 +584,7 @@ do_batch_specific() {
 
     # Remove planner if exists
     local planner_dir="$RALPH_DIR/workers/planner-$batch_id"
-    [ -d "$planner_dir" ] && {
+    [ -d "$planner_dir" ] && safe_path "$planner_dir" "planner_dir" && {
         rm -rf "$planner_dir"
         log "Removed planner-$batch_id"
     }

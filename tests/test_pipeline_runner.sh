@@ -49,7 +49,7 @@ setup() {
 
 teardown() {
     unset WIGGUM_TASK_ID WIGGUM_STEP_ID WIGGUM_STEP_READONLY
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # Helper: Create a pipeline JSON file
@@ -874,7 +874,7 @@ test_pipeline_workspace_disappears_before_agent() {
 
     # Remove workspace AFTER pipeline_run_all starts but before step execution
     # We do this by removing it and relying on the pre-agent check
-    rm -rf "$TEST_DIR/worker/workspace"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR/worker/workspace"
 
     : > "$TEST_DIR/agent_invocations.txt"
     local exit_code=0

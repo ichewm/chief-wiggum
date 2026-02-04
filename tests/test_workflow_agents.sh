@@ -36,7 +36,7 @@ setup() {
 }
 
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # =============================================================================
@@ -54,7 +54,7 @@ test_git_sync_main_agent_sources() {
 }
 
 test_git_sync_main_missing_workspace_fails() {
-    rm -rf "$WORKER_DIR/workspace"
+    [ -n "$WORKER_DIR" ] && rm -rf "$WORKER_DIR/workspace"
 
     source "$WIGGUM_HOME/lib/agents/workflow/git-sync-main.sh"
     local result=0
@@ -64,7 +64,7 @@ test_git_sync_main_missing_workspace_fails() {
 }
 
 test_git_sync_main_not_git_repo_fails() {
-    rm -rf "$WORKER_DIR/workspace/.git"
+    [ -n "$WORKER_DIR" ] && rm -rf "$WORKER_DIR/workspace/.git"
 
     source "$WIGGUM_HOME/lib/agents/workflow/git-sync-main.sh"
     local result=0
@@ -125,7 +125,7 @@ test_git_commit_push_commits_changes() {
 }
 
 test_git_commit_push_missing_workspace_fails() {
-    rm -rf "$WORKER_DIR/workspace"
+    [ -n "$WORKER_DIR" ] && rm -rf "$WORKER_DIR/workspace"
 
     source "$WIGGUM_HOME/lib/agents/workflow/git-commit-push.sh"
     local result=0
@@ -192,7 +192,7 @@ test_pr_merge_no_pr_number_fails() {
 }
 
 test_pr_merge_missing_workspace_fails() {
-    rm -rf "$WORKER_DIR/workspace"
+    [ -n "$WORKER_DIR" ] && rm -rf "$WORKER_DIR/workspace"
 
     source "$WIGGUM_HOME/lib/agents/workflow/pr-merge.sh"
     local result=0
@@ -233,7 +233,7 @@ test_git_conflict_resolver_no_conflicts_skips() {
 }
 
 test_git_conflict_resolver_missing_workspace_fails() {
-    rm -rf "$WORKER_DIR/workspace"
+    [ -n "$WORKER_DIR" ] && rm -rf "$WORKER_DIR/workspace"
 
     source "$WIGGUM_HOME/lib/agents/workflow/git-conflict-resolver.sh"
     local result=0

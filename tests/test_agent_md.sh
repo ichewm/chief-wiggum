@@ -175,7 +175,7 @@ test_parse_frontmatter_type() {
 
     assert_equals "engineering.test-agent" "$_MD_TYPE" "Should parse type from frontmatter"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_parse_frontmatter_description() {
@@ -190,7 +190,7 @@ test_parse_frontmatter_description() {
 
     assert_equals "Test agent for unit tests" "$_MD_DESCRIPTION" "Should parse description from frontmatter"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_parse_frontmatter_mode() {
@@ -205,7 +205,7 @@ test_parse_frontmatter_mode() {
 
     assert_equals "ralph_loop" "$_MD_MODE" "Should parse mode from frontmatter"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_parse_frontmatter_readonly() {
@@ -220,7 +220,7 @@ test_parse_frontmatter_readonly() {
 
     assert_equals "true" "$_MD_READONLY" "Should parse readonly from frontmatter"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_parse_frontmatter_required_paths() {
@@ -240,7 +240,7 @@ test_parse_frontmatter_required_paths() {
         assert_failure "Should parse required_paths array (got $path_count items)" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_parse_frontmatter_valid_results() {
@@ -260,7 +260,7 @@ test_parse_frontmatter_valid_results() {
         assert_failure "Should parse valid_results array (got $result_count items)" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 # =============================================================================
@@ -283,7 +283,7 @@ test_extract_system_prompt() {
         assert_failure "Should extract system prompt section" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_extract_user_prompt() {
@@ -302,7 +302,7 @@ test_extract_user_prompt() {
         assert_failure "Should extract user prompt section" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_extract_continuation_prompt() {
@@ -321,7 +321,7 @@ test_extract_continuation_prompt() {
         assert_failure "Should extract continuation prompt section" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 # =============================================================================
@@ -352,7 +352,7 @@ test_interpolate_path_variables() {
         assert_failure "Should interpolate path variables (got: $result)" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_interpolate_task_context() {
@@ -379,7 +379,7 @@ test_interpolate_task_context() {
     fi
 
     unset WIGGUM_STEP_ID
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_interpolate_iteration_variables() {
@@ -401,7 +401,7 @@ test_interpolate_iteration_variables() {
         assert_failure "Should interpolate iteration variables (got: $result)" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 # =============================================================================
@@ -420,7 +420,7 @@ test_once_mode_detection() {
 
     assert_equals "once" "$_MD_MODE" "Should detect once mode"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_resume_mode_detection() {
@@ -436,7 +436,7 @@ test_resume_mode_detection() {
     assert_equals "resume" "$_MD_MODE" "Should detect resume mode"
     assert_equals "parent" "$_MD_SESSION_FROM" "Should parse session_from"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_live_mode_detection() {
@@ -452,7 +452,7 @@ test_live_mode_detection() {
     assert_equals "live" "$_MD_MODE" "Should detect live mode"
     assert_equals "true" "$_MD_READONLY" "Should parse readonly for live agent"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 # =============================================================================
@@ -485,7 +485,7 @@ test_md_agent_init_defines_functions() {
         assert_failure "md_agent_init should define agent_run" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_agent_required_paths_returns_paths() {
@@ -507,7 +507,7 @@ test_agent_required_paths_returns_paths() {
         assert_failure "agent_required_paths should return workspace (got: $paths)" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 # =============================================================================
@@ -554,7 +554,7 @@ EOF
         assert_success "Should fail on missing type field" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_load_fails_on_missing_user_prompt() {
@@ -584,7 +584,7 @@ EOF
         assert_success "Should fail on missing user prompt" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 # =============================================================================
@@ -621,7 +621,7 @@ EOF
 
     assert_equals "3" "$_MD_SUPERVISOR_INTERVAL" "Should parse supervisor_interval from frontmatter"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_supervisor_feedback_interpolation() {
@@ -646,7 +646,7 @@ test_supervisor_feedback_interpolation() {
         assert_failure "Should interpolate supervisor_feedback variable (got: $result)" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 # =============================================================================
@@ -683,7 +683,7 @@ EOF
 
     assert_equals "{{ralph_dir}}/plans/{{task_id}}.md" "$_MD_PLAN_FILE" "Should parse plan_file from frontmatter"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_plan_section_generation() {
@@ -712,7 +712,7 @@ test_plan_section_generation() {
     fi
 
     unset RALPH_DIR
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_plan_section_empty_when_no_file() {
@@ -734,7 +734,7 @@ test_plan_section_empty_when_no_file() {
         assert_failure "Should return empty when no plan file specified (got: $result)" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 # =============================================================================
@@ -854,7 +854,7 @@ Missing content
         assert_failure "Should show content only when file exists (got: $result)" true
     fi
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 # =============================================================================
@@ -992,7 +992,7 @@ test_live_mode_session_directory_creation() {
     fi
 
     unset WIGGUM_STEP_ID
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_live_mode_session_file_naming() {
@@ -1012,7 +1012,7 @@ test_live_mode_session_file_naming() {
     assert_equals "$expected_file" "$session_file" "Session file should use step_id in name"
 
     unset WIGGUM_STEP_ID
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_live_mode_first_run_detection() {
@@ -1058,7 +1058,7 @@ test_live_mode_first_run_detection() {
     fi
 
     unset WIGGUM_STEP_ID
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_live_mode_session_id_persistence() {
@@ -1081,7 +1081,7 @@ test_live_mode_session_id_persistence() {
 
     assert_equals "$test_uuid" "$read_uuid" "Should persist and read session UUID"
 
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 # =============================================================================
@@ -1150,7 +1150,7 @@ PRDEOF
     fi
 
     unset RALPH_LOOP_STOP_REASON RALPH_RUN_ID WIGGUM_STEP_ID
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_no_supervisor_stop_preserves_fail() {
@@ -1202,7 +1202,7 @@ PRDEOF
     fi
 
     unset RALPH_RUN_ID WIGGUM_STEP_ID
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_supervisor_stop_no_log_result_stays_fail() {
@@ -1253,7 +1253,7 @@ PRDEOF
     fi
 
     unset RALPH_LOOP_STOP_REASON RALPH_RUN_ID WIGGUM_STEP_ID
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 test_max_iterations_unchecked_prd_stays_fail() {
@@ -1303,7 +1303,7 @@ PRDEOF
     fi
 
     unset RALPH_LOOP_STOP_REASON RALPH_RUN_ID WIGGUM_STEP_ID
-    rm -rf "$tmpdir"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 # =============================================================================

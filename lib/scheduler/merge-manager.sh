@@ -20,6 +20,7 @@ source "$WIGGUM_HOME/lib/core/defaults.sh"
 source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 source "$WIGGUM_HOME/lib/scheduler/conflict-queue.sh"
 source "$WIGGUM_HOME/lib/scheduler/batch-coordination.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # Check if a failed worker should be marked permanently failed in kanban
 #
@@ -163,6 +164,7 @@ _cleanup_merged_pr_worktree() {
     fi
 
     # Remove workspace checkout to save disk space (retry for busy files)
+    safe_path "$workspace" "workspace" || return 1
     rm -rf "$workspace" 2>/dev/null
     if [ -d "$workspace" ]; then
         sleep 1

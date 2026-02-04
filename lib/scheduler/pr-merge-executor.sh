@@ -11,6 +11,7 @@ set -euo pipefail
 
 [ -n "${_PR_MERGE_EXECUTOR_LOADED:-}" ] && return 0
 _PR_MERGE_EXECUTOR_LOADED=1
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # =============================================================================
 # PHASE 4: EXECUTE - Merge PRs in order with re-evaluation
@@ -531,6 +532,7 @@ _create_multi_resolve_batch() {
 pr_merge_spawn_background() {
     local ralph_dir="$1"
     local project_dir="$2"
+    safe_path "$ralph_dir" "ralph_dir" || return 1
 
     # Check if already running
     if pr_optimizer_is_running "$ralph_dir"; then

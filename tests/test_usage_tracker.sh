@@ -37,7 +37,7 @@ setup() {
 
 teardown() {
     unset CLAUDE_PROJECTS_DIR USAGE_DATA_DIR WIGGUM_RATE_LIMIT_THRESHOLD
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # =============================================================================

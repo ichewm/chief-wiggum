@@ -18,6 +18,7 @@ _AGENT_METADATA_LOADED=1
 
 # Source platform.sh at top level for portable helper functions (find_newest, grep_pcre_*, etc.)
 source "$WIGGUM_HOME/lib/core/platform.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # =============================================================================
 # METADATA SETUP
@@ -354,6 +355,7 @@ agent_on_signal() {
 #   worker_dir - Worker directory path
 agent_create_directories() {
     local worker_dir="$1"
+    safe_path "$worker_dir" "worker_dir" || return 1
     mkdir -p "$worker_dir/logs"
     mkdir -p "$worker_dir/summaries"
     mkdir -p "$worker_dir/results"

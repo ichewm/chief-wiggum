@@ -8,6 +8,7 @@ RALPH_DIR="${RALPH_DIR:-$PROJECT_DIR/.ralph}"
 
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 source "$WIGGUM_HOME/lib/core/verbose-flags.sh"
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/file-lock.sh"
@@ -791,6 +792,7 @@ cmd_task_reset() {
 
     # Check if workspace is broken (worktree reference invalid)
     local workspace="$worker_dir/workspace"
+    safe_path "$workspace" "workspace" || return 1
     local workspace_broken=false
     if [ -d "$workspace" ]; then
         if ! git -C "$workspace" rev-parse HEAD &>/dev/null; then

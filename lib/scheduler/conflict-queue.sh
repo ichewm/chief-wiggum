@@ -23,6 +23,7 @@ source "$WIGGUM_HOME/lib/core/platform.sh"
 # Source dependencies
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/file-lock.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # Initialize conflict queue if it doesn't exist
 #
@@ -30,6 +31,7 @@ source "$WIGGUM_HOME/lib/core/file-lock.sh"
 #   ralph_dir - Ralph directory path
 conflict_queue_init() {
     local ralph_dir="$1"
+    safe_path "$ralph_dir" "ralph_dir" || return 1
     local queue_file="$ralph_dir/batches/queue.json"
 
     mkdir -p "$ralph_dir/batches"

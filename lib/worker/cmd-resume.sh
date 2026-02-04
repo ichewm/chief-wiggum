@@ -20,6 +20,7 @@ source "$WIGGUM_HOME/lib/runtime/runtime.sh"
 source "$WIGGUM_HOME/lib/backend/claude/usage-tracker.sh"
 source "$WIGGUM_HOME/lib/pipeline/pipeline-loader.sh"
 source "$WIGGUM_HOME/lib/core/resume-state.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # Check if a step completed (has a result file) vs was interrupted (no result)
 #
@@ -71,6 +72,8 @@ do_resume() {
     # Match any task prefix format: TASK-001, PIPELINE-001, etc.
     task_id=$(echo "$worker_id" | sed -E 's/worker-([A-Za-z]{2,10}-[0-9]{1,4})-.*/\1/')
 
+    safe_path "$RALPH_DIR" "RALPH_DIR" || return 1
+    safe_path "$worker_dir" "worker_dir" || return 1
     # Initialize logging for resume command
     mkdir -p "$RALPH_DIR/logs"
     export LOG_FILE="$RALPH_DIR/logs/resume.log"

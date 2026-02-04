@@ -46,7 +46,7 @@ setup() {
 }
 
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # Helper to run hook with JSON input

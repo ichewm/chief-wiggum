@@ -19,6 +19,7 @@ source "$WIGGUM_HOME/lib/worker/git-state.sh"
 source "$WIGGUM_HOME/lib/git/pr-comments.sh"
 source "$WIGGUM_HOME/lib/backend/claude/usage-tracker.sh"
 
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 # Output message respecting quiet mode
 _msg() {
     [ "$QUIET_MODE" = "true" ] || echo "$@"
@@ -40,6 +41,7 @@ do_worker_fix() {
         exit $EXIT_WORKER_NO_RALPH_DIR
     fi
 
+    safe_path "$RALPH_DIR" "RALPH_DIR" || return 1
     mkdir -p "$RALPH_DIR/logs"
 
     if [ -z "$input_id" ]; then

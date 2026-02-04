@@ -31,7 +31,7 @@ setup() {
 teardown() {
     _LOADED_AGENT=""
     unset -f agent_required_paths agent_run agent_cleanup agent_output_files 2>/dev/null || true
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # =============================================================================

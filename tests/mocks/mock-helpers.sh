@@ -45,7 +45,7 @@ mock_setup() {
 # Clean up mock temp directory
 mock_teardown() {
     if [ -n "$MOCK_DIR" ] && [ -d "$MOCK_DIR" ]; then
-        rm -rf "$MOCK_DIR"
+        [ -n "$MOCK_DIR" ] && rm -rf "$MOCK_DIR"
     fi
     MOCK_DIR=""
 

@@ -99,7 +99,7 @@ ensure_uv
 # Remove existing installation if present
 if [[ -e "$TARGET" ]]; then
     echo "Removing existing installation at $TARGET"
-    rm -rf "$TARGET"
+    [[ -n "$TARGET" && "$TARGET" != "/" ]] && rm -rf "$TARGET"
 fi
 
 # Create parent directory if needed
@@ -127,7 +127,7 @@ for skill_dir in "$SCRIPT_DIR/skills"/*/; do
         skill_link="$SKILLS_TARGET/$skill_name"
         if [[ -e "$skill_link" ]]; then
             echo "  Removing existing $skill_link"
-            rm -rf "$skill_link"
+            [[ -n "$skill_link" && "$skill_link" != "/" ]] && rm -rf "$skill_link"
         fi
         ln -s "$skill_dir" "$skill_link"
         echo "  Linked $skill_name -> $skill_link"

@@ -36,7 +36,7 @@ setup() {
 
 teardown() {
     unset RALPH_DIR
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # =============================================================================

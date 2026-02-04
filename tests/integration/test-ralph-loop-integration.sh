@@ -40,7 +40,7 @@ setup() {
 
 teardown() {
     mock_teardown
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # =============================================================================

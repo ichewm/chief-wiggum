@@ -16,6 +16,7 @@ set -euo pipefail
 _AGENT_RESULT_LOADED=1
 
 source "$WIGGUM_HOME/lib/core/platform.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # =============================================================================
 # STRUCTURED AGENT RESULTS (Epoch-Named)
@@ -155,6 +156,7 @@ agent_find_latest_report() {
 # Returns: Path to the written report file (via stdout)
 agent_write_report() {
     local worker_dir="$1"
+    safe_path "$worker_dir" "worker_dir" || return 1
     local content="$2"
     local epoch="${_AGENT_START_EPOCH:-$(epoch_now)}"
     local name="${WIGGUM_STEP_ID:-${AGENT_TYPE:-unknown}}"
@@ -180,6 +182,7 @@ agent_write_report() {
 #   other     -> status=unknown, exit_code=1
 agent_write_result() {
     local worker_dir="$1"
+    safe_path "$worker_dir" "worker_dir" || return 1
     local gate_result="$2"
     local extra_outputs="${3:-'{}'}"
     local errors="${4:-'[]'}"

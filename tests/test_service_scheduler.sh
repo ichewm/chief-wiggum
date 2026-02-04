@@ -47,7 +47,7 @@ setup() {
 teardown() {
     # Kill any background processes we started
     jobs -p 2>/dev/null | xargs -r kill 2>/dev/null || true
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # =============================================================================

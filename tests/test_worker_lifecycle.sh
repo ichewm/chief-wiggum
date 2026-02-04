@@ -35,7 +35,7 @@ setup() {
 }
 
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # =============================================================================
@@ -126,7 +126,7 @@ test_resolve_worker_id_no_match_error() {
 }
 
 test_resolve_worker_id_no_workers_dir_error() {
-    rm -rf "$RALPH_DIR/workers"
+    [ -n "$RALPH_DIR" ] && rm -rf "$RALPH_DIR/workers"
 
     local result
     result=$(resolve_worker_id "$RALPH_DIR" "TASK-001" 2>&1)

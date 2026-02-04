@@ -12,6 +12,7 @@ set -euo pipefail
 [ -n "${_PR_MERGE_DATA_LOADED:-}" ] && return 0
 _PR_MERGE_DATA_LOADED=1
 source "$WIGGUM_HOME/lib/core/platform.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # =============================================================================
 # Background Optimizer Status Tracking
@@ -149,6 +150,7 @@ pr_optimizer_clear_status() {
 #   worker_dir - Worker directory path
 _cleanup_merged_worktree() {
     local worker_dir="$1"
+    safe_path "$worker_dir" "worker_dir" || return 1
     local workspace="$worker_dir/workspace"
     local worker_name
     worker_name=$(basename "$worker_dir")
@@ -163,6 +165,7 @@ _cleanup_merged_worktree() {
         fi
     fi
 
+    safe_path "$workspace" "workspace" || return 1
     # Remove workspace checkout to save disk space (retry for busy files)
     rm -rf "$workspace" 2>/dev/null
     if [ -d "$workspace" ]; then

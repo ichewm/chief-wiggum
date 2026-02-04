@@ -166,7 +166,7 @@ main() {
     fi
 
     # Clean previous coverage
-    rm -rf "$COVERAGE_DIR"
+    [ -n "$COVERAGE_DIR" ] && rm -rf "$COVERAGE_DIR"
     mkdir -p "$COVERAGE_DIR"
 
     echo ""

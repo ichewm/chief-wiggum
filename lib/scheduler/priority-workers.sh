@@ -21,6 +21,7 @@ source "$WIGGUM_HOME/lib/scheduler/batch-coordination.sh"
 source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 source "$WIGGUM_HOME/lib/git/worktree-helpers.sh"
 source "$WIGGUM_HOME/lib/core/file-lock.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # =============================================================================
 # Priority Worker Capacity Management
@@ -1031,6 +1032,7 @@ create_orphan_pr_workspaces() {
         # Create worktree from PR branch
         if ! setup_worktree_from_branch "$project_dir" "$worker_dir" "$branch"; then
             log_error "  $task_id: Failed to create workspace from branch $branch"
+            safe_path "$worker_dir" "worker_dir" || continue
             rm -rf "$worker_dir"
             continue
         fi

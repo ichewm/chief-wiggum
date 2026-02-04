@@ -35,6 +35,8 @@
 [ -n "${_ORCHESTRATOR_FUNCTIONS_LOADED:-}" ] && return 0
 _ORCHESTRATOR_FUNCTIONS_LOADED=1
 
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
+
 # These functions depend on scheduler module components
 # They should be sourced after the scheduler modules are loaded
 
@@ -231,6 +233,7 @@ orch_spawn_multi_pr_planner() {
 
     [ -n "$ralph_dir" ] || return 1
     [ -n "$project_dir" ] || return 1
+    safe_path "$ralph_dir" "ralph_dir" || return 1
 
     # First, check for completed planners
     _orch_check_completed_planners
@@ -299,6 +302,7 @@ orch_spawn_multi_pr_planner() {
     if ! conflict_queue_build_batch_file "$ralph_dir" "$batch_id" "$planner_worker_dir/conflict-batch.json"; then
         log_error "Failed to build batch file for $batch_id - marking batch as failed"
         conflict_queue_update_batch_status "$ralph_dir" "$batch_id" "failed"
+        safe_path "$planner_worker_dir" "planner_worker_dir" || return 1
         rm -rf "$planner_worker_dir"
         return 1
     fi
@@ -521,6 +525,7 @@ orch_spawn_ready_tasks() {
 
     [ -n "$ralph_dir" ] || return 1
     [ -n "$project_dir" ] || return 1
+    safe_path "$ralph_dir" "ralph_dir" || return 1
 
     # Tick scheduler to get latest task lists
     scheduler_tick
@@ -988,6 +993,7 @@ spawn_worker() {
             fi
             # Terminal failure - clean up and retry fresh
             log "Cleaning up terminal-failure worker for $task_id: $(basename "$existing_dir")"
+            safe_path "$existing_dir" "existing_dir" || return 1
             rm -rf "$existing_dir"
             # Retry spawning - reset exit code first
             start_exit_code=0
@@ -1310,6 +1316,7 @@ _resume_decide_for_worker() {
     local worker_dir="$1"
     local task_id="$2"
     local worker_type="$3"
+    safe_path "$worker_dir" "worker_dir" || return 1
 
     local worker_id
     worker_id=$(basename "$worker_dir")
@@ -1523,6 +1530,7 @@ _launch_decide_background() {
         source "$WIGGUM_HOME/lib/scheduler/orchestrator-functions.sh"
         activity_init "$PROJECT_DIR"
 
+        safe_path "$RALPH_DIR" "RALPH_DIR" || exit 1
         mkdir -p "$RALPH_DIR/logs"
         export LOG_FILE="$RALPH_DIR/logs/resume.log"
 

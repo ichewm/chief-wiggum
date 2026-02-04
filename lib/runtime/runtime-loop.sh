@@ -24,6 +24,7 @@ source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/checkpoint.sh"
 source "$WIGGUM_HOME/lib/runtime/runtime.sh"
 source "$WIGGUM_HOME/lib/utils/work-log.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -298,6 +299,7 @@ run_ralph_loop() {
     }
 
     # Ensure base output directories exist (fix workers may skip agent_create_directories)
+    safe_path "$output_dir" "output_dir" || return 1
     mkdir -p "$output_dir/logs"
     mkdir -p "$output_dir/summaries"
 
@@ -668,6 +670,7 @@ ${summary_prompt}"
                     log "Supervisor: RESTART - archiving run $run_id and resetting to iteration 0"
                     echo "[$(iso_now)] INFO: SUPERVISOR_RESTART iteration=$iteration restart_count=$restart_count run_id=$run_id" >> "$output_dir/worker.log" 2>/dev/null || true
 
+                    safe_path "$output_dir" "output_dir" || return 1
                     local archive_dir="$output_dir/supervisors/run-$((restart_count - 1))"
                     mkdir -p "$archive_dir"
                     mv "$output_dir/logs/$run_id" "$archive_dir/" 2>/dev/null || true

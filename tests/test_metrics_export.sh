@@ -19,7 +19,7 @@ setup() {
 }
 
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # Helper: create a worker directory with a PRD file
@@ -366,7 +366,7 @@ test_export_metrics_cache_cleanup_stale_entries() {
     assert_file_exists "$cache_dir/worker-TASK-015-15151.json" "Cache for worker 015 should exist"
 
     # Remove one worker
-    rm -rf "$ralph_dir/workers/worker-TASK-014-14141"
+    [ -n "$ralph_dir" ] && rm -rf "$ralph_dir/workers/worker-TASK-014-14141"
 
     # Export again — stale cache should be cleaned up
     export_metrics "$ralph_dir" > /dev/null 2>&1

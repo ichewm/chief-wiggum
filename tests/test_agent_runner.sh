@@ -30,7 +30,7 @@ teardown() {
     _AGENT_RUNNER_DIR=""
     _AGENT_RUNNER_PROJECT_DIR=""
     _AGENT_RUNNER_CHILD_PID=""
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # =============================================================================

@@ -16,7 +16,7 @@ setup() {
     TEST_DIR=$(mktemp -d)
 }
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # Test 1: Basic locking with simple command

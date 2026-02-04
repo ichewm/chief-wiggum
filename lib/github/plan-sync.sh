@@ -16,6 +16,7 @@ source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 source "$WIGGUM_HOME/lib/github/issue-state.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # Marker prefix for plan comments (invisible when rendered)
 PLAN_COMMENT_MARKER="<!-- wiggum:plan -->"
@@ -150,6 +151,7 @@ github_plan_sync_task() {
     local task_id="$2"
     local dry_run="${3:-false}"
     local force="${4:-}"
+    safe_path "$ralph_dir" "ralph_dir" || return 1
 
     # Look up issue_number from sync state
     local task_state

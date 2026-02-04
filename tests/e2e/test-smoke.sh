@@ -38,7 +38,7 @@ test_fail() {
 # Cleanup function
 cleanup() {
     cd /
-    rm -rf "$TEST_TEMP_DIR" 2>/dev/null || true
+    [ -n "$TEST_TEMP_DIR" ] && rm -rf "$TEST_TEMP_DIR" 2>/dev/null || true
 }
 trap cleanup EXIT
 

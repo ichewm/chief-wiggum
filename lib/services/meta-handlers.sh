@@ -29,6 +29,7 @@ _SERVICE_HANDLERS_META_LOADED=1
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/file-lock.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # =============================================================================
 # CONFIGURATION
@@ -162,6 +163,7 @@ svc_meta_count_completion() {
     if [ "$_META_ENABLED" != "true" ]; then
         return 0
     fi
+    safe_path "$RALPH_DIR" "RALPH_DIR" || return 1
 
     local state_file
     state_file=$(_meta_state_file)

@@ -58,7 +58,7 @@ EOF
 }
 
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # Helper: create a fake resumable worker directory with RETRY decision

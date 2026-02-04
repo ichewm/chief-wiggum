@@ -20,6 +20,7 @@ source "$WIGGUM_HOME/lib/runtime/runtime.sh"
 source "$WIGGUM_HOME/lib/backend/claude/usage-tracker.sh"
 source "$WIGGUM_HOME/lib/github/issue-sync.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # Output message respecting quiet mode
 _msg() {
@@ -38,6 +39,7 @@ do_start() {
         exit $EXIT_WORKER_NO_RALPH_DIR
     fi
 
+    safe_path "$RALPH_DIR" "RALPH_DIR" || return 1
     mkdir -p "$RALPH_DIR/logs"
 
     # Handle --worker-dir mode (run pipeline on existing worker)

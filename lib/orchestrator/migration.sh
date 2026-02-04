@@ -13,6 +13,7 @@
 
 [ -n "${_ORCHESTRATOR_MIGRATION_LOADED:-}" ] && return 0
 _ORCHESTRATOR_MIGRATION_LOADED=1
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # Create required orchestrator and service directories
 #
@@ -20,6 +21,7 @@ _ORCHESTRATOR_MIGRATION_LOADED=1
 #   ralph_dir - Ralph directory path
 _ensure_orchestrator_dirs() {
     local ralph_dir="${1:-$RALPH_DIR}"
+    safe_path "$ralph_dir" "ralph_dir" || return 1
     mkdir -p "$ralph_dir/orchestrator"
     mkdir -p "$ralph_dir/services"
 }

@@ -21,7 +21,7 @@ setup() {
 }
 
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
     unset LOG_LEVEL
     unset LOG_FILE
     unset DEBUG

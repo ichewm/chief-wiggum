@@ -27,7 +27,7 @@ setup() {
 }
 
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
     # Restore original WIGGUM_HOME for subsequent tests
     export WIGGUM_HOME="$WIGGUM_HOME_BACKUP"
     if [ -n "$PROJECT_DIR_BACKUP" ]; then

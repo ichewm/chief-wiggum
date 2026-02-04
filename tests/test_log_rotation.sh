@@ -21,7 +21,7 @@ setup() {
     _LR_MAX_ARCHIVES=10
 }
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # Helper: generate N lines of ~80 bytes each to pass the fast-path byte check

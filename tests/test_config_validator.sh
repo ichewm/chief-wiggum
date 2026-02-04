@@ -16,7 +16,7 @@ setup() {
     export LOG_FILE="$TEST_DIR/test.log"
 }
 teardown() {
-    rm -rf "$TEST_DIR"
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
 }
 
 # ===========================================================================

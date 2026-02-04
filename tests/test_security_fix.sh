@@ -28,7 +28,7 @@ setup() {
 
 teardown() {
     if [ -n "$TEST_TMP_DIR" ] && [ -d "$TEST_TMP_DIR" ]; then
-        rm -rf "$TEST_TMP_DIR"
+        [ -n "$TEST_TMP_DIR" ] && rm -rf "$TEST_TMP_DIR"
     fi
 }
 

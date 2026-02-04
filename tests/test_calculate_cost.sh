@@ -145,7 +145,7 @@ test_calculate_worker_cost_missing_logs_dir() {
     output=$(calculate_worker_cost "$tmp_dir/worker.log" 2>&1)
     local exit_code=$?
 
-    rm -rf "$tmp_dir"
+    [ -n "$tmp_dir" ] && rm -rf "$tmp_dir"
 
     assert_equals "1" "$exit_code" "Should fail when logs directory missing"
     assert_output_contains "$output" "Logs directory not found" "Should report missing logs directory"

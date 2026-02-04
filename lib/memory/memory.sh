@@ -21,6 +21,7 @@ _MEMORY_LOADED=1
 
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/platform.sh"
+source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # =============================================================================
 # INITIALIZATION
@@ -390,6 +391,7 @@ memory_rebuild_agent_stats() {
             }' > "$agent_dir/stats.json"
     done
 
+    safe_path "$tmp_dir" "tmp_dir" || return 1
     rm -rf "$tmp_dir"
 }
 
@@ -565,6 +567,7 @@ memory_process_pending() {
     source "$WIGGUM_HOME/lib/worker/agent-registry.sh"
 
     # Create a minimal worker dir for the agent
+    safe_path "$ralph_dir" "ralph_dir" || return 1
     local analyst_worker_dir="$ralph_dir/memory/.analyst-work"
     mkdir -p "$analyst_worker_dir/workspace" "$analyst_worker_dir/results" "$analyst_worker_dir/logs"
 
@@ -582,6 +585,7 @@ memory_process_pending() {
     run_sub_agent "system.memory-analyst" "$analyst_worker_dir" "$project_dir" || exit_code=$?
 
     # Clean up analyst work dir
+    safe_path "$analyst_worker_dir" "analyst_worker_dir" || true
     rm -rf "$analyst_worker_dir"
 
     if [ "$exit_code" -eq 0 ]; then
