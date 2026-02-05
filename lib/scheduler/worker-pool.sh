@@ -162,6 +162,38 @@ pool_ingest_pending() {
     done <<< "$lines"
 }
 
+# Persist cleanup event to disk for cross-subprocess communication
+#
+# In Python orchestrator mode, pre-phase and post-phase run in separate
+# bash-bridge subprocesses. POOL_CLEANUP_EVENT set in pre-phase is lost
+# before post-phase runs. This function persists the event to disk.
+#
+# Args:
+#   ralph_dir - Ralph directory path
+pool_persist_cleanup_event() {
+    local ralph_dir="$1"
+    local event_file="$ralph_dir/orchestrator/cleanup-event"
+    touch "$event_file"
+}
+
+# Ingest cleanup event persisted to disk by a previous subprocess
+#
+# Reads and clears the cleanup-event file, setting POOL_CLEANUP_EVENT=true
+# if it existed. Call at the start of post-phase to restore state from
+# pre-phase in Python orchestrator mode.
+#
+# Args:
+#   ralph_dir - Ralph directory path
+pool_ingest_cleanup_event() {
+    local ralph_dir="$1"
+    local event_file="$ralph_dir/orchestrator/cleanup-event"
+
+    if [ -f "$event_file" ]; then
+        rm -f "$event_file"
+        POOL_CLEANUP_EVENT=true
+    fi
+}
+
 # Remove a worker from the pool
 #
 # Args:
@@ -489,6 +521,11 @@ pool_cleanup_finished() {
             pool_remove "$pid"
         fi
     done
+
+    # Persist cleanup event to disk for Python mode cross-subprocess communication
+    if [[ "${POOL_CLEANUP_EVENT:-false}" == "true" ]] && [[ -n "${RALPH_DIR:-}" ]]; then
+        pool_persist_cleanup_event "$RALPH_DIR"
+    fi
 }
 
 # Restore pool state from existing worker directories

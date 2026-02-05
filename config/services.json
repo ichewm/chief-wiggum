@@ -484,6 +484,17 @@
     },
 
     {
+      "id": "cleanup-event-ingest",
+      "description": "Ingest cleanup events from pre-phase (Python mode)",
+      "phase": "post",
+      "order": 1,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_ingest_cleanup_event"
+      }
+    },
+    {
       "id": "completion-check",
       "description": "Check if all tasks are complete and signal exit",
       "phase": "post",

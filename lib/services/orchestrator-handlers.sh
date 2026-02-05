@@ -327,6 +327,11 @@ svc_orch_worker_cleanup() {
 # Post Phase Handlers (Phase 4)
 # =============================================================================
 
+# Ingest cleanup events persisted by pre-phase (Python mode cross-subprocess)
+svc_orch_ingest_cleanup_event() {
+    pool_ingest_cleanup_event "$RALPH_DIR"
+}
+
 # Check if all tasks are complete, write exit signal (throttled)
 _ORCH_COMPLETION_INTERVAL=10
 _ORCH_COMPLETION_LAST=0
@@ -422,7 +427,7 @@ svc_orch_task_spawner() {
             local main_count
             main_count=$(pool_count "main")
             if [ "$((main_count + pending_main_count))" -ge "$MAX_WORKERS" ]; then
-                break  # at main capacity, stop processing
+                continue  # at main capacity, skip this item but process fix/resolve workers
             fi
         fi
 
@@ -431,7 +436,7 @@ svc_orch_task_spawner() {
 
             if ! scheduler_can_spawn_task "$task_id" "$MAX_WORKERS"; then
                 case "$SCHED_SKIP_REASON" in
-                    at_capacity) break ;;
+                    at_capacity) continue ;;  # skip this main task, may have fix/resolve tasks later
                     file_conflict)
                         local -A _temp_workers=()
                         _build_workers() {
