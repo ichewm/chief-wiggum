@@ -176,14 +176,47 @@ get_task_priority() {
     '
 }
 
-# Get task status character (space, =, x, *)
+# Check if a task is listed in the done comment
+# The done comment format: <!-- done: TASK-001, TASK-002, ... -->
+#
+# Args:
+#   kanban  - Path to kanban file
+#   task_id - Task ID to check
+#
+# Returns: 0 if in done comment, 1 if not
+is_task_in_done_comment() {
+    local kanban="$1"
+    local task_id="$2"
+
+    # Look for task ID in done comment (comma or space separated, word boundaries)
+    grep -qE "^<!-- done:.*[, ]${task_id}([, ]|$)" "$kanban" 2>/dev/null
+}
+
+# Get task status character (space, =, x, *, P, N)
+# Returns "x" for tasks in the done comment (archived completed tasks)
 get_task_status() {
     local kanban="$1"
     local task_id="$2"
 
-    _get_cached_metadata "$kanban" | awk -F'|' -v task="$task_id" '
+    # First check the metadata cache for active task lines
+    local _task_status
+    _task_status=$(_get_cached_metadata "$kanban" | awk -F'|' -v task="$task_id" '
         $1 == task { print $2 }
-    '
+    ')
+
+    if [ -n "$_task_status" ]; then
+        echo "$_task_status"
+        return
+    fi
+
+    # Task not found in active lines - check done comment
+    if is_task_in_done_comment "$kanban" "$task_id"; then
+        echo "x"
+        return
+    fi
+
+    # Task truly doesn't exist - return empty
+    echo ""
 }
 
 # Check if a task's dependencies are satisfied (all deps merged/complete)

@@ -21,6 +21,7 @@ source "$WIGGUM_HOME/lib/runtime/runtime.sh"
 source "$WIGGUM_HOME/lib/backend/claude/usage-tracker.sh"
 source "$WIGGUM_HOME/lib/github/pr-labels.sh"
 source "$WIGGUM_HOME/lib/github/issue-sync.sh"
+source "$WIGGUM_HOME/lib/scheduler/pr-merge-data.sh"
 
 show_help() {
     cat << 'EOF'
@@ -314,13 +315,30 @@ cmd_global_sync() {
             local current_status
             current_status=$(get_task_status "$kanban" "$task_id")
 
-            if [ "$current_status" != "x" ]; then
-                log "  $task_id: merged"
-                update_kanban_status "$kanban" "$task_id" "x"
-                # Update issue and PR labels to completed
-                github_issue_sync_task_status "$RALPH_DIR" "$task_id" "x" || true
-                ((++merged_count))
+            # Skip if already complete (includes tasks in done comment)
+            if [ "$current_status" = "x" ]; then
+                continue
             fi
+
+            # Skip if task doesn't exist in kanban at all (orphan PR)
+            if [ -z "$current_status" ]; then
+                log_debug "  $task_id: skipped (not in kanban)"
+                continue
+            fi
+
+            log "  $task_id: merged"
+            update_kanban_status "$kanban" "$task_id" "x"
+            # Update issue and PR labels to completed
+            github_issue_sync_task_status "$RALPH_DIR" "$task_id" "x" || true
+
+            # Archive worker directory now that PR is merged
+            local worker_dir
+            worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$task_id" 2>/dev/null || true)
+            if [ -n "$worker_dir" ] && [ -d "$worker_dir" ]; then
+                _cleanup_merged_worktree "$worker_dir"
+            fi
+
+            ((++merged_count))
         fi
 
         # Handle open PRs: check for new comments
@@ -434,13 +452,23 @@ cmd_task_sync() {
                 local current_status
                 current_status=$(get_task_status "$kanban" "$task_id")
 
-                if [ "$current_status" != "x" ]; then
-                    local pr_number
-                    pr_number=$(echo "$pr" | jq -r '.number')
-                    log "PR #$pr_number ($task_id): Merged - updating [$current_status] -> [x]"
-                    update_kanban_status "$kanban" "$task_id" "x"
-                    # Update PR label to completed
-                    github_pr_sync_task_status "$RALPH_DIR" "$task_id" "x" "$current_status" || true
+                # Skip if already complete or task doesn't exist
+                if [ "$current_status" = "x" ] || [ -z "$current_status" ]; then
+                    continue
+                fi
+
+                local pr_number
+                pr_number=$(echo "$pr" | jq -r '.number')
+                log "PR #$pr_number ($task_id): Merged - updating [$current_status] -> [x]"
+                update_kanban_status "$kanban" "$task_id" "x"
+                # Update PR label to completed
+                github_pr_sync_task_status "$RALPH_DIR" "$task_id" "x" "$current_status" || true
+
+                # Archive worker directory now that PR is merged
+                local worker_dir
+                worker_dir=$(find_worker_by_task_id "$RALPH_DIR" "$task_id" 2>/dev/null || true)
+                if [ -n "$worker_dir" ] && [ -d "$worker_dir" ]; then
+                    _cleanup_merged_worktree "$worker_dir"
                 fi
             fi
         done
