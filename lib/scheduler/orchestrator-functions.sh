@@ -984,7 +984,6 @@ orch_failure_recovery() {
     local ralph_dir="${RALPH_DIR:-}"
     local project_dir="${PROJECT_DIR:-}"
     local limit="${RECOVERY_WORKER_LIMIT:-2}"
-    local stale_threshold=1800  # 30 minutes
 
     [ -n "$ralph_dir" ] || { log_error "RALPH_DIR not set"; return 1; }
     [ -n "$project_dir" ] || { log_error "PROJECT_DIR not set"; return 1; }
@@ -1001,8 +1000,7 @@ orch_failure_recovery() {
     failed_tasks=$(get_failed_tasks "$kanban_file")
     [ -n "$failed_tasks" ] || return 0
 
-    local now_ts launched=0
-    now_ts=$(epoch_now)
+    local launched=0
 
     while IFS= read -r task_id; do
         [ -n "$task_id" ] || continue
@@ -1012,11 +1010,9 @@ orch_failure_recovery() {
         active_count=$(_count_active_recoveries)
         [ "$active_count" -lt "$limit" ] || break
 
-        # Find worker directory
+        # Find newest worker directory (consistent with find_worker_by_task_id)
         local worker_dir=""
-        for dir in "$ralph_dir/workers"/worker-${task_id}-*; do
-            [ -d "$dir" ] && worker_dir="$dir" && break
-        done
+        worker_dir=$(find_worker_by_task_id "$ralph_dir" "$task_id")
         [ -n "$worker_dir" ] || continue
         [ -d "$worker_dir/workspace" ] || continue
 
@@ -1034,11 +1030,19 @@ orch_failure_recovery() {
             log_warn "Removed orphaned recovery-in-progress marker for $(basename "$worker_dir")"
         fi
 
-        # Skip if recovery already succeeded (PASS)
+        # Skip if recovery already completed this failure cycle
+        # (PASS from a previous cycle is cleared by the resume path, so if
+        # the task is [*] again and recovery-attempted says PASS, the resume
+        # failed — allow re-recovery)
         if [ -f "$worker_dir/recovery-attempted" ]; then
             local prev_result
             prev_result=$(cat "$worker_dir/recovery-attempted" 2>/dev/null)
-            [ "$prev_result" = "PASS" ] && continue
+            if [ "$prev_result" = "PASS" ]; then
+                # Task is [*] despite PASS — previous resume must have failed.
+                # Clear stale marker to allow re-recovery.
+                rm -f "$worker_dir/recovery-attempted"
+                log_warn "Cleared stale recovery-attempted PASS for $(basename "$worker_dir") (task still failed)"
+            fi
         fi
 
         # Launch recovery agent in background
@@ -1082,6 +1086,7 @@ _launch_recovery_worker() {
     export _RECOVERY_WIGGUM_HOME="$WIGGUM_HOME"
     export _RECOVERY_WORKER_DIR="$worker_dir"
     export _RECOVERY_PROJECT_DIR="$PROJECT_DIR"
+    export _RECOVERY_RALPH_DIR="$RALPH_DIR"
     export _RECOVERY_TASK_ID="$task_id"
 
     # shellcheck disable=SC2016
@@ -1120,6 +1125,26 @@ _launch_recovery_worker() {
 
         if [ "$recovery_result" = "PASS" ]; then
             _log_ts "INFO: Recovery completed successfully for $task_id"
+
+            # Post failure summary to GitHub if issue sync is configured
+            report_file=$(find "$worker_dir/reports" -name "*failure-summarizer*" 2>/dev/null | sort -r | head -1 || true)
+            if [ -n "$report_file" ] && [ -f "$report_file" ]; then
+                export RALPH_DIR="$_RECOVERY_RALPH_DIR"
+                source "$WIGGUM_HOME/lib/github/issue-writer.sh" 2>/dev/null || true
+                if type github_issue_post_failure_summary &>/dev/null; then
+                    summary_content=$(cat "$report_file")
+                    github_issue_post_failure_summary "$RALPH_DIR" "$task_id" "$summary_content" 2>/dev/null || true
+                fi
+            fi
+
+            # Trigger resume flow so the task gets re-queued
+            _log_ts "INFO: Triggering resume for $task_id..."
+            unset WIGGUM_PIPELINE  # clear recovery pipeline for resume
+            _resume_exit=0
+            "$WIGGUM_HOME/bin/wiggum-worker" resume "$task_id" --quiet 2>&1 || _resume_exit=$?
+            if [ "$_resume_exit" -ne 0 ]; then
+                _log_ts "WARN: Resume trigger failed for $task_id (exit $_resume_exit)"
+            fi
         else
             _log_ts "WARN: Recovery returned $recovery_result for $task_id (exit $_exit_code)"
         fi
@@ -1128,7 +1153,7 @@ _launch_recovery_worker() {
     local bg_pid=$!
 
     # Clean up exported vars
-    unset _RECOVERY_WIGGUM_HOME _RECOVERY_WORKER_DIR _RECOVERY_PROJECT_DIR _RECOVERY_TASK_ID
+    unset _RECOVERY_WIGGUM_HOME _RECOVERY_WORKER_DIR _RECOVERY_PROJECT_DIR _RECOVERY_RALPH_DIR _RECOVERY_TASK_ID
 
     # Track the background process via file (persists across bridge invocations)
     mkdir -p "$RALPH_DIR/orchestrator"
