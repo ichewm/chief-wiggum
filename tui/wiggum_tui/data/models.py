@@ -87,6 +87,7 @@ class Worker:
     workspace_path: str
     pr_url: str | None = None
     pipeline_info: PipelineInfo | None = None
+    is_archived: bool = False  # True if worker is in history/ directory
 
 
 @dataclass

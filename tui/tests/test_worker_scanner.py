@@ -386,3 +386,115 @@ class TestGetTaskRunningStatus:
         assert result["TASK-001"] == (True, 1000)
         assert result["TASK-002"] == (False, None)
         assert result["TASK-003"] == (False, None)
+
+
+class TestHistoryDirectory:
+    """Tests for scanning history directory."""
+
+    def test_scans_history_directory(self, tmp_path: Path):
+        ralph_dir = tmp_path / ".ralph"
+        history_dir = ralph_dir / "history"
+        worker_dir = history_dir / "worker-TASK-001-1700000000"
+        worker_dir.mkdir(parents=True)
+
+        (worker_dir / "prd.md").write_text("- [x] Done")
+
+        workers = scan_workers(ralph_dir)
+
+        assert len(workers) == 1
+        assert workers[0].id == "worker-TASK-001-1700000000"
+        assert workers[0].task_id == "TASK-001"
+        assert workers[0].is_archived is True
+        # Archived workers should be marked as merged
+        assert workers[0].status == WorkerStatus.MERGED
+
+    def test_scans_both_workers_and_history(self, tmp_path: Path):
+        ralph_dir = tmp_path / ".ralph"
+
+        # Create active worker
+        workers_dir = ralph_dir / "workers"
+        active_worker = workers_dir / "worker-TASK-001-1700000001"
+        active_worker.mkdir(parents=True)
+        (active_worker / "prd.md").write_text("- [x] Done")
+
+        # Create archived worker
+        history_dir = ralph_dir / "history"
+        archived_worker = history_dir / "worker-TASK-002-1700000000"
+        archived_worker.mkdir(parents=True)
+        (archived_worker / "prd.md").write_text("- [x] Done")
+
+        workers = scan_workers(ralph_dir)
+
+        assert len(workers) == 2
+
+        # Find each worker
+        active = next(w for w in workers if w.task_id == "TASK-001")
+        archived = next(w for w in workers if w.task_id == "TASK-002")
+
+        assert active.is_archived is False
+        assert active.status == WorkerStatus.COMPLETED
+
+        assert archived.is_archived is True
+        assert archived.status == WorkerStatus.MERGED
+
+    def test_include_history_false(self, tmp_path: Path):
+        ralph_dir = tmp_path / ".ralph"
+
+        # Create active worker
+        workers_dir = ralph_dir / "workers"
+        active_worker = workers_dir / "worker-TASK-001-1700000001"
+        active_worker.mkdir(parents=True)
+        (active_worker / "prd.md").write_text("- [x] Done")
+
+        # Create archived worker
+        history_dir = ralph_dir / "history"
+        archived_worker = history_dir / "worker-TASK-002-1700000000"
+        archived_worker.mkdir(parents=True)
+        (archived_worker / "prd.md").write_text("- [x] Done")
+
+        # Scan without history
+        workers = scan_workers(ralph_dir, include_history=False)
+
+        assert len(workers) == 1
+        assert workers[0].task_id == "TASK-001"
+        assert workers[0].is_archived is False
+
+    def test_archived_failed_worker_keeps_failed_status(self, tmp_path: Path):
+        ralph_dir = tmp_path / ".ralph"
+        history_dir = ralph_dir / "history"
+        worker_dir = history_dir / "worker-TASK-001-1700000000"
+        worker_dir.mkdir(parents=True)
+
+        # Failed marker in PRD
+        (worker_dir / "prd.md").write_text("- [*] Failed task")
+
+        workers = scan_workers(ralph_dir)
+
+        assert len(workers) == 1
+        assert workers[0].is_archived is True
+        # Failed workers should keep failed status even when archived
+        assert workers[0].status == WorkerStatus.FAILED
+
+    def test_deduplicates_same_worker_in_both_dirs(self, tmp_path: Path):
+        """When same worker ID exists in both workers/ and history/, prefer non-archived."""
+        ralph_dir = tmp_path / ".ralph"
+
+        # Create worker in workers/ (non-archived)
+        workers_dir = ralph_dir / "workers"
+        active_worker = workers_dir / "worker-TASK-001-1700000000"
+        active_worker.mkdir(parents=True)
+        (active_worker / "prd.md").write_text("- [ ] In progress")
+
+        # Create same worker ID in history/ (archived)
+        history_dir = ralph_dir / "history"
+        archived_worker = history_dir / "worker-TASK-001-1700000000"
+        archived_worker.mkdir(parents=True)
+        (archived_worker / "prd.md").write_text("- [x] Done")
+
+        workers = scan_workers(ralph_dir)
+
+        # Should be deduplicated to one entry
+        assert len(workers) == 1
+        # Should prefer non-archived version
+        assert workers[0].is_archived is False
+        assert workers[0].status == WorkerStatus.STOPPED  # Non-archived, incomplete PRD

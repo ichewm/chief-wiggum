@@ -198,71 +198,77 @@ def get_prd_status(prd_path: Path) -> str:
         return "incomplete"
 
 
-def scan_workers(ralph_dir: Path) -> list[Worker]:
-    """Scan .ralph/workers directory for workers.
+def scan_workers(ralph_dir: Path, include_history: bool = True) -> list[Worker]:
+    """Scan .ralph/workers and optionally .ralph/history directories for workers.
 
     Args:
         ralph_dir: Path to .ralph directory.
+        include_history: Whether to include archived workers from history/.
 
     Returns:
         List of Worker objects, sorted by timestamp (newest first).
     """
     global _completed_workers_cache
 
-    workers_dir = ralph_dir / "workers"
     workers: list[Worker] = []
 
-    if not workers_dir.is_dir():
-        return workers
+    # Directories to scan: (path, is_archived)
+    dirs_to_scan: list[tuple[Path, bool]] = [(ralph_dir / "workers", False)]
+    if include_history:
+        dirs_to_scan.append((ralph_dir / "history", True))
 
     # First pass: collect worker directories, using cache for completed workers
-    # (dir, task_id, dir_timestamp, pid, pid_mtime, has_pid_file)
-    worker_entries: list[tuple[Path, str, int, int | None, int | None, bool]] = []
+    # (dir, task_id, dir_timestamp, pid, pid_mtime, has_pid_file, is_archived)
+    worker_entries: list[tuple[Path, str, int, int | None, int | None, bool, bool]] = []
 
-    for entry in workers_dir.iterdir():
-        if not entry.name.startswith("worker-"):
-            continue
-        if not entry.is_dir():
+    for workers_dir, is_archived in dirs_to_scan:
+        if not workers_dir.is_dir():
             continue
 
-        # Parse worker ID
-        match = WORKER_PATTERN.match(entry.name)
-        if not match:
-            continue
+        for entry in workers_dir.iterdir():
+            if not entry.name.startswith("worker-"):
+                continue
+            if not entry.is_dir():
+                continue
 
-        # Use full path as cache key to avoid conflicts across different ralph directories
-        cache_key = str(entry.resolve())
+            # Parse worker ID
+            match = WORKER_PATTERN.match(entry.name)
+            if not match:
+                continue
 
-        # Check if this worker is already cached as completed/failed
-        if cache_key in _completed_workers_cache:
-            workers.append(_completed_workers_cache[cache_key])
-            continue
+            # Use full path as cache key to avoid conflicts across different ralph directories
+            cache_key = str(entry.resolve())
 
-        task_id, ts_str = match.groups()
-        # Use timestamp from directory name as fallback (original creation time)
-        try:
-            dir_timestamp = int(ts_str)
-        except ValueError:
-            dir_timestamp = 0
+            # Check if this worker is already cached as completed/failed
+            if cache_key in _completed_workers_cache:
+                workers.append(_completed_workers_cache[cache_key])
+                continue
 
-        pid_path = entry / "agent.pid"
-        pid: int | None = None
-        pid_mtime: int | None = None
-        has_pid_file = pid_path.exists()
-
-        if has_pid_file:
+            task_id, ts_str = match.groups()
+            # Use timestamp from directory name as fallback (original creation time)
             try:
-                pid_content = pid_path.read_text().strip()
-                pid = int(pid_content)
-                # Get agent.pid mtime - this is when the current agent started
-                pid_mtime = int(pid_path.stat().st_mtime)
-            except (ValueError, OSError):
-                pass
+                dir_timestamp = int(ts_str)
+            except ValueError:
+                dir_timestamp = 0
 
-        worker_entries.append((entry, task_id, dir_timestamp, pid, pid_mtime, has_pid_file))
+            pid_path = entry / "agent.pid"
+            pid: int | None = None
+            pid_mtime: int | None = None
+            has_pid_file = pid_path.exists()
+
+            if has_pid_file:
+                try:
+                    pid_content = pid_path.read_text().strip()
+                    pid = int(pid_content)
+                    # Get agent.pid mtime - this is when the current agent started
+                    pid_mtime = int(pid_path.stat().st_mtime)
+                except (ValueError, OSError):
+                    pass
+
+            worker_entries.append((entry, task_id, dir_timestamp, pid, pid_mtime, has_pid_file, is_archived))
 
     # Second pass: build Worker objects
-    for entry, task_id, dir_timestamp, pid, pid_mtime, has_pid_file in worker_entries:
+    for entry, task_id, dir_timestamp, pid, pid_mtime, has_pid_file, is_archived in worker_entries:
         prd_path = entry / "prd.md"
         log_path = entry / "worker.log"
         workspace_path = entry / "workspace"
@@ -293,6 +299,10 @@ def scan_workers(ralph_dir: Path) -> list[Worker]:
                 except (json.JSONDecodeError, OSError):
                     pass
 
+        # Archived workers are always merged (that's why they're in history/)
+        if is_archived and status != WorkerStatus.FAILED:
+            status = WorkerStatus.MERGED
+
         # For running workers, use agent.pid mtime (current agent start time)
         # For completed/stopped workers, use directory timestamp (original creation time)
         if status == WorkerStatus.RUNNING and pid_mtime is not None:
@@ -321,6 +331,7 @@ def scan_workers(ralph_dir: Path) -> list[Worker]:
             workspace_path=str(workspace_path),
             pr_url=pr_url,
             pipeline_info=read_pipeline_config(entry),
+            is_archived=is_archived,
         )
 
         # Cache completed/failed/merged workers since their state never changes
@@ -330,6 +341,23 @@ def scan_workers(ralph_dir: Path) -> list[Worker]:
             _completed_workers_cache[cache_key] = worker
 
         workers.append(worker)
+
+    # Deduplicate by worker.id, preferring non-archived over archived
+    # This handles the case where a worker exists in both workers/ and history/
+    workers_by_id: dict[str, Worker] = {}
+    for worker in workers:
+        existing = workers_by_id.get(worker.id)
+        if existing is None:
+            workers_by_id[worker.id] = worker
+        elif worker.is_archived and not existing.is_archived:
+            # Keep existing non-archived version
+            pass
+        elif not worker.is_archived and existing.is_archived:
+            # Replace archived with non-archived
+            workers_by_id[worker.id] = worker
+        # If both have same archived status, keep existing (first one found)
+
+    workers = list(workers_by_id.values())
 
     # Sort by timestamp descending (newest first)
     workers.sort(key=lambda w: w.timestamp, reverse=True)

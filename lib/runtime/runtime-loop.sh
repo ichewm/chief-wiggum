@@ -25,6 +25,7 @@ source "$WIGGUM_HOME/lib/core/checkpoint.sh"
 source "$WIGGUM_HOME/lib/runtime/runtime.sh"
 source "$WIGGUM_HOME/lib/utils/work-log.sh"
 source "$WIGGUM_HOME/lib/core/safe-path.sh"
+source "$WIGGUM_HOME/lib/worker/worker-lifecycle.sh"
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -247,6 +248,11 @@ run_ralph_loop() {
     local max_consecutive_fast_fails="${WIGGUM_MAX_FAST_FAILS:-3}"
     local fast_fail_threshold_secs="${WIGGUM_FAST_FAIL_THRESHOLD:-5}"
 
+    # Track currently running subprocess PID for signal propagation.
+    # When the loop receives SIGTERM/SIGINT, we kill this subprocess
+    # to prevent orphaned processes (e.g., claude CLI).
+    _ralph_loop_current_pid=""
+
     # Check if backend supports sessions
     local _has_sessions=false
     if runtime_backend_supports_sessions; then
@@ -260,10 +266,16 @@ run_ralph_loop() {
     fi
 
     # Signal handler for graceful shutdown
+    # Kills any running subprocess to prevent orphaned processes.
     # shellcheck disable=SC2329
     _ralph_loop_signal_handler() {
         log "Ralph loop received shutdown signal"
         shutdown_requested=true
+        # Kill the running subprocess and all its children
+        if [ -n "${_ralph_loop_current_pid:-}" ] && kill -0 "$_ralph_loop_current_pid" 2>/dev/null; then
+            log_debug "Terminating subprocess tree (PID: $_ralph_loop_current_pid)"
+            kill_process_tree "$_ralph_loop_current_pid" TERM
+        fi
     }
 
     # Exit handler for detecting unexpected exits
@@ -401,6 +413,7 @@ run_ralph_loop() {
         } > "$log_file"
 
         # PHASE 1: Work session - build args via backend and execute with retry
+        # Run in background subshell so signal handler can terminate it.
         local -a work_args=()
         runtime_backend_build_exec_args work_args "$workspace" "$system_prompt" "$user_prompt" "$log_file" "$max_turns" "$session_id"
 
@@ -408,7 +421,13 @@ run_ralph_loop() {
         work_start_epoch=$(epoch_now)
 
         local exit_code=0
-        runtime_exec_with_retry "${work_args[@]}" >> "$log_file" 2>&1 || exit_code=$?
+        # Run in background and track PID for signal-based termination
+        (
+            runtime_exec_with_retry "${work_args[@]}" >> "$log_file" 2>&1
+        ) &
+        _ralph_loop_current_pid=$!
+        wait "$_ralph_loop_current_pid" 2>/dev/null || exit_code=$?
+        _ralph_loop_current_pid=""
         log "Work phase completed (exit code: $exit_code, session: $session_id)"
 
         local work_duration=$(( $(epoch_now) - work_start_epoch ))
@@ -497,8 +516,13 @@ Please provide your summary based on the conversation so far, following this str
             local -a summary_args=()
             runtime_backend_build_resume_args summary_args "$session_id" "$summary_prompt" "$summary_log" 2
 
-            runtime_exec_with_retry "${summary_args[@]}" \
-                > "$summary_log" 2>&1 || summary_exit_code=$?
+            # Run in background for signal-based termination
+            (
+                runtime_exec_with_retry "${summary_args[@]}" > "$summary_log" 2>&1
+            ) &
+            _ralph_loop_current_pid=$!
+            wait "$_ralph_loop_current_pid" 2>/dev/null || summary_exit_code=$?
+            _ralph_loop_current_pid=""
         else
             # Session-less backend: run a fresh invocation with summary context
             local summary_system="You are summarizing a work session. The following is the log of work performed."
@@ -513,8 +537,13 @@ ${summary_prompt}"
             local -a summary_args=()
             runtime_backend_build_exec_args summary_args "$workspace" "$summary_system" "$summary_with_context" "$summary_log" 2 ""
 
-            runtime_exec_with_retry "${summary_args[@]}" \
-                > "$summary_log" 2>&1 || summary_exit_code=$?
+            # Run in background for signal-based termination
+            (
+                runtime_exec_with_retry "${summary_args[@]}" > "$summary_log" 2>&1
+            ) &
+            _ralph_loop_current_pid=$!
+            wait "$_ralph_loop_current_pid" 2>/dev/null || summary_exit_code=$?
+            _ralph_loop_current_pid=""
         fi
 
         log "Summary generation completed (exit code: $summary_exit_code)"
@@ -601,12 +630,17 @@ ${summary_prompt}"
                       }'
             } > "$supervisor_log"
 
-            # Run supervisor via backend
+            # Run supervisor via backend (in background for signal-based termination)
             local -a supervisor_args=()
             runtime_backend_build_exec_args supervisor_args "$workspace" "$supervisor_system_prompt" "$supervisor_prompt" "$supervisor_log" 5 "$supervisor_session_id"
 
             local supervisor_exit_code=0
-            runtime_exec_with_retry "${supervisor_args[@]}" >> "$supervisor_log" 2>&1 || supervisor_exit_code=$?
+            (
+                runtime_exec_with_retry "${supervisor_args[@]}" >> "$supervisor_log" 2>&1
+            ) &
+            _ralph_loop_current_pid=$!
+            wait "$_ralph_loop_current_pid" 2>/dev/null || supervisor_exit_code=$?
+            _ralph_loop_current_pid=""
             log "Supervisor session completed (exit code: $supervisor_exit_code)"
 
             # Extract decision and guidance

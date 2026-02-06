@@ -27,6 +27,7 @@ source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/utils/activity-log.sh"
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
 source "$WIGGUM_HOME/lib/core/agent-stream.sh"
+source "$WIGGUM_HOME/lib/worker/worker-lifecycle.sh"
 
 # =============================================================================
 # RESULT CACHING (Performance Optimization)
@@ -931,12 +932,16 @@ _pipeline_run_step() {
         ) &
         local _agent_pid=$!
 
-        # Watchdog: kill the subshell after timeout
+        # Watchdog: kill the subshell and all descendants after timeout
+        # Uses kill_process_tree to ensure grandchild processes (like claude CLI
+        # spawned inside ralph loops) are also terminated, preventing orphans.
         (
             sleep "$step_timeout"
-            kill -TERM "$_agent_pid" 2>/dev/null
+            # TERM first to allow graceful shutdown
+            kill_process_tree "$_agent_pid" TERM
             sleep 30
-            kill -KILL "$_agent_pid" 2>/dev/null
+            # KILL if still running
+            kill_process_tree "$_agent_pid" KILL
         ) &
         local _watchdog_pid=$!
 

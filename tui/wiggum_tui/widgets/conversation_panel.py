@@ -11,13 +11,15 @@ from textual.widget import Widget
 
 from ..data.conversation_parser import (
     parse_iteration_logs,
+    parse_multiple_worker_logs,
     get_conversation_summary,
     truncate_text,
     format_tool_result,
     has_logs_changed,
+    get_logs_max_mtime,
 )
 from ..data.worker_scanner import scan_workers
-from ..data.models import Conversation, ConversationTurn, ToolCall
+from ..data.models import Conversation, ConversationTurn, ToolCall, Worker
 from ..utils import format_relative_time
 
 import json
@@ -173,12 +175,15 @@ class ConversationPanel(Widget):
     def __init__(self, ralph_dir: Path) -> None:
         super().__init__()
         self.ralph_dir = ralph_dir
-        self._workers_list: list[tuple[str, str]] = []  # (id, label)
+        self._tasks_list: list[tuple[str, str]] = []  # (task_id, label)
+        # task_id -> list of (worker_dir, timestamp, is_archived)
+        self._task_workers: dict[str, list[tuple[Path, int, bool]]] = {}
         self._search_text: str = ""
-        self.current_worker: str | None = None
+        self.current_task: str | None = None
         self.conversation: Conversation | None = None
         self._last_data_hash: str = ""
         self._last_workers_dir_mtime: float = 0.0
+        self._last_history_dir_mtime: float = 0.0
 
     def _compute_data_hash(self, conversation: Conversation | None) -> str:
         """Compute a hash of conversation data for change detection."""
@@ -199,12 +204,12 @@ class ConversationPanel(Widget):
         with Horizontal(classes="conv-controls"):
             yield Input(placeholder="Search...", id="worker-search")
             yield Select(
-                [(label, worker_id) for worker_id, label in self._workers_list],
-                prompt="Select worker...",
+                [(label, task_id) for task_id, label in self._tasks_list],
+                prompt="Select task...",
                 id="worker-select",
             )
 
-        if not self._workers_list:
+        if not self._tasks_list:
             yield Static(
                 "No workers with conversation logs found.",
                 classes="empty-message",
@@ -215,93 +220,156 @@ class ConversationPanel(Widget):
 
     def on_mount(self) -> None:
         """Initialize panel."""
-        if self._workers_list:
-            # Auto-select first worker
-            first_worker_id = self._workers_list[0][0]
-            self._load_conversation(first_worker_id)
+        if self._tasks_list:
+            # Auto-select first task
+            first_task_id = self._tasks_list[0][0]
+            self._load_conversation(first_task_id)
         self.set_interval(3, self._refresh_workers_list)
 
+    def _get_worker_dir(self, worker_id: str, is_archived: bool = False) -> Path:
+        """Get the directory path for a worker.
+
+        Args:
+            worker_id: The worker's ID (directory name).
+            is_archived: Whether the worker is in history/ instead of workers/.
+
+        Returns:
+            Path to the worker directory.
+        """
+        if is_archived:
+            return self.ralph_dir / "history" / worker_id
+        return self.ralph_dir / "workers" / worker_id
+
     def _load_workers(self) -> None:
-        """Load list of workers with conversations."""
+        """Load list of workers with conversations, grouped by task_id."""
         workers = scan_workers(self.ralph_dir)
-        workers_with_mtime: list[tuple[str, str, float]] = []  # (id, label, mtime)
+
+        # Group workers by task_id
+        # task_id -> list of (worker, worker_dir)
+        task_workers: dict[str, list[tuple[Worker, Path]]] = {}
 
         for worker in workers:
-            worker_dir = self.ralph_dir / "workers" / worker.id
+            worker_dir = self._get_worker_dir(worker.id, worker.is_archived)
             logs_dir = worker_dir / "logs"
             if logs_dir.is_dir():
-                # Quick check: if logs dir exists, use worker timestamp for ordering
-                # This avoids expensive glob/stat on all log files
                 try:
-                    # Check if there are any log files (quick existence check)
                     has_logs = any(logs_dir.glob("*.log")) or any(logs_dir.glob("*/*.log"))
                     if has_logs:
-                        # Build label with pipeline info and relative time
-                        pi = worker.pipeline_info
-                        rel_time = format_relative_time(worker.timestamp)
-                        if pi and pi.step_id:
-                            agent_label = pi.agent_short or pi.step_id
-                            label = f"{worker.task_id} - {agent_label} @ {pi.step_id} ({worker.status.value}) [{rel_time}]"
-                        else:
-                            label = f"{worker.task_id} - {worker.status.value} [{rel_time}]"
-                        workers_with_mtime.append((worker.id, label, worker.timestamp))
+                        if worker.task_id not in task_workers:
+                            task_workers[worker.task_id] = []
+                        task_workers[worker.task_id].append((worker, worker_dir))
                 except OSError:
                     continue
 
-        # Sort by creation time ascending (oldest first)
-        workers_with_mtime.sort(key=lambda x: x[2])
-        self._workers_list = [(w[0], w[1]) for w in workers_with_mtime]
+        # Build task list and worker directories map
+        self._task_workers = {}
+        tasks_with_info: list[tuple[str, str, int, int]] = []  # (task_id, label, latest_ts, worker_count)
+
+        for task_id, worker_list in task_workers.items():
+            # Sort workers by timestamp (oldest first)
+            worker_list.sort(key=lambda x: x[0].timestamp)
+
+            # Store worker directories for this task
+            self._task_workers[task_id] = [
+                (worker_dir, w.timestamp, w.is_archived)
+                for w, worker_dir in worker_list
+            ]
+
+            # Get info from most recent worker for the label
+            latest_worker, _ = worker_list[-1]
+            worker_count = len(worker_list)
+            has_archived = any(w.is_archived for w, _ in worker_list)
+
+            # Build label
+            pi = latest_worker.pipeline_info
+            rel_time = format_relative_time(latest_worker.timestamp)
+            archive_marker = " [+archived]" if has_archived else ""
+            worker_count_str = f" ({worker_count} runs)" if worker_count > 1 else ""
+
+            if pi and pi.step_id:
+                agent_label = pi.agent_short or pi.step_id
+                label = f"{task_id} - {agent_label} @ {pi.step_id} ({latest_worker.status.value}) [{rel_time}]{worker_count_str}{archive_marker}"
+            else:
+                label = f"{task_id} - {latest_worker.status.value} [{rel_time}]{worker_count_str}{archive_marker}"
+
+            tasks_with_info.append((task_id, label, latest_worker.timestamp, worker_count))
+
+        # Sort by latest timestamp ascending (oldest first)
+        tasks_with_info.sort(key=lambda x: x[2])
+        self._tasks_list = [(t[0], t[1]) for t in tasks_with_info]
 
     def _refresh_workers_list(self) -> None:
         """Periodically refresh the worker dropdown options."""
-        # Quick check: has workers directory changed?
+        # Quick check: has workers or history directory changed?
         workers_dir = self.ralph_dir / "workers"
-        try:
-            current_mtime = workers_dir.stat().st_mtime
-            if current_mtime == self._last_workers_dir_mtime:
-                return  # No change, skip refresh
-            self._last_workers_dir_mtime = current_mtime
-        except OSError:
-            return
+        history_dir = self.ralph_dir / "history"
 
-        old_list = self._workers_list[:]
+        workers_mtime = 0.0
+        history_mtime = 0.0
+        try:
+            workers_mtime = workers_dir.stat().st_mtime
+        except OSError:
+            pass
+        try:
+            history_mtime = history_dir.stat().st_mtime
+        except OSError:
+            pass
+
+        if workers_mtime == self._last_workers_dir_mtime and history_mtime == self._last_history_dir_mtime:
+            return  # No change, skip refresh
+
+        self._last_workers_dir_mtime = workers_mtime
+        self._last_history_dir_mtime = history_mtime
+
+        old_list = self._tasks_list[:]
         self._load_workers()
-        if old_list != self._workers_list:
+        if old_list != self._tasks_list:
             self._apply_search_filter()
 
-    def _filtered_workers(self) -> list[tuple[str, str]]:
-        """Return workers list filtered by current search text."""
+    def _filtered_tasks(self) -> list[tuple[str, str]]:
+        """Return tasks list filtered by current search text."""
         if not self._search_text:
-            return self._workers_list
+            return self._tasks_list
         query = self._search_text.lower()
-        return [(wid, label) for wid, label in self._workers_list if query in label.lower()]
+        return [(tid, label) for tid, label in self._tasks_list if query in label.lower()]
 
     def _apply_search_filter(self) -> None:
         """Apply current search filter to the Select widget."""
         try:
             select = self.query_one("#worker-select", Select)
-            filtered = self._filtered_workers()
+            filtered = self._filtered_tasks()
             select.set_options(
-                [(label, worker_id) for worker_id, label in filtered]
+                [(label, task_id) for task_id, label in filtered]
             )
             # Restore selection if still in filtered list
-            filtered_ids = [w[0] for w in filtered]
-            if self.current_worker and self.current_worker in filtered_ids:
-                select.value = self.current_worker
+            filtered_ids = [t[0] for t in filtered]
+            if self.current_task and self.current_task in filtered_ids:
+                select.value = self.current_task
         except Exception:
             pass
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        """Filter worker dropdown based on search text."""
+        """Filter task dropdown based on search text."""
         if event.input.id == "worker-search":
             self._search_text = event.value
             self._apply_search_filter()
 
-    def _load_conversation(self, worker_id: str) -> None:
-        """Load conversation for a worker."""
-        self.current_worker = worker_id
-        worker_dir = self.ralph_dir / "workers" / worker_id
-        self.conversation = parse_iteration_logs(worker_dir)
+    def _load_conversation(self, task_id: str) -> None:
+        """Load combined conversation for all workers of a task."""
+        self.current_task = task_id
+        worker_dirs = self._task_workers.get(task_id, [])
+
+        if not worker_dirs:
+            self.conversation = Conversation(worker_id=task_id)
+        elif len(worker_dirs) == 1:
+            # Single worker - use simple parser
+            worker_dir, _, _ = worker_dirs[0]
+            self.conversation = parse_iteration_logs(worker_dir)
+        else:
+            # Multiple workers - combine conversations
+            dirs_with_ts = [(wd, ts) for wd, ts, _ in worker_dirs]
+            self.conversation = parse_multiple_worker_logs(dirs_with_ts, task_id)
+
         self._last_data_hash = self._compute_data_hash(self.conversation)
         self._populate_tree()
 
@@ -706,23 +774,36 @@ class ConversationPanel(Widget):
                 result_node.add_leaf(f"[#a6adc8]{line}[/]")
 
     def on_select_changed(self, event: Select.Changed) -> None:
-        """Handle worker selection change."""
+        """Handle task selection change."""
         if event.select.id == "worker-select" and event.value:
             self._load_conversation(str(event.value))
 
     def refresh_data(self) -> None:
         """Refresh conversation data only if data changed."""
-        if not self.current_worker:
+        if not self.current_task:
             return
 
-        worker_dir = self.ralph_dir / "workers" / self.current_worker
-
-        # Quick mtime check - skip parsing if logs haven't changed
-        if not has_logs_changed(worker_dir):
+        worker_dirs = self._task_workers.get(self.current_task, [])
+        if not worker_dirs:
             return
 
-        # Logs changed, re-parse (will use cache if mtime matches)
-        new_conversation = parse_iteration_logs(worker_dir)
+        # Quick mtime check - skip parsing if no logs have changed
+        any_changed = False
+        for worker_dir, _, _ in worker_dirs:
+            if has_logs_changed(worker_dir):
+                any_changed = True
+                break
+
+        if not any_changed:
+            return
+
+        # Logs changed, re-parse
+        if len(worker_dirs) == 1:
+            worker_dir, _, _ = worker_dirs[0]
+            new_conversation = parse_iteration_logs(worker_dir)
+        else:
+            dirs_with_ts = [(wd, ts) for wd, ts, _ in worker_dirs]
+            new_conversation = parse_multiple_worker_logs(dirs_with_ts, self.current_task)
 
         # Check if data actually changed (in case cache returned same data)
         new_hash = self._compute_data_hash(new_conversation)
@@ -733,25 +814,25 @@ class ConversationPanel(Widget):
         self.conversation = new_conversation
         self._populate_tree()
 
-    def select_worker(self, worker_id: str) -> None:
-        """Select a specific worker programmatically."""
+    def select_task(self, task_id: str) -> None:
+        """Select a specific task programmatically."""
         try:
             select = self.query_one("#worker-select", Select)
-            select.value = worker_id
-            self._load_conversation(worker_id)
+            select.value = task_id
+            self._load_conversation(task_id)
         except Exception:
             pass
 
     def select_by_task_id(self, task_id: str) -> None:
-        """Select the most recent worker for a given task ID.
+        """Select a task by its ID.
 
         Args:
             task_id: Task ID to find and select (e.g. "TASK-001").
         """
-        # Find a worker whose ID contains this task_id
-        for worker_id, label in self._workers_list:
-            if task_id in worker_id or task_id in label:
-                self.select_worker(worker_id)
+        # Check if this task_id is directly in our list
+        for tid, label in self._tasks_list:
+            if tid == task_id or task_id in label:
+                self.select_task(tid)
                 return
 
     def action_expand_all(self) -> None:

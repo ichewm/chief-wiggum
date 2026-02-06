@@ -133,7 +133,7 @@
     "engineering.test-runner": {
       "max_iterations": 3,
       "max_turns": 20,
-      "timeout_seconds": 600,
+      "timeout_seconds": 1800,
       "result_mappings": {
         "PASS": { "status": "success", "exit_code": 0, "default_jump": "next" },
         "FAIL": { "status": "failure", "exit_code": 10, "default_jump": "abort" },

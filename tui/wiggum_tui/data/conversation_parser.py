@@ -380,3 +380,68 @@ def format_tool_result(result: Any, max_length: int = 200) -> str:
         return f"{{...}} ({', '.join(keys)})"
 
     return truncate_text(str(result), max_length)
+
+
+def parse_multiple_worker_logs(
+    worker_dirs: list[tuple[Path, int]],
+    task_id: str,
+) -> Conversation:
+    """Parse and combine logs from multiple worker directories for the same task.
+
+    Args:
+        worker_dirs: List of (worker_dir, timestamp) tuples, sorted by timestamp.
+        task_id: The task ID for this combined conversation.
+
+    Returns:
+        Combined Conversation object with turns from all workers.
+    """
+    if not worker_dirs:
+        return Conversation(worker_id=task_id)
+
+    combined = Conversation(worker_id=task_id)
+    all_turns: list[ConversationTurn] = []
+    all_results: list[IterationResult] = []
+
+    # Process workers in timestamp order (oldest first)
+    sorted_workers = sorted(worker_dirs, key=lambda x: x[1])
+
+    for worker_dir, worker_ts in sorted_workers:
+        conv = parse_iteration_logs(worker_dir, use_cache=True)
+
+        # Use first non-empty system/user prompt
+        if not combined.system_prompt and conv.system_prompt:
+            combined.system_prompt = conv.system_prompt
+        if not combined.user_prompt and conv.user_prompt:
+            combined.user_prompt = conv.user_prompt
+
+        # Prefix log_name with worker directory name to distinguish
+        worker_name = worker_dir.name
+        for turn in conv.turns:
+            # Create a new turn with prefixed log_name
+            prefixed_turn = ConversationTurn(
+                iteration=turn.iteration,
+                assistant_text=turn.assistant_text,
+                tool_calls=turn.tool_calls,
+                timestamp=turn.timestamp,
+                log_name=f"{worker_name}/{turn.log_name}" if turn.log_name else worker_name,
+            )
+            all_turns.append(prefixed_turn)
+
+        for result in conv.results:
+            # Create a new result with prefixed log_name
+            prefixed_result = IterationResult(
+                iteration=result.iteration,
+                subtype=result.subtype,
+                duration_ms=result.duration_ms,
+                duration_api_ms=result.duration_api_ms,
+                num_turns=result.num_turns,
+                total_cost_usd=result.total_cost_usd,
+                is_error=result.is_error,
+                usage=result.usage,
+                log_name=f"{worker_name}/{result.log_name}" if result.log_name else worker_name,
+            )
+            all_results.append(prefixed_result)
+
+    combined.turns = all_turns
+    combined.results = all_results
+    return combined

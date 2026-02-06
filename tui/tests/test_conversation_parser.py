@@ -6,6 +6,7 @@ from pathlib import Path
 
 from wiggum_tui.data.conversation_parser import (
     parse_iteration_logs,
+    parse_multiple_worker_logs,
     get_conversation_summary,
     truncate_text,
     format_tool_result,
@@ -453,3 +454,114 @@ class TestFormatToolResult:
         result = format_tool_result({"stdout": long_content}, max_length=50)
         assert len(result) == 50
         assert result.endswith("...")
+
+
+class TestParseMultipleWorkerLogs:
+    """Tests for parse_multiple_worker_logs function."""
+
+    def test_empty_list(self):
+        result = parse_multiple_worker_logs([], "TASK-001")
+        assert result.worker_id == "TASK-001"
+        assert result.turns == []
+        assert result.results == []
+
+    def test_single_worker(self, tmp_path: Path):
+        worker_dir = tmp_path / "worker-TASK-001-1700000000"
+        logs_dir = worker_dir / "logs"
+        logs_dir.mkdir(parents=True)
+
+        log_content = json.dumps({
+            "type": "iteration_start",
+            "system_prompt": "System",
+            "user_prompt": "User"
+        }) + "\n" + json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "Hello"}]}
+        })
+        (logs_dir / "iteration-0.log").write_text(log_content)
+
+        result = parse_multiple_worker_logs([(worker_dir, 1700000000)], "TASK-001")
+
+        assert result.worker_id == "TASK-001"
+        assert result.system_prompt == "System"
+        assert result.user_prompt == "User"
+        assert len(result.turns) == 1
+
+    def test_combines_multiple_workers(self, tmp_path: Path):
+        # Create first worker (older)
+        worker1 = tmp_path / "worker-TASK-001-1700000000"
+        logs1 = worker1 / "logs"
+        logs1.mkdir(parents=True)
+        (logs1 / "iteration-0.log").write_text(json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "First worker"}]}
+        }))
+
+        # Create second worker (newer)
+        worker2 = tmp_path / "worker-TASK-001-1700000001"
+        logs2 = worker2 / "logs"
+        logs2.mkdir(parents=True)
+        (logs2 / "iteration-0.log").write_text(json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "Second worker"}]}
+        }))
+
+        result = parse_multiple_worker_logs([
+            (worker1, 1700000000),
+            (worker2, 1700000001),
+        ], "TASK-001")
+
+        assert result.worker_id == "TASK-001"
+        assert len(result.turns) == 2
+        # Turns should be from both workers, ordered by worker timestamp
+        assert "First worker" in result.turns[0].assistant_text
+        assert "Second worker" in result.turns[1].assistant_text
+
+    def test_prefixes_log_names_with_worker(self, tmp_path: Path):
+        worker_dir = tmp_path / "worker-TASK-001-1700000000"
+        logs_dir = worker_dir / "logs"
+        logs_dir.mkdir(parents=True)
+        (logs_dir / "iteration-0.log").write_text(json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "Hello"}]}
+        }))
+
+        result = parse_multiple_worker_logs([(worker_dir, 1700000000)], "TASK-001")
+
+        assert len(result.turns) == 1
+        # Log name should be prefixed with worker directory name
+        assert "worker-TASK-001-1700000000" in result.turns[0].log_name
+
+    def test_uses_first_non_empty_prompts(self, tmp_path: Path):
+        # First worker has no prompts
+        worker1 = tmp_path / "worker-TASK-001-1700000000"
+        logs1 = worker1 / "logs"
+        logs1.mkdir(parents=True)
+        (logs1 / "iteration-0.log").write_text(json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "First"}]}
+        }))
+
+        # Second worker has prompts
+        worker2 = tmp_path / "worker-TASK-001-1700000001"
+        logs2 = worker2 / "logs"
+        logs2.mkdir(parents=True)
+        (logs2 / "iteration-0.log").write_text(
+            json.dumps({
+                "type": "iteration_start",
+                "system_prompt": "System from second",
+                "user_prompt": "User from second"
+            }) + "\n" + json.dumps({
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "Second"}]}
+            })
+        )
+
+        result = parse_multiple_worker_logs([
+            (worker1, 1700000000),
+            (worker2, 1700000001),
+        ], "TASK-001")
+
+        # Should use prompts from second worker since first has none
+        assert result.system_prompt == "System from second"
+        assert result.user_prompt == "User from second"
