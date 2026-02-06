@@ -24,6 +24,7 @@ GITHUB_SYNC_ALLOWED_USER_IDS="${WIGGUM_GITHUB_ALLOWED_USER_IDS:-}"
 GITHUB_SYNC_LABEL_FILTER="${WIGGUM_GITHUB_LABEL_FILTER:-}"
 GITHUB_SYNC_DEFAULT_PRIORITY="${WIGGUM_GITHUB_DEFAULT_PRIORITY:-}"
 GITHUB_SYNC_CLOSE_ON=""
+GITHUB_SYNC_CONTEXT_EVENTS="${WIGGUM_CONTEXT_EVENTS:-}"
 
 # =============================================================================
 # Internal: Extract config from JSON files
@@ -51,7 +52,8 @@ _extract_github_sync_config() {
         (.github.issue_sync.default_priority // ""),
         (.github.issue_sync.priority_labels // {} | tojson),
         (.github.issue_sync.status_labels // {} | tojson),
-        (.github.issue_sync.close_on // [] | join(","))
+        (.github.issue_sync.close_on // [] | join(",")),
+        (.github.issue_sync.context_events // "")
     ] | join("\u001f")' "$config_file" 2>/dev/null || return 1
 }
 
@@ -78,6 +80,7 @@ load_github_sync_config() {
     local _cfg_enabled="" _cfg_user_ids=""
     local _cfg_label_filter="" _cfg_default_priority=""
     local _cfg_priority_labels="" _cfg_status_labels="" _cfg_close_on=""
+    local _cfg_context_events=""
 
     # Try project-specific config first, then global
     local extracted=""
@@ -97,6 +100,7 @@ load_github_sync_config() {
         IFS=$'\x1f' read -r _cfg_enabled _cfg_user_ids \
                          _cfg_label_filter _cfg_default_priority \
                          _cfg_priority_labels _cfg_status_labels _cfg_close_on \
+                         _cfg_context_events \
                          <<< "$extracted"
     fi
 
@@ -124,6 +128,9 @@ load_github_sync_config() {
     # Status chars that close the issue (default: only "x" = completed)
     GITHUB_SYNC_CLOSE_ON="${_cfg_close_on:-x}"
 
+    # Context events: emit events when in-progress task content changes on GitHub
+    GITHUB_SYNC_CONTEXT_EVENTS="${WIGGUM_CONTEXT_EVENTS:-${_cfg_context_events:-false}}"
+
     export GITHUB_SYNC_ENABLED
     export GITHUB_SYNC_ALLOWED_USER_IDS
     export GITHUB_SYNC_LABEL_FILTER
@@ -133,6 +140,7 @@ load_github_sync_config() {
     # shellcheck disable=SC2090
     export GITHUB_SYNC_STATUS_LABELS
     export GITHUB_SYNC_CLOSE_ON
+    export GITHUB_SYNC_CONTEXT_EVENTS
 }
 
 # Check if GitHub issue sync is enabled

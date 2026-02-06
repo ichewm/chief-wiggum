@@ -315,6 +315,19 @@ _md_interpolate() {
         result="${result//\{\{plan_section\}\}/$plan_section}"
     fi
 
+    # Context updates (from GitHub sync when issue content changes)
+    if [[ "$result" == *"{{context_updates}}"* ]]; then
+        local context_updates="${WIGGUM_CONTEXT_UPDATES:-}"
+        if [ -n "$context_updates" ]; then
+            # Format as markdown section
+            local formatted
+            formatted=$(_md_format_context_updates "$context_updates")
+            result="${result//\{\{context_updates\}\}/$formatted}"
+        else
+            result="${result//\{\{context_updates\}\}/}"
+        fi
+    fi
+
     echo "$result"
 }
 
@@ -520,6 +533,41 @@ You are a READ-ONLY agent. The workspace contains uncommitted work that MUST NOT
 
 You operate by READING files. Do NOT modify the workspace in any way.
 EOF
+}
+
+# Format context updates JSON as a markdown section
+#
+# Converts the context-updates.json content into a human-readable
+# markdown section that agents can understand.
+#
+# Args:
+#   context_json - JSON string from WIGGUM_CONTEXT_UPDATES
+#
+# Returns: Formatted markdown section
+_md_format_context_updates() {
+    local context_json="$1"
+
+    # Parse JSON and format as markdown
+    local formatted
+    formatted=$(echo "$context_json" | jq -r '
+        "## IMPORTANT: Requirements Updated\n\n" +
+        "**The requirements for this task have been updated on GitHub.**\n\n" +
+        "**Updated at:** " + .updated_at + "\n\n" +
+        "**Updated Description:**\n\n" +
+        .description + "\n"
+    ' 2>/dev/null)
+
+    # Fallback if jq fails
+    if [ -z "$formatted" ]; then
+        formatted="## Context Update Available
+
+The task requirements have been updated. Raw context:
+\`\`\`json
+$context_json
+\`\`\`"
+    fi
+
+    echo "$formatted"
 }
 
 # Generate plan section if plan file exists

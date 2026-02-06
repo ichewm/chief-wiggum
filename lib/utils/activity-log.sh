@@ -89,3 +89,31 @@ activity_log() {
     # Atomic append with flock (using shared utility)
     append_with_lock "$_ACTIVITY_LOG_FILE" "$json"
 }
+
+# Emit context update event for a worker
+#
+# Used when GitHub sync detects content changes for in-progress tasks.
+# The context.updated event signals that new requirements or acceptance
+# criteria are available, which pipeline steps can consume.
+#
+# Args:
+#   worker_id  - Worker identifier
+#   task_id    - Task identifier
+#   field      - Changed field ("description", "acceptance_criteria", "scope")
+#   source     - Event source ("github_issue_sync")
+#   old_hash   - SHA256 hash of previous content
+#   new_hash   - SHA256 hash of new content
+#
+# Returns: 0 on success
+activity_log_context_update() {
+    local worker_id="$1"
+    local task_id="$2"
+    local field="$3"
+    local source="$4"
+    local old_hash="$5"
+    local new_hash="$6"
+
+    activity_log "context.updated" "$worker_id" "$task_id" \
+        "field=$field" "source=$source" \
+        "old_hash=$old_hash" "new_hash=$new_hash"
+}

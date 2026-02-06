@@ -24,6 +24,7 @@ source "$WIGGUM_HOME/lib/github/issue-writer.sh"
 source "$WIGGUM_HOME/lib/github/pr-labels.sh"
 source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 source "$WIGGUM_HOME/lib/core/platform.sh"
+source "$WIGGUM_HOME/lib/utils/activity-log.sh"
 
 # =============================================================================
 # Internal: GitHub API Helpers
@@ -305,6 +306,86 @@ _get_untracked_task_ids() {
 }
 
 # =============================================================================
+# Internal: Context Update Helpers
+# =============================================================================
+
+# Find the active worker directory for a task
+#
+# Searches workers directory for a worker handling the specified task.
+# Returns the worker_id (basename) of the first active worker found.
+#
+# Args:
+#   ralph_dir - Path to .ralph directory
+#   task_id   - Task ID to find
+#
+# Returns: worker_id on stdout, or empty if not found
+_find_active_worker() {
+    local ralph_dir="$1"
+    local task_id="$2"
+
+    local workers_dir="$ralph_dir/workers"
+    [ -d "$workers_dir" ] || return 1
+
+    local worker_dir
+    for worker_dir in "$workers_dir"/worker-"$task_id"-*; do
+        if [ -d "$worker_dir" ] && [ -f "$worker_dir/worker.log" ]; then
+            # Worker exists and has a log file (indicates active/recent worker)
+            basename "$worker_dir"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Write context update file for a worker
+#
+# Creates context-updates.json in the worker directory with the latest
+# GitHub issue content. Pipeline steps read this file to inject updated
+# context into agent prompts.
+#
+# Args:
+#   ralph_dir    - Path to .ralph directory
+#   worker_id    - Worker identifier (basename of worker directory)
+#   task_id      - Task ID
+#   description  - Updated description from GitHub issue
+#   priority     - Updated priority
+#   dependencies - Updated dependencies
+#
+# Returns: 0 on success
+_write_worker_context_update() {
+    local ralph_dir="$1"
+    local worker_id="$2"
+    local task_id="$3"
+    local description="$4"
+    local priority="$5"
+    local dependencies="$6"
+
+    local worker_dir="$ralph_dir/workers/$worker_id"
+    [ -d "$worker_dir" ] || return 1
+
+    local context_file="$worker_dir/context-updates.json"
+    local ts
+    ts=$(iso_now)
+
+    # Write as JSON with timestamp
+    jq -n \
+        --arg ts "$ts" \
+        --arg task_id "$task_id" \
+        --arg description "$description" \
+        --arg priority "$priority" \
+        --arg dependencies "$dependencies" \
+        '{
+            updated_at: $ts,
+            task_id: $task_id,
+            description: $description,
+            priority: $priority,
+            dependencies: $dependencies
+        }' > "$context_file"
+
+    log_debug "Wrote context update for worker $worker_id: $context_file"
+}
+
+# =============================================================================
 # Down Sync (GitHub -> Local)
 # =============================================================================
 
@@ -421,6 +502,42 @@ github_issue_sync_down() {
                             log_debug "Updated task $task_id from issue #$number"
                         fi
                         ((++updated))
+                    fi
+                fi
+            elif [ "$current_status" = "=" ] && [ "${GITHUB_SYNC_CONTEXT_EVENTS:-false}" = "true" ]; then
+                # In-progress task: emit context update events without modifying kanban
+                # This allows pipeline steps to see updated requirements/acceptance criteria
+                local existing_entry
+                existing_entry=$(github_sync_state_get_task "$ralph_dir" "$task_id")
+                local new_hash
+                new_hash=$(github_sync_hash_content "$description")
+
+                if [ "$existing_entry" != "null" ]; then
+                    local old_hash
+                    old_hash=$(echo "$existing_entry" | jq -r '.description_hash // ""')
+
+                    if [ "$old_hash" != "$new_hash" ]; then
+                        # Content changed - find active worker and write context update
+                        local worker_id
+                        worker_id=$(_find_active_worker "$ralph_dir" "$task_id") || true
+
+                        if [ -n "$worker_id" ]; then
+                            if [ "$dry_run" = "true" ]; then
+                                echo "[dry-run] Context update for $task_id (issue #$number) - content changed"
+                            else
+                                # Emit activity log event
+                                activity_log_context_update "$worker_id" "$task_id" \
+                                    "description" "github_issue_sync" "$old_hash" "$new_hash"
+
+                                # Write updated content to worker's context file
+                                _write_worker_context_update "$ralph_dir" "$worker_id" "$task_id" \
+                                    "$description" "$priority" "$dependencies"
+
+                                log "Context update for in-progress task $task_id from issue #$number"
+                            fi
+                        else
+                            log_debug "Task $task_id content changed but no active worker found"
+                        fi
                     fi
                 fi
             else

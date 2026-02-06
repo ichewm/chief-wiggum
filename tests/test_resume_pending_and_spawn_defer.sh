@@ -38,6 +38,8 @@ scheduler_mark_event() { :; }
 scheduler_remove_from_aging() { :; }
 
 # Activity log stub - records calls for assertions
+# Set guard to prevent real activity-log.sh from overwriting our stub
+_ACTIVITY_LOG_LOADED=1
 _ACTIVITY_LOG_CALLS=()
 activity_log() {
     _ACTIVITY_LOG_CALLS+=("$1|${2:-}|${3:-}|${4:-}")

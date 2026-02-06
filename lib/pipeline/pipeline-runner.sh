@@ -335,6 +335,40 @@ _clear_step_context() {
     unset WIGGUM_PARENT_STEP_ID WIGGUM_PARENT_RUN_ID WIGGUM_PARENT_SESSION_ID
     unset WIGGUM_PARENT_RESULT WIGGUM_PARENT_REPORT WIGGUM_PARENT_OUTPUT_DIR
     unset WIGGUM_NEXT_STEP_ID
+    unset WIGGUM_CONTEXT_UPDATES WIGGUM_CONTEXT_UPDATES_FILE
+}
+
+# =============================================================================
+# CONTEXT UPDATE INJECTION
+# =============================================================================
+# Load context updates for a worker from the context-updates.json file.
+# This file is written by GitHub sync when issue content changes for
+# in-progress tasks, allowing agents to see updated requirements.
+
+# Load context updates for this worker
+#
+# Reads context-updates.json if it exists and exports the content
+# as WIGGUM_CONTEXT_UPDATES for agent prompt interpolation.
+#
+# Args:
+#   worker_dir - Worker directory path
+#
+# Exports:
+#   WIGGUM_CONTEXT_UPDATES      - JSON content of context updates
+#   WIGGUM_CONTEXT_UPDATES_FILE - Path to the context file
+_load_context_updates() {
+    local worker_dir="$1"
+    local context_file="$worker_dir/context-updates.json"
+
+    if [ -f "$context_file" ]; then
+        export WIGGUM_CONTEXT_UPDATES
+        WIGGUM_CONTEXT_UPDATES=$(cat "$context_file")
+        export WIGGUM_CONTEXT_UPDATES_FILE="$context_file"
+        log_debug "Loaded context updates from $context_file"
+    else
+        export WIGGUM_CONTEXT_UPDATES=""
+        export WIGGUM_CONTEXT_UPDATES_FILE=""
+    fi
 }
 
 # =============================================================================
@@ -842,6 +876,9 @@ _pipeline_run_step() {
 
     # Export parent/next step context for markdown agents
     _export_step_context "$idx" "$worker_dir"
+
+    # Load context updates for this worker (from GitHub sync)
+    _load_context_updates "$worker_dir"
 
     # Update current step pointer in pipeline-config.json
     _update_current_step "$worker_dir" "$idx" "$step_id"

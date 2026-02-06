@@ -117,6 +117,8 @@ Verify the right TYPES of tests exist:
 </WIGGUM_SYSTEM_PROMPT>
 
 <WIGGUM_USER_PROMPT>
+{{context_updates}}
+
 VALIDATION TASK:
 
 Verify completed work meets PRD requirements. Trust nothing - verify everything.
