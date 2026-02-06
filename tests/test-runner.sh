@@ -5,6 +5,7 @@
 # Usage:
 #   ./test-runner.sh                  # Run all tests
 #   ./test-runner.sh --filter lock    # Run only tests matching "lock"
+#   ./test-runner.sh --filter lock,kanban  # Run tests matching "lock" or "kanban"
 #   ./test-runner.sh path/to/test.sh  # Run specific test file
 
 set -euo pipefail
@@ -213,15 +214,19 @@ main() {
         test_files=("${POSITIONAL_ARGS[@]}")
     fi
 
-    # Apply filter if specified
+    # Apply filter if specified (supports comma-separated patterns)
     if [ -n "$FILTER_PATTERN" ]; then
         local filtered_files=()
+        IFS=',' read -ra filter_patterns <<< "$FILTER_PATTERN"
         for test_file in "${test_files[@]}"; do
             local name
             name=$(basename "$test_file")
-            if [[ "$name" == *"$FILTER_PATTERN"* ]]; then
-                filtered_files+=("$test_file")
-            fi
+            for pattern in "${filter_patterns[@]}"; do
+                if [[ "$name" == *"$pattern"* ]]; then
+                    filtered_files+=("$test_file")
+                    break
+                fi
+            done
         done
 
         if [ ${#filtered_files[@]} -eq 0 ]; then
