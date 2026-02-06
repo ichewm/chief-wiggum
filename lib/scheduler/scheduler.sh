@@ -721,7 +721,22 @@ get_resumable_workers() {
         is_worker_running "$worker_dir" && continue
 
         # Skip terminal failures (last step + FAIL, or resume-state terminal)
-        _is_terminal_failure "$worker_dir" && continue
+        # Mark terminal + update kanban when repeated step failures detected
+        if _is_terminal_failure "$worker_dir"; then
+            if ! resume_state_is_terminal "$worker_dir"; then
+                local _term_tid2
+                _term_tid2=$(get_task_id_from_worker "$(basename "$worker_dir")")
+                if _has_repeated_step_failures "$worker_dir"; then
+                    resume_state_set_terminal "$worker_dir" "Repeated failures at same pipeline step"
+                    update_kanban_failed "$RALPH_DIR/kanban.md" "$_term_tid2" || true
+                    github_issue_sync_task_status "$RALPH_DIR" "$_term_tid2" "*" || true
+                    log_error "Worker $(basename "$worker_dir") repeated step failures — marked terminal"
+                    activity_log "worker.resume_failed" "$(basename "$worker_dir")" "$_term_tid2" "reason=repeated_step_failures"
+                    scheduler_mark_event
+                fi
+            fi
+            continue
+        fi
 
         # Skip workers in cooldown (DEFER)
         resume_state_is_cooling "$worker_dir" && continue
@@ -794,7 +809,24 @@ get_workers_needing_decide() {
         is_worker_running "$worker_dir" && continue
 
         # Skip terminal failures (last step + FAIL, or resume-state terminal)
-        _is_terminal_failure "$worker_dir" && continue
+        # Note: _is_terminal_failure includes _has_repeated_step_failures which
+        # silently blocks workers. When it triggers here, mark terminal + update kanban
+        # so tasks don't stay stuck as [=] forever.
+        if _is_terminal_failure "$worker_dir"; then
+            if ! resume_state_is_terminal "$worker_dir"; then
+                local _term_tid
+                _term_tid=$(get_task_id_from_worker "$(basename "$worker_dir")")
+                if _has_repeated_step_failures "$worker_dir"; then
+                    resume_state_set_terminal "$worker_dir" "Repeated failures at same pipeline step"
+                    update_kanban_failed "$RALPH_DIR/kanban.md" "$_term_tid" || true
+                    github_issue_sync_task_status "$RALPH_DIR" "$_term_tid" "*" || true
+                    log_error "Worker $(basename "$worker_dir") repeated step failures — marked terminal"
+                    activity_log "worker.resume_failed" "$(basename "$worker_dir")" "$_term_tid" "reason=repeated_step_failures"
+                    scheduler_mark_event
+                fi
+            fi
+            continue
+        fi
 
         # Skip workers in cooldown (DEFER)
         resume_state_is_cooling "$worker_dir" && continue
