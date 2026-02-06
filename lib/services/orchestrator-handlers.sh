@@ -141,9 +141,16 @@ svc_orch_validate_kanban() {
 
 # Initialize scheduler and detect dependency cycles
 svc_orch_init_scheduler() {
-    scheduler_init "$RALPH_DIR" "$PROJECT_DIR" \
-        "$AGING_FACTOR" "$SIBLING_WIP_PENALTY" "$PLAN_BONUS" "$DEP_BONUS_PER_TASK" \
-        "$RESUME_INITIAL_BONUS" "$RESUME_FAIL_PENALTY"
+    # Use distributed scheduler initialization if in github or hybrid mode
+    if [[ "${WIGGUM_TASK_SOURCE_MODE:-local}" != "local" ]]; then
+        scheduler_init_with_task_source "$RALPH_DIR" "$PROJECT_DIR" \
+            "$AGING_FACTOR" "$SIBLING_WIP_PENALTY" "$PLAN_BONUS" "$DEP_BONUS_PER_TASK" \
+            "$RESUME_INITIAL_BONUS" "$RESUME_FAIL_PENALTY" "${WIGGUM_SERVER_ID:-}"
+    else
+        scheduler_init "$RALPH_DIR" "$PROJECT_DIR" \
+            "$AGING_FACTOR" "$SIBLING_WIP_PENALTY" "$PLAN_BONUS" "$DEP_BONUS_PER_TASK" \
+            "$RESUME_INITIAL_BONUS" "$RESUME_FAIL_PENALTY"
+    fi
 
     log "Checking for dependency cycles..."
     scheduler_detect_cycles || true
@@ -615,4 +622,32 @@ svc_orch_terminal_cleanup() {
 # Remove orchestrator lock file on shutdown
 svc_orch_lock_cleanup() {
     _release_lock
+}
+
+# =============================================================================
+# Distributed Mode Service Handlers
+# =============================================================================
+
+# Update heartbeats for claimed tasks (distributed mode only)
+svc_orch_distributed_heartbeat() {
+    # Only run in distributed modes
+    [[ "${WIGGUM_TASK_SOURCE_MODE:-local}" == "local" ]] && return 0
+
+    scheduler_update_heartbeats
+}
+
+# Run orphan recovery scan (distributed mode only)
+svc_orch_distributed_orphan_recovery() {
+    # Only run in distributed modes
+    [[ "${WIGGUM_TASK_SOURCE_MODE:-local}" == "local" ]] && return 0
+
+    scheduler_run_orphan_recovery
+}
+
+# Clean shutdown of distributed components
+svc_orch_distributed_shutdown() {
+    # Only run in distributed modes
+    [[ "${WIGGUM_TASK_SOURCE_MODE:-local}" == "local" ]] && return 0
+
+    scheduler_shutdown_distributed
 }

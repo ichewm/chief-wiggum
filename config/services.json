@@ -506,6 +506,50 @@
         "function": "svc_orch_check_pr_optimizer"
       }
     },
+    {
+      "id": "distributed-heartbeat",
+      "description": "Update heartbeats for claimed tasks in distributed mode",
+      "phase": "periodic",
+      "order": 85,
+      "schedule": {
+        "type": "interval",
+        "interval": 180,
+        "run_on_startup": true
+      },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_distributed_heartbeat"
+      },
+      "condition": {
+        "env_not_equals": { "WIGGUM_TASK_SOURCE_MODE": "local" }
+      },
+      "concurrency": {
+        "max_instances": 1,
+        "if_running": "skip"
+      }
+    },
+    {
+      "id": "distributed-orphan-recovery",
+      "description": "Recover orphan tasks with stale heartbeats in distributed mode",
+      "phase": "periodic",
+      "order": 86,
+      "schedule": {
+        "type": "interval",
+        "interval": 300,
+        "run_on_startup": true
+      },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_distributed_orphan_recovery"
+      },
+      "condition": {
+        "env_not_equals": { "WIGGUM_TASK_SOURCE_MODE": "local" }
+      },
+      "concurrency": {
+        "max_instances": 1,
+        "if_running": "skip"
+      }
+    },
 
     {
       "id": "cleanup-event-ingest",
@@ -622,6 +666,20 @@
       }
     },
 
+    {
+      "id": "distributed-shutdown",
+      "description": "Release claimed tasks and stop heartbeats in distributed mode",
+      "phase": "shutdown",
+      "order": 5,
+      "schedule": { "type": "tick" },
+      "execution": {
+        "type": "function",
+        "function": "svc_orch_distributed_shutdown"
+      },
+      "condition": {
+        "env_not_equals": { "WIGGUM_TASK_SOURCE_MODE": "local" }
+      }
+    },
     {
       "id": "final-state-save",
       "description": "Final service state persistence on shutdown",

@@ -18,7 +18,8 @@ _ORCHESTRATOR_ARG_PARSER_LOADED=1
 #   MAX_WORKERS, MAX_ITERATIONS, MAX_TURNS, WIGGUM_RUN_MODE,
 #   WIGGUM_PLAN_MODE, WIGGUM_SMART_MODE, WIGGUM_PIPELINE,
 #   FIX_WORKER_LIMIT, FORCE_LOCK, WIGGUM_USE_PYTHON,
-#   WIGGUM_NO_RESUME, WIGGUM_NO_FIX, WIGGUM_NO_MERGE, WIGGUM_NO_SYNC
+#   WIGGUM_NO_RESUME, WIGGUM_NO_FIX, WIGGUM_NO_MERGE, WIGGUM_NO_SYNC,
+#   WIGGUM_TASK_SOURCE_MODE, WIGGUM_SERVER_ID
 #
 # Args:
 #   "$@" - Command line arguments (after verbose flags removed)
@@ -87,6 +88,30 @@ _parse_run_args() {
                     exit $EXIT_USAGE
                 fi
                 export WIGGUM_PIPELINE="$2"
+                shift 2
+                ;;
+            --mode)
+                if [[ -z "${2:-}" ]] || [[ "${2:-}" =~ ^- ]]; then
+                    echo "Error: --mode requires an argument (local, github, or hybrid)"
+                    exit $EXIT_USAGE
+                fi
+                case "$2" in
+                    local|github|hybrid)
+                        export WIGGUM_TASK_SOURCE_MODE="$2"
+                        ;;
+                    *)
+                        echo "Error: --mode must be one of: local, github, hybrid"
+                        exit $EXIT_USAGE
+                        ;;
+                esac
+                shift 2
+                ;;
+            --server-id)
+                if [[ -z "${2:-}" ]] || [[ "${2:-}" =~ ^- ]]; then
+                    echo "Error: --server-id requires a server identifier"
+                    exit $EXIT_USAGE
+                fi
+                export WIGGUM_SERVER_ID="$2"
                 shift 2
                 ;;
             --no-resume)

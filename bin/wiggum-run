@@ -34,6 +34,8 @@ source "$WIGGUM_HOME/lib/scheduler/conflict-registry.sh"
 source "$WIGGUM_HOME/lib/scheduler/pr-merge-optimizer.sh"
 source "$WIGGUM_HOME/lib/scheduler/orchestrator-functions.sh"
 source "$WIGGUM_HOME/lib/scheduler/smart-routing.sh"
+# Distributed scheduler integration (conditionally loaded based on WIGGUM_TASK_SOURCE_MODE)
+source "$WIGGUM_HOME/lib/distributed/scheduler-integration.sh"
 
 # Service-based scheduler (consolidated module includes core + state)
 source "$WIGGUM_HOME/lib/service/service-scheduler.sh"
@@ -74,6 +76,8 @@ WIGGUM_NO_FIX=false        # --no-fix: disable fix-workers, multi-pr-planner
 WIGGUM_NO_MERGE=false      # --no-merge: disable resolve-workers
 WIGGUM_NO_SYNC=false       # --no-sync: disable github-issue-sync, github-plan-sync, pr-sync
 WIGGUM_USE_PYTHON=false    # --python: use Python service scheduler
+WIGGUM_TASK_SOURCE_MODE="${WIGGUM_TASK_SOURCE_MODE:-local}"  # local | github | hybrid
+WIGGUM_SERVER_ID="${WIGGUM_SERVER_ID:-}"   # Custom server ID for distributed modes
 
 show_help() {
     cat << EOF
@@ -101,6 +105,12 @@ Options:
   --max-turns N        Maximum turns per Claude session (default: 50)
   --fix-agents N       Maximum concurrent fix/resolve workers (default: 2, or config)
   --pipeline NAME      Pipeline config to use (from config/pipelines/ or config/)
+  --mode MODE          Task source mode: local (default), github, or hybrid
+                       - local:  Use .ralph/kanban.md (single-user, current behavior)
+                       - github: Use GitHub Issues as source (distributed servers)
+                       - hybrid: GitHub primary, kanban.md as local cache
+  --server-id ID       Custom server identifier for distributed modes (optional)
+                       Default: auto-generated unique ID per machine
   --python             Use Python service scheduler (reduced fork overhead)
   --force              Override stale orchestrator lock
   -v, --verbose        Verbose output (same as default)
@@ -129,6 +139,9 @@ Examples:
   wiggum run --no-sync                    # Run without GitHub sync
   wiggum run --no-resume --no-fix         # No resume, no fix workers
   wiggum run --fix-only --no-merge        # Fix PRs but don't merge them
+  wiggum run --mode github                # Distributed mode with GitHub Issues
+  wiggum run --mode hybrid                # GitHub primary, local kanban cache
+  wiggum run --mode github --server-id s1 # Custom server ID for distributed
 
 Behavior:
   - Chief assigns pending tasks [ ] to workers based on dependency graph
@@ -283,6 +296,7 @@ main() {
     export MAX_WORKERS MAX_ITERATIONS MAX_TURNS AGENT_TYPE
     export WIGGUM_RUN_MODE
     export WIGGUM_NO_RESUME WIGGUM_NO_FIX WIGGUM_NO_MERGE WIGGUM_NO_SYNC
+    export WIGGUM_TASK_SOURCE_MODE WIGGUM_SERVER_ID
     export FIX_WORKER_LIMIT FIX_WORKER_TIMEOUT RESOLVE_WORKER_TIMEOUT
     export AGING_FACTOR SIBLING_WIP_PENALTY PLAN_BONUS DEP_BONUS_PER_TASK
     export RESUME_INITIAL_BONUS RESUME_FAIL_PENALTY RESUME_MIN_RETRY_INTERVAL
