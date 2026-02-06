@@ -289,6 +289,10 @@ attempt_pr_merge() {
             update_kanban_status "$ralph_dir/kanban.md" "$task_id" "x"
         fi
 
+        # Sync issue + PR labels before cleanup (worker dir must still exist for PR lookup)
+        source "$WIGGUM_HOME/lib/github/issue-sync.sh"
+        github_issue_sync_task_status "$ralph_dir" "$task_id" "x" || true
+
         # Clean up batch coordination state before removing workspace
         _cleanup_batch_state "$worker_dir" "$task_id" "$ralph_dir"
 
@@ -306,6 +310,10 @@ attempt_pr_merge() {
         if [ -f "$ralph_dir/kanban.md" ]; then
             update_kanban_status "$ralph_dir/kanban.md" "$task_id" "x"
         fi
+
+        # Sync issue + PR labels before cleanup (worker dir must still exist for PR lookup)
+        source "$WIGGUM_HOME/lib/github/issue-sync.sh"
+        github_issue_sync_task_status "$ralph_dir" "$task_id" "x" || true
 
         # Clean up batch coordination state before removing workspace
         _cleanup_batch_state "$worker_dir" "$task_id" "$ralph_dir"

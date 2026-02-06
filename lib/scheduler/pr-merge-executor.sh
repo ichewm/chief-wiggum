@@ -57,6 +57,10 @@ _attempt_merge() {
             log "      Kanban: [$task_id] → [x]"
         fi
 
+        # Sync issue + PR labels before cleanup (worker dir must still exist for PR lookup)
+        source "$WIGGUM_HOME/lib/github/issue-sync.sh"
+        github_issue_sync_task_status "$ralph_dir" "$task_id" "x" || true
+
         local worker_dir
         worker_dir=$(jq -r --arg t "$task_id" '.prs[$t].worker_dir' "$state_file")
 
