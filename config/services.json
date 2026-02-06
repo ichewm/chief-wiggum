@@ -364,6 +364,7 @@
       "description": "Run recovery pipeline for failed workers and trigger resume",
       "phase": "periodic",
       "order": 75,
+      "timeout": 1800,
       "schedule": {
         "type": "interval",
         "interval": 120,
