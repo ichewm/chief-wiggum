@@ -85,9 +85,11 @@ activity_init "$PROJECT_DIR"
 #   - service_state_init/restore  (would load state.json via jq on every call)
 #   - service_scheduler_init      (would load services.json + state via jq)
 #
-# We DO call scheduler_init (lib/scheduler/scheduler.sh) — it's cheap (just
-# variable assignments + pool_init + touch) and sets _SCHED_RALPH_DIR which
-# all scheduler module functions use instead of $RALPH_DIR.
+# We DO call scheduler_init (lib/scheduler/scheduler.sh) — it sets
+# _SCHED_RALPH_DIR which all scheduler module functions use instead of
+# $RALPH_DIR. In distributed modes (github/hybrid), we call
+# scheduler_init_with_task_source instead, which also initializes the task
+# source so that scheduler_tick_distributed, scheduler_claim_task, etc. work.
 #
 # _SERVICE_STATE_FILE stays empty (""), so bash service_state_save() returns
 # early at its [ -n "$_SERVICE_STATE_FILE" ] guard — no risk of overwriting
@@ -118,10 +120,17 @@ _ORCH_ITERATION="${_ORCH_ITERATION:-0}"
 _ORCH_TICK_EPOCH="${_ORCH_TICK_EPOCH:-$(date +%s)}"
 
 # Initialize the scheduler module (sets _SCHED_RALPH_DIR, pool state, etc.)
-# This is cheap — just variable assignments, no jq/subprocess calls.
-scheduler_init "$RALPH_DIR" "$PROJECT_DIR" \
-    "$AGING_FACTOR" "$SIBLING_WIP_PENALTY" "$PLAN_BONUS" "$DEP_BONUS_PER_TASK" \
-    "$RESUME_INITIAL_BONUS" "$RESUME_FAIL_PENALTY"
+# In distributed modes (github/hybrid), also initialize the task source so that
+# scheduler_tick_distributed, scheduler_claim_task, etc. work correctly.
+if [[ "${WIGGUM_TASK_SOURCE_MODE:-local}" != "local" ]]; then
+    scheduler_init_with_task_source "$RALPH_DIR" "$PROJECT_DIR" \
+        "$AGING_FACTOR" "$SIBLING_WIP_PENALTY" "$PLAN_BONUS" "$DEP_BONUS_PER_TASK" \
+        "$RESUME_INITIAL_BONUS" "$RESUME_FAIL_PENALTY" "${WIGGUM_SERVER_ID:-}"
+else
+    scheduler_init "$RALPH_DIR" "$PROJECT_DIR" \
+        "$AGING_FACTOR" "$SIBLING_WIP_PENALTY" "$PLAN_BONUS" "$DEP_BONUS_PER_TASK" \
+        "$RESUME_INITIAL_BONUS" "$RESUME_FAIL_PENALTY"
+fi
 
 # Verify scheduler_init actually set _SCHED_RALPH_DIR
 _assert_dir "_SCHED_RALPH_DIR" "${_SCHED_RALPH_DIR:-}" "kanban.md"
