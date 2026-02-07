@@ -110,8 +110,49 @@ _task_source_adapter_init() {
         return 1
     fi
 
+    # Ensure server label exists (dynamically created per server_id).
+    # Use file marker so this only runs once per orchestrator session,
+    # not on every bridge invocation (every 5s).
+    if [ -n "$server_id" ] && [ "$server_id" != "local" ]; then
+        local marker="$ralph_dir/orchestrator/.server-label-ok"
+        if [ ! -f "$marker" ] || [ "$(cat "$marker" 2>/dev/null)" != "$server_id" ]; then
+            _github_ensure_server_label "$server_id" \
+                && echo "$server_id" > "$marker" 2>/dev/null
+        fi
+    fi
+
     log_debug "GitHub adapter initialized: server_id=$server_id"
     return 0
+}
+
+# Ensure the server-specific label exists on the GitHub repo
+#
+# Server labels (wiggum:server:<id>) are dynamic — they can't be pre-created
+# by 'wiggum github init'. This creates the label on first use.
+#
+# Args:
+#   server_id - Server identifier
+_github_ensure_server_label() {
+    local server_id="$1"
+    local label_name="${_GH_SERVER_LABEL_PREFIX}${server_id}"
+
+    # Check if label already exists (fast path via gh label list)
+    if gh label list --search "$label_name" --json name --jq '.[].name' 2>/dev/null \
+        | grep -qxF "$label_name"; then
+        return 0
+    fi
+
+    # Create label
+    log "Creating server label: $label_name"
+    local exit_code=0
+    gh label create "$label_name" \
+        --color "c5def5" \
+        --description "Wiggum server: $server_id" \
+        2>/dev/null || exit_code=$?
+
+    if [ "$exit_code" -ne 0 ]; then
+        log_warn "Failed to create server label '$label_name' (exit: $exit_code) — task claiming may fail"
+    fi
 }
 
 # =============================================================================
