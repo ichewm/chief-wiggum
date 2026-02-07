@@ -32,12 +32,12 @@ test_server_identity_generate_format() {
     local server_id
     server_id=$(server_identity_generate)
 
-    # Format: wiggum-{hostname}-{timestamp}-{random}
-    if [[ "$server_id" =~ ^wiggum-.*-[0-9]+-[a-f0-9]+$ ]]; then
+    # Format: {hostname}-{random}
+    if [[ "$server_id" =~ ^[a-z0-9].*-[a-f0-9]+$ ]]; then
         echo -e "  ${GREEN}✓${NC} Server ID has correct format: $server_id"
     else
         echo -e "  ${RED}✗${NC} Server ID has wrong format: $server_id"
-        echo "    Expected pattern: wiggum-{hostname}-{timestamp}-{random}"
+        echo "    Expected pattern: {hostname}-{random}"
         FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
     fi
     ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
@@ -56,8 +56,8 @@ test_server_identity_generate_contains_hostname() {
     local server_id hostname_part
     server_id=$(server_identity_generate)
 
-    # Extract hostname (between first and second dash after 'wiggum-')
-    hostname_part=$(echo "$server_id" | sed 's/^wiggum-//' | cut -d'-' -f1)
+    # Extract hostname (everything before the last dash-separated hex segment)
+    hostname_part=$(echo "$server_id" | sed 's/-[a-f0-9]*$//' )
 
     if [ -n "$hostname_part" ]; then
         echo -e "  ${GREEN}✓${NC} Server ID contains hostname part: $hostname_part"

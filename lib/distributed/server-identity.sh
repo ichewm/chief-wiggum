@@ -5,7 +5,7 @@
 # Generates and manages unique server identifiers for distributed task claiming.
 # Each server instance gets a unique ID for coordination with other servers.
 #
-# Identity format: wiggum-{hostname}-{timestamp}-{random}
+# Identity format: {hostname}-{random}
 #
 # Storage: .ralph/server/identity.json
 # =============================================================================
@@ -47,8 +47,11 @@ _SERVER_DEFAULT_MAX_CONCURRENT=4
 
 # Generate a unique server ID
 #
-# Format: wiggum-{hostname}-{timestamp}-{random}
-# Example: wiggum-myserver-1707235200-a1b2c3d4
+# Format: {hostname}-{random}
+# Example: myserver-a1b2c3d4
+#
+# Keep short — GitHub labels have a 50-char limit and the label prefix
+# "wiggum:server:" is 14 chars, leaving 36 for the server ID.
 #
 # Returns: server_id on stdout
 server_identity_generate() {
@@ -57,13 +60,10 @@ server_identity_generate() {
     # Sanitize hostname: lowercase, replace non-alphanumeric with dash
     hostname=$(echo "$hostname" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')
 
-    local timestamp
-    timestamp=$(epoch_now)
-
     local random
     random=$(head -c 4 /dev/urandom 2>/dev/null | od -An -tx1 | tr -d ' \n' || echo "$(date +%N)$$")
 
-    echo "wiggum-${hostname}-${timestamp}-${random}"
+    echo "${hostname}-${random}"
 }
 
 # =============================================================================

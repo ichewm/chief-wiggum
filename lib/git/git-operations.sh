@@ -294,6 +294,96 @@ git_worktree_check_mergeable() {
 }
 
 # =============================================================================
+# ADVANCE WORKTREE TO LATEST MAIN
+# =============================================================================
+
+# Advance a workspace branch to the latest origin/main
+#
+# Three-tier merge strategy (cheapest to most expensive):
+#   1. Fast-forward (no merge commit)
+#   2. Rebase (linear history, safe on single-owner task branches)
+#   3. Merge --no-edit (single conflict resolution point)
+#
+# On conflict: aborts the merge and returns 1 (workspace left unchanged).
+# Skip via WIGGUM_SKIP_MAIN_ADVANCE=true.
+#
+# Args:
+#   workspace - Directory containing the git worktree
+#
+# Returns: 0 on success (or already up to date), 1 on conflict or fetch failure
+git_advance_to_main() {
+    local workspace="$1"
+
+    # Skip if explicitly disabled
+    if [ "${WIGGUM_SKIP_MAIN_ADVANCE:-false}" = "true" ]; then
+        log_debug "git_advance_to_main: skipped (WIGGUM_SKIP_MAIN_ADVANCE=true)"
+        return 0
+    fi
+
+    if [ ! -d "$workspace" ]; then
+        log_error "git_advance_to_main: workspace not found: $workspace"
+        return 1
+    fi
+
+    # Fetch latest main
+    if ! git -C "$workspace" fetch origin main 2>/dev/null; then
+        log_warn "git_advance_to_main: fetch failed"
+        return 1
+    fi
+
+    # Check if already up to date
+    if git -C "$workspace" merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
+        log_debug "git_advance_to_main: already up to date"
+        return 0
+    fi
+
+    # Abort stale merge/rebase state from previous incomplete operations
+    if git -C "$workspace" rev-parse --verify MERGE_HEAD &>/dev/null; then
+        log_warn "git_advance_to_main: aborting stale merge"
+        git -C "$workspace" merge --abort 2>/dev/null || true
+    fi
+    local gitdir
+    gitdir=$(git -C "$workspace" rev-parse --git-dir 2>/dev/null)
+    if [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ]; then
+        log_warn "git_advance_to_main: aborting stale rebase"
+        git -C "$workspace" rebase --abort 2>/dev/null || true
+    fi
+
+    # Set git identity for merge/rebase commits
+    git_set_identity
+
+    # Step 1: Try fast-forward (cheapest)
+    local ff_exit=0
+    git -C "$workspace" merge --ff-only origin/main >/dev/null 2>&1 || ff_exit=$?
+    if [ $ff_exit -eq 0 ]; then
+        log_debug "git_advance_to_main: fast-forwarded to origin/main"
+        return 0
+    fi
+
+    # Step 2: Try rebase (linear history, safe on single-owner branches)
+    local rebase_exit=0
+    git -C "$workspace" rebase origin/main >/dev/null 2>&1 || rebase_exit=$?
+    if [ $rebase_exit -eq 0 ]; then
+        log_debug "git_advance_to_main: rebased onto origin/main"
+        return 0
+    fi
+    # Abort failed rebase before falling back to merge
+    git -C "$workspace" rebase --abort 2>/dev/null || true
+
+    # Step 3: Try merge (single conflict resolution point)
+    local merge_exit=0
+    git -C "$workspace" merge origin/main --no-edit >/dev/null 2>&1 || merge_exit=$?
+    if [ $merge_exit -eq 0 ]; then
+        log_debug "git_advance_to_main: merged origin/main"
+        return 0
+    fi
+
+    # Merge failed — abort to leave workspace unchanged
+    git -C "$workspace" merge --abort 2>/dev/null || true
+    return 1
+}
+
+# =============================================================================
 # GIT IDENTITY HELPER
 # =============================================================================
 

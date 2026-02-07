@@ -507,6 +507,150 @@ test_worktree_diff3_conflictstyle() {
 }
 
 # =============================================================================
+# git_advance_to_main() Tests
+# =============================================================================
+
+# Helper: create a bare "origin" repo and a workspace clone for advance tests
+_setup_advance_repos() {
+    ORIGIN_DIR="$TEST_DIR/origin.git"
+    ADV_WORKSPACE="$TEST_DIR/adv-workspace"
+
+    # Create a bare repo as mock origin
+    git init -q --bare "$ORIGIN_DIR"
+
+    # Create a working clone, push initial commit
+    local tmp_clone="$TEST_DIR/tmp-clone"
+    git clone -q "$ORIGIN_DIR" "$tmp_clone"
+    cd "$tmp_clone" || return 1
+    git config user.email "test@test.com"
+    git config user.name "Test User"
+    echo "initial" > README.md
+    git add README.md
+    git commit -q -m "Initial commit"
+    git push -q origin main 2>/dev/null || git push -q origin HEAD:main 2>/dev/null
+    cd "$TESTS_DIR" || return 1
+
+    # Create workspace clone on a task branch
+    git clone -q "$ORIGIN_DIR" "$ADV_WORKSPACE"
+    cd "$ADV_WORKSPACE" || return 1
+    git config user.email "test@test.com"
+    git config user.name "Test User"
+    git checkout -b task/ADV-001-12345 2>/dev/null
+    cd "$TESTS_DIR" || return 1
+}
+
+test_advance_to_main_already_up_to_date() {
+    _setup_advance_repos
+
+    local result=0
+    git_advance_to_main "$ADV_WORKSPACE" 2>/dev/null || result=$?
+
+    assert_equals "0" "$result" "Should return 0 when already up to date"
+}
+
+test_advance_to_main_fast_forward() {
+    _setup_advance_repos
+
+    # Push a new commit to origin/main via a temp clone
+    local tmp2="$TEST_DIR/tmp2"
+    git clone -q "$ORIGIN_DIR" "$tmp2"
+    cd "$tmp2" || return 1
+    git config user.email "test@test.com"
+    git config user.name "Test User"
+    echo "new main content" > new_file.txt
+    git add new_file.txt
+    git commit -q -m "Advance main"
+    git push -q origin main
+    cd "$TESTS_DIR" || return 1
+
+    local result=0
+    git_advance_to_main "$ADV_WORKSPACE" 2>/dev/null || result=$?
+
+    assert_equals "0" "$result" "Should fast-forward successfully"
+
+    # Verify the new file is present
+    assert_file_exists "$ADV_WORKSPACE/new_file.txt" "New file from main should exist"
+}
+
+test_advance_to_main_conflict_leaves_clean() {
+    _setup_advance_repos
+
+    # Create a conflicting change on the task branch
+    cd "$ADV_WORKSPACE" || return 1
+    echo "task branch content" > README.md
+    git add README.md
+    git commit -q -m "Task branch change"
+    cd "$TESTS_DIR" || return 1
+
+    # Push a conflicting change to origin/main
+    local tmp3="$TEST_DIR/tmp3"
+    git clone -q "$ORIGIN_DIR" "$tmp3"
+    cd "$tmp3" || return 1
+    git config user.email "test@test.com"
+    git config user.name "Test User"
+    echo "conflicting main content" > README.md
+    git add README.md
+    git commit -q -m "Conflicting main change"
+    git push -q origin main
+    cd "$TESTS_DIR" || return 1
+
+    local result=0
+    git_advance_to_main "$ADV_WORKSPACE" 2>/dev/null || result=$?
+
+    assert_equals "1" "$result" "Should return 1 on conflict"
+
+    # Workspace should be clean — no MERGE_HEAD, no conflict markers
+    cd "$ADV_WORKSPACE" || return 1
+
+    local gitdir
+    gitdir=$(git rev-parse --git-dir 2>/dev/null)
+    if [ -f "$gitdir/MERGE_HEAD" ]; then
+        echo -e "  ${RED}X${NC} MERGE_HEAD should not exist after abort"
+        FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
+    else
+        echo -e "  ${GREEN}✓${NC} No MERGE_HEAD after conflict"
+    fi
+    ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
+
+    # Check no conflict markers in tracked files
+    local markers
+    markers=$(git grep -l '^<\{7\} \|^=\{7\}$\|^>\{7\} ' 2>/dev/null || true)
+    if [ -z "$markers" ]; then
+        echo -e "  ${GREEN}✓${NC} No conflict markers in workspace"
+    else
+        echo -e "  ${RED}X${NC} Found conflict markers in: $markers"
+        FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
+    fi
+    ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
+
+    cd "$TESTS_DIR" || return 1
+}
+
+test_advance_to_main_skip_env() {
+    _setup_advance_repos
+
+    # Push a new commit to origin/main
+    local tmp4="$TEST_DIR/tmp4"
+    git clone -q "$ORIGIN_DIR" "$tmp4"
+    cd "$tmp4" || return 1
+    git config user.email "test@test.com"
+    git config user.name "Test User"
+    echo "should not appear" > skipped.txt
+    git add skipped.txt
+    git commit -q -m "Advance that should be skipped"
+    git push -q origin main
+    cd "$TESTS_DIR" || return 1
+
+    export WIGGUM_SKIP_MAIN_ADVANCE=true
+    local result=0
+    git_advance_to_main "$ADV_WORKSPACE" 2>/dev/null || result=$?
+    unset WIGGUM_SKIP_MAIN_ADVANCE
+
+    assert_equals "0" "$result" "Should return 0 when skipped"
+    assert_file_not_exists "$ADV_WORKSPACE/skipped.txt" "Skipped file should not appear"
+}
+
+# =============================================================================
 # Run All Tests
 # =============================================================================
 
@@ -540,6 +684,12 @@ run_test test_cherry_pick_recovery_missing_branch
 # worktree config tests
 run_test test_worktree_rerere_enabled
 run_test test_worktree_diff3_conflictstyle
+
+# git_advance_to_main tests
+run_test test_advance_to_main_already_up_to_date
+run_test test_advance_to_main_fast_forward
+run_test test_advance_to_main_conflict_leaves_clean
+run_test test_advance_to_main_skip_env
 
 print_test_summary
 exit_with_test_result
