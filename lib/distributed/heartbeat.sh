@@ -158,12 +158,12 @@ $progress_table"
         gh api \
             --method PATCH \
             "/repos/{owner}/{repo}/issues/comments/$comment_id" \
-            -f body="$heartbeat_body" 2>/dev/null || {
+            -f body="$heartbeat_body" >/dev/null 2>&1 || {
             log_warn "Failed to update heartbeat comment for #$issue_number"
             return 1
         }
     else
-        gh issue comment "$issue_number" --body "$heartbeat_body" 2>/dev/null || {
+        gh issue comment "$issue_number" --body "$heartbeat_body" >/dev/null 2>&1 || {
             log_warn "Failed to create heartbeat comment for #$issue_number"
             return 1
         }
@@ -275,6 +275,12 @@ heartbeat_update_all() {
 
     log_debug "heartbeat_update_all: pid=$$ server_id='$server_id' caller=${FUNCNAME[1]:-?}"
 
+    # Ensure issue cache is populated (Python bridge spawns fresh processes
+    # per phase, so cache from scheduler_tick is not shared)
+    if declare -F _github_refresh_cache &>/dev/null; then
+        _github_refresh_cache 2>/dev/null || true
+    fi
+
     # Get all tasks we own
     local owned_issues
     owned_issues=$(claim_list_owned "$server_id")
@@ -285,8 +291,12 @@ heartbeat_update_all() {
     while IFS= read -r issue_number; do
         [ -n "$issue_number" ] || continue
 
-        # Derive task_id from issue
-        local task_id="GH-$issue_number"
+        # Resolve real task_id from issue cache (populated by scheduler tick)
+        local task_id=""
+        if [ -n "${_GH_ISSUE_CACHE[$issue_number]+x}" ]; then
+            task_id=$(_github_parse_task_id "${_GH_ISSUE_CACHE[$issue_number]}") || true
+        fi
+        task_id="${task_id:-GH-$issue_number}"
 
         # Check for step-completed event to force immediate update
         local worker_dir=""
@@ -461,7 +471,7 @@ heartbeat_shutdown() {
 
 Tasks will be released. Other servers may claim after stale threshold."
 
-        gh issue comment "$issue_number" --body "$shutdown_body" 2>/dev/null || true
+        gh issue comment "$issue_number" --body "$shutdown_body" >/dev/null 2>&1 || true
     done <<< "$owned_issues"
 
     log "Heartbeat shutdown complete"
