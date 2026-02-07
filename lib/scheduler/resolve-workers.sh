@@ -158,8 +158,17 @@ spawn_resolve_workers() {
                 local worker_id task_id
                 worker_id=$(basename "$worker_dir")
                 task_id=$(get_task_id_from_worker "$worker_id")
-                log "Resetting stuck resolver for $task_id (was in 'resolving' but no agent running)"
-                git_state_set "$worker_dir" "needs_resolve" "priority-workers.spawn_resolve_workers" "Reset stuck resolver (no agent process found)"
+
+                # Increment merge_attempts so the MAX_MERGE_ATTEMPTS escape hatch
+                # can trigger — without this, a resolver that crashes on every spawn
+                # loops forever: resolving → stuck reset → needs_resolve → respawn
+                git_state_inc_merge_attempts "$worker_dir" 2>/dev/null || true
+                local attempts
+                attempts=$(git_state_get_merge_attempts "$worker_dir" 2>/dev/null || echo "0")
+                attempts="${attempts:-0}"
+
+                log "Resetting stuck resolver for $task_id (was in 'resolving' but no agent running, attempt $attempts/${MAX_MERGE_ATTEMPTS:-3})"
+                git_state_set "$worker_dir" "needs_resolve" "priority-workers.spawn_resolve_workers" "Reset stuck resolver (no agent process found, attempt $attempts)"
             fi
         fi
     done
