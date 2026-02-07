@@ -1016,6 +1016,9 @@ orch_failure_recovery() {
         [ -n "$worker_dir" ] || continue
         [ -d "$worker_dir/workspace" ] || continue
 
+        # Skip terminal workers (already exhausted retry attempts)
+        resume_state_is_terminal "$worker_dir" && continue
+
         # Skip running workers
         is_worker_running "$worker_dir" && continue
 
@@ -1111,8 +1114,11 @@ _launch_recovery_worker() {
         run_agent "system.task-worker" "$worker_dir" "$_RECOVERY_PROJECT_DIR" 30 3 50 \
             "failure-summarize" "" || _exit_code=$?
 
-        # Remove in-progress marker
+        # Remove in-progress marker and stale agent.pid (the PID belongs to
+        # this setsid subprocess which is still alive, so wiggum-worker resume
+        # would see it as "already running" and refuse to launch)
         rm -f "$worker_dir/recovery-in-progress"
+        rm -f "$worker_dir/agent.pid"
 
         # Check recovery result
         recovery_result="FAIL"
