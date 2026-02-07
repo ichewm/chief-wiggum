@@ -120,17 +120,17 @@ _ORCH_ITERATION="${_ORCH_ITERATION:-0}"
 _ORCH_TICK_EPOCH="${_ORCH_TICK_EPOCH:-$(date +%s)}"
 
 # Initialize the scheduler module (sets _SCHED_RALPH_DIR, pool state, etc.)
-# In distributed modes (github/hybrid), also initialize the task source so that
-# scheduler_tick_distributed, scheduler_claim_task, etc. work correctly.
+# In distributed modes (github/hybrid), also initialize the task source adapter
+# so that scheduler_tick_distributed, scheduler_claim_task, etc. work correctly.
+# We call task_source_init directly (lightweight) instead of the full
+# scheduler_init_with_task_source which also runs heartbeat_init — heartbeats
+# are managed by the dedicated svc_orch_distributed_heartbeat service.
 if [[ "${WIGGUM_TASK_SOURCE_MODE:-local}" != "local" ]]; then
-    scheduler_init_with_task_source "$RALPH_DIR" "$PROJECT_DIR" \
-        "$AGING_FACTOR" "$SIBLING_WIP_PENALTY" "$PLAN_BONUS" "$DEP_BONUS_PER_TASK" \
-        "$RESUME_INITIAL_BONUS" "$RESUME_FAIL_PENALTY" "${WIGGUM_SERVER_ID:-}"
-else
-    scheduler_init "$RALPH_DIR" "$PROJECT_DIR" \
-        "$AGING_FACTOR" "$SIBLING_WIP_PENALTY" "$PLAN_BONUS" "$DEP_BONUS_PER_TASK" \
-        "$RESUME_INITIAL_BONUS" "$RESUME_FAIL_PENALTY"
+    task_source_init "$RALPH_DIR" "$PROJECT_DIR" "${WIGGUM_SERVER_ID:-}"
 fi
+scheduler_init "$RALPH_DIR" "$PROJECT_DIR" \
+    "$AGING_FACTOR" "$SIBLING_WIP_PENALTY" "$PLAN_BONUS" "$DEP_BONUS_PER_TASK" \
+    "$RESUME_INITIAL_BONUS" "$RESUME_FAIL_PENALTY"
 
 # Verify scheduler_init actually set _SCHED_RALPH_DIR
 _assert_dir "_SCHED_RALPH_DIR" "${_SCHED_RALPH_DIR:-}" "kanban.md"
