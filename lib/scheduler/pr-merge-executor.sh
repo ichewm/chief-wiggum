@@ -12,6 +12,7 @@ set -euo pipefail
 [ -n "${_PR_MERGE_EXECUTOR_LOADED:-}" ] && return 0
 _PR_MERGE_EXECUTOR_LOADED=1
 source "$WIGGUM_HOME/lib/core/safe-path.sh"
+source "$WIGGUM_HOME/lib/core/lifecycle-engine.sh"
 
 # =============================================================================
 # PHASE 4: EXECUTE - Merge PRs in order with re-evaluation
@@ -49,47 +50,24 @@ _attempt_merge() {
     if [ "$pr_state" = "MERGED" ]; then
         log "    ✓ Merged PR #$pr_number"
 
-        # Update kanban status to complete
-        local kanban_file
-        kanban_file=$(dirname "$state_file")/kanban.md
-        if [ -f "$kanban_file" ]; then
-            update_kanban_status "$kanban_file" "$task_id" "x" 2>/dev/null || true
-            log "      Kanban: [$task_id] → [x]"
-        fi
-
-        # Sync issue + PR labels before cleanup (worker dir must still exist for PR lookup)
-        source "$WIGGUM_HOME/lib/github/issue-sync.sh"
-        github_issue_sync_task_status "$ralph_dir" "$task_id" "x" || true
-
-        # Update PR labels: remove pending-approval, add completed
-        local completed_label pending_label
-        completed_label=$(github_sync_get_status_label "x")
-        pending_label=$(github_sync_get_status_label "P")
-        github_pr_set_status_label "$pr_number" "$completed_label" "$pending_label" || true
-
-        # Release distributed claim (no-op in local mode)
-        scheduler_release_task "$task_id" 2>/dev/null || true
-
         local worker_dir
         worker_dir=$(jq -r --arg t "$task_id" '.prs[$t].worker_dir' "$state_file")
 
-        # Clean up batch coordination before workspace deletion
-        if [ -n "$worker_dir" ] && [ -d "$worker_dir" ]; then
-            if batch_coord_has_worker_context "$worker_dir"; then
-                local batch_id
-                batch_id=$(batch_coord_read_worker_context "$worker_dir" "batch_id")
-                if [ -n "$batch_id" ]; then
-                    local project_dir
-                    project_dir=$(dirname "$ralph_dir")
-                    batch_coord_mark_complete "$batch_id" "$task_id" "$project_dir"
-                    log "      Batch: advanced $batch_id past $task_id"
-                fi
-            fi
+        # Update PR labels (not covered by lifecycle sync_github effect)
+        source "$WIGGUM_HOME/lib/github/issue-sync.sh"
+        [ -n "${GITHUB_SYNC_STATUS_LABELS:-}" ] || load_github_sync_config 2>/dev/null || true
+        local completed_label pending_label
+        completed_label=$(github_sync_get_status_label "x" 2>/dev/null) || true
+        pending_label=$(github_sync_get_status_label "P" 2>/dev/null) || true
+        if [ -n "$completed_label" ]; then
+            github_pr_set_status_label "$pr_number" "$completed_label" "$pending_label" || true
         fi
 
-        # Delete workspace now that PR is merged
+        # Transition via lifecycle — handles kanban, issue sync, batch cleanup,
+        # worktree archive, and claim release
         if [ -n "$worker_dir" ] && [ -d "$worker_dir" ]; then
-            _cleanup_merged_worktree "$worker_dir"
+            lifecycle_is_loaded || lifecycle_load
+            emit_event "$worker_dir" "merge.pr_merged" "pr-merge-executor._attempt_merge" || true
         fi
 
         return 0

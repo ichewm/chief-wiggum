@@ -169,10 +169,11 @@ scheduler_restore_workers() {
             _scheduler_reclaim_restored_workers
         fi
 
-        # Route dead multi-pr-resolve workers back into conflict/merge pipeline
-        _scheduler_route_dead_resolve_workers
+        # Reset dead workers stuck in running/transient states via lifecycle events
+        _scheduler_reset_dead_workers
 
         # Migrate legacy .needs-fix markers to git-state.json
+        # (must be inside the workers-dir check since it iterates worker-*)
         for worker_dir in "$_SCHED_RALPH_DIR/workers"/worker-*; do
             [ -d "$worker_dir" ] || continue
             if [ -f "$worker_dir/.needs-fix" ] && [ ! -f "$worker_dir/git-state.json" ]; then
@@ -236,13 +237,23 @@ _scheduler_reclaim_restored_workers() {
 # Uses the resolve.startup_reset lifecycle event (resets merge attempts
 # instead of incrementing — server restart is not a resolution failure).
 # Scans worker directories directly (no issue cache or API needed).
-_scheduler_route_dead_resolve_workers() {
+# Reset dead workers stuck in running/transient states
+#
+# At startup, workers whose agent processes died remain in "running" states
+# (fixing, merging, resolving) or transient states (merge_conflict). These
+# are reset via lifecycle events:
+#   - resolving → needs_resolve (resolve.startup_reset, resets merge attempts)
+#   - fixing    → needs_fix     (startup.reset)
+#   - merging   → needs_merge   (startup.reset, resets merge attempts)
+# Terminal (merged, failed) and waiting (needs_*) states are already handled
+# by their respective services.
+_scheduler_reset_dead_workers() {
     [ -d "$_SCHED_RALPH_DIR/workers" ] || return 0
 
     # Ensure lifecycle spec is loaded for emit_event
     lifecycle_is_loaded || lifecycle_load
 
-    local routed=0
+    local reset_count=0
     local scanned=0
     for worker_dir in "$_SCHED_RALPH_DIR/workers"/worker-*; do
         [ -d "$worker_dir" ] || continue
@@ -253,48 +264,44 @@ _scheduler_route_dead_resolve_workers() {
 
         # Skip running workers
         if is_worker_running "$worker_dir"; then
-            log_debug "route_dead_resolve: $worker_name is still running - skip"
+            log_debug "reset_dead: $worker_name is still running - skip"
             continue
         fi
 
-        # Get git state
         local current_git_state
         current_git_state=$(git_state_get "$worker_dir" 2>/dev/null || echo "none")
 
-        # Skip terminal git states and workers already queued for resolve
+        # Determine which event to emit based on current state
+        local event=""
         case "$current_git_state" in
-            merged|failed|needs_resolve|needs_multi_resolve)
-                log_debug "route_dead_resolve: $worker_name state=$current_git_state - skip (already handled)"
-                continue
-                ;;
+            # Running states that need reset
+            resolving)
+                event="resolve.startup_reset" ;;
+            fixing|merging)
+                event="startup.reset" ;;
+            # Terminal/waiting states — already handled by services
+            merged|failed|needs_fix|needs_merge|needs_resolve|needs_multi_resolve|none)
+                log_debug "reset_dead: $worker_name state=$current_git_state - skip (handled by services)"
+                continue ;;
+            # Transient states (merge_conflict, fix_completed, resolved) — may need attention
+            *)
+                log_debug "reset_dead: $worker_name state=$current_git_state - skip (transient/unknown)"
+                continue ;;
         esac
-
-        # Only route workers that were in the multi-pr-resolve pipeline
-        if [ ! -f "$worker_dir/pipeline-config.json" ]; then
-            log_debug "route_dead_resolve: $worker_name state=$current_git_state - no pipeline-config.json"
-            continue
-        fi
-        local pipeline_name
-        pipeline_name=$(jq -r '.pipeline.name // ""' "$worker_dir/pipeline-config.json" 2>/dev/null) || continue
-
-        if [ "$pipeline_name" != "multi-pr-resolve" ]; then
-            log_debug "route_dead_resolve: $worker_name state=$current_git_state pipeline=$pipeline_name - not resolve pipeline"
-            continue
-        fi
 
         local task_id
         task_id=$(get_task_id_from_worker "$worker_name")
-        if emit_event "$worker_dir" "resolve.startup_reset" "scheduler.restore"; then
-            log "Routed dead resolve worker $task_id to conflict/merge pipeline (was $current_git_state)"
-            ((++routed)) || true
+        if emit_event "$worker_dir" "$event" "scheduler.restore"; then
+            log "Reset dead worker $task_id via $event (was $current_git_state)"
+            ((++reset_count)) || true
         else
-            log_warn "Failed to route resolve worker $task_id (state: $current_git_state) - no transition for resolve.startup_reset from $current_git_state"
+            log_warn "Failed to reset dead worker $task_id (state: $current_git_state, event: $event)"
         fi
     done
 
-    log_debug "route_dead_resolve: scanned=$scanned routed=$routed"
-    if [ "$routed" -gt 0 ]; then
-        log "Routed $routed dead resolve worker(s) to conflict/merge pipeline"
+    log_debug "reset_dead: scanned=$scanned reset=$reset_count"
+    if [ "$reset_count" -gt 0 ]; then
+        log "Reset $reset_count dead worker(s) at startup"
     fi
 }
 

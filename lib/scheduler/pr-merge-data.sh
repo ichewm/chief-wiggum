@@ -13,6 +13,7 @@ set -euo pipefail
 _PR_MERGE_DATA_LOADED=1
 source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/safe-path.sh"
+source "$WIGGUM_HOME/lib/core/lifecycle-engine.sh"
 
 # =============================================================================
 # Background Optimizer Status Tracking
@@ -533,30 +534,22 @@ pr_merge_gather_all() {
         local pr_state
         pr_state=$(timeout "${WIGGUM_GH_TIMEOUT:-30}" gh pr view "$pr_number" --json state -q '.state' 2>/dev/null || echo "UNKNOWN")
         if [ "$pr_state" = "MERGED" ]; then
-            log "  $task_id (PR #$pr_number): Already merged - cleaning up"
-            # Update kanban to complete
-            update_kanban_status "$ralph_dir/kanban.md" "$task_id" "x" 2>/dev/null || true
-            # Update PR labels: remove pending-approval, add completed
+            log "  $task_id (PR #$pr_number): Already merged - transitioning via lifecycle"
+            # Update PR labels (not covered by lifecycle sync_github effect)
             source "$WIGGUM_HOME/lib/github/issue-sync.sh"
-            [ -n "${GITHUB_SYNC_STATUS_LABELS:-}" ] || load_github_sync_config
+            [ -n "${GITHUB_SYNC_STATUS_LABELS:-}" ] || load_github_sync_config 2>/dev/null || true
             local completed_label pending_label
-            completed_label=$(github_sync_get_status_label "x")
-            pending_label=$(github_sync_get_status_label "P")
-            github_pr_set_status_label "$pr_number" "$completed_label" "$pending_label" || true
-            # Release distributed claim (no-op in local mode)
-            scheduler_release_task "$task_id" 2>/dev/null || true
-            # Clean up batch coordination before workspace deletion
-            if batch_coord_has_worker_context "$worker_dir"; then
-                local batch_id
-                batch_id=$(batch_coord_read_worker_context "$worker_dir" "batch_id")
-                if [ -n "$batch_id" ]; then
-                    local project_dir
-                    project_dir=$(dirname "$ralph_dir")
-                    batch_coord_mark_complete "$batch_id" "$task_id" "$project_dir"
-                fi
+            completed_label=$(github_sync_get_status_label "x" 2>/dev/null) || true
+            pending_label=$(github_sync_get_status_label "P" 2>/dev/null) || true
+            if [ -n "$completed_label" ]; then
+                github_pr_set_status_label "$pr_number" "$completed_label" "$pending_label" || true
             fi
-            # Delete workspace
-            _cleanup_merged_worktree "$worker_dir"
+            # Transition via lifecycle — handles kanban, issue sync, batch cleanup,
+            # worktree archive, and claim release
+            if [ -d "$worker_dir" ]; then
+                lifecycle_is_loaded || lifecycle_load
+                emit_event "$worker_dir" "merge.pr_merged" "pr-merge-data.gather" || true
+            fi
             continue
         fi
 

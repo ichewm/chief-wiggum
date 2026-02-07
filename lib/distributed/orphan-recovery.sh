@@ -181,6 +181,11 @@ orphan_run_scan() {
 
     log_debug "Running orphan recovery scan (threshold: ${threshold}s)"
 
+    # Populate issue cache for task_id resolution (needed to check for workers)
+    if declare -F _github_refresh_cache &>/dev/null; then
+        _github_refresh_cache 2>/dev/null || true
+    fi
+
     # Find stale claims
     local stale_claims
     stale_claims=$(orphan_detect_stale_claims "$threshold")
@@ -195,10 +200,29 @@ orphan_run_scan() {
     while IFS='|' read -r issue_number owner age; do
         [ -n "$issue_number" ] || continue
 
-        # Skip our own tasks (they'll get heartbeat soon)
+        # Skip our own tasks only if we have a worker for them
+        # (workerless claims get no heartbeat and would stay stale forever)
         if [ "$owner" = "$server_id" ]; then
-            log_debug "Skipping our own stale task #$issue_number (will heartbeat)"
-            continue
+            local has_worker=false
+            local task_id=""
+            if [ -n "${_GH_ISSUE_CACHE[$issue_number]+x}" ] && declare -F _github_parse_task_id &>/dev/null; then
+                task_id=$(_github_parse_task_id "${_GH_ISSUE_CACHE[$issue_number]}") || true
+            fi
+            if [ -n "$task_id" ] && [ -d "$ralph_dir/workers" ]; then
+                local worker_dir
+                worker_dir=$(find "$ralph_dir/workers" -maxdepth 1 -type d \
+                    -name "worker-${task_id}-*" 2>/dev/null | head -1)
+                [ -n "$worker_dir" ] && has_worker=true
+            fi
+            if [ "$has_worker" = true ]; then
+                log_debug "Skipping our own stale task #$issue_number ($task_id) - has worker"
+                continue
+            fi
+            if [ -z "$task_id" ]; then
+                log_debug "Skipping our own stale task #$issue_number - cannot resolve task_id"
+                continue
+            fi
+            log "Self-recovering workerless claim on issue #$issue_number ($task_id)"
         fi
 
         log "Found orphan task #$issue_number (owner: $owner, stale: ${age}s)"

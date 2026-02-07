@@ -92,6 +92,11 @@
     { "event": "user.resume",           "from": "failed",     "to": "needs_merge",  "kanban": "=" },
     { "event": "permanent_failure",     "from": "failed",     "to": "failed",       "kanban": "*", "effects": ["sync_github"] },
 
+    { "event": "startup.reset",          "from": "fixing",     "to": "needs_fix" },
+    { "event": "startup.reset",          "from": "merging",    "to": "needs_merge",  "effects": ["reset_merge"] },
+
+    { "event": "merge.pr_merged",        "from": "*",          "to": "merged",       "kanban": "x", "effects": ["sync_github", "cleanup_batch", "cleanup_worktree", "release_claim"] },
+
     { "event": "resume.abort",          "from": "*",          "to": "failed",       "kanban": "*", "effects": ["sync_github"] },
     { "event": "resume.retry",          "from": "*",          "to": null,           "kanban": "=" },
     { "event": "task.reclaim",          "from": "*",          "to": null,           "kanban": " " }
