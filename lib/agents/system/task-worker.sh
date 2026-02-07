@@ -140,7 +140,7 @@ _commit_subagent_changes() {
         return 1
     fi
 
-    local commit_msg="chore($agent_name): automated changes"
+    local commit_msg="${WIGGUM_TASK_ID:+${WIGGUM_TASK_ID}: }${WIGGUM_STEP_ID:-unknown} - ${agent_name}"
 
     # Set git author/committer identity
     git_set_identity

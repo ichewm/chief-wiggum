@@ -561,8 +561,12 @@ cmd_task_resolve() {
         # "Your local changes would be overwritten" errors
         if ! git -C "$workspace" diff --quiet || ! git -C "$workspace" diff --cached --quiet; then
             log "Working tree has uncommitted changes - committing before merge"
+            local _wid _tid
+            _wid=$(basename "$worker_dir")
+            _tid=$(echo "$_wid" | sed -E 's/worker-([A-Za-z]{2,10}-[0-9]{1,4})-.*/\1/')
+            [[ "$_tid" == "$_wid" ]] && _tid=""
             git -C "$workspace" add -A
-            git -C "$workspace" commit -m "chore: auto-commit before merge with main" || true
+            git -C "$workspace" commit -m "${_tid:+${_tid}: }pre-merge" || true
         fi
 
         # Try to merge main - this may create conflicts

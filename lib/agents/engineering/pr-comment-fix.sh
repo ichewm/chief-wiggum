@@ -431,10 +431,7 @@ _commit_and_push_fixes() {
     fi
 
     # Create commit message
-    local commit_msg="fix: Address PR review comments
-
-Automated fixes for PR review feedback.
-See comment-status.md for details on addressed items."
+    local commit_msg="${WIGGUM_TASK_ID:+${WIGGUM_TASK_ID}: }${WIGGUM_STEP_ID:-pr-fix} - pr-comment-fix"
 
     # Set git author/committer identity
     git_set_identity

@@ -253,7 +253,7 @@ git_safety_checkpoint() {
             git_set_identity
 
             # Create checkpoint commit
-            if git commit --no-gpg-sign -m "chore: checkpoint before read-only agent" >/dev/null 2>&1; then
+            if git commit --no-gpg-sign -m "${WIGGUM_TASK_ID:+${WIGGUM_TASK_ID}: }checkpoint" >/dev/null 2>&1; then
                 current_sha=$(git rev-parse HEAD 2>/dev/null)
                 log_debug "Created checkpoint commit: $current_sha"
             else
@@ -387,11 +387,11 @@ git_create_commit() {
         fi
 
         # Create commit message
-        local commit_msg="${task_id}: ${task_desc}
+        local commit_msg="${task_id}: finalization
 
+${task_desc}
 Worker: $worker_id
-Priority: ${task_priority}
-Completed by Ralph Wiggum autonomous worker."
+Priority: ${task_priority}"
 
         # Set git author/committer identity for this commit
         git_set_identity

@@ -155,9 +155,9 @@ heartbeat_build_progress_table() {
     local table="| Step | Duration | Result |
 |------|----------|--------|"
 
-    # Get pipeline steps
+    # Get pipeline steps (steps is an object keyed by step_id, not an array)
     local steps
-    steps=$(jq -r '.steps[].id' "$worker_dir/pipeline-config.json" 2>/dev/null) || return 0
+    steps=$(jq -r '.steps | keys_unsorted[]' "$worker_dir/pipeline-config.json" 2>/dev/null) || return 0
 
     local current_step
     current_step=$(jq -r '.current.step_id // ""' "$worker_dir/pipeline-config.json" 2>/dev/null)

@@ -63,7 +63,7 @@ agent_run() {
         log "Working tree has uncommitted changes - committing before conflict resolution"
         git_set_identity
         git -C "$workspace" add -A
-        git -C "$workspace" commit --no-gpg-sign -m "chore: auto-commit before conflict resolution" 2>/dev/null || true
+        git -C "$workspace" commit --no-gpg-sign -m "${WIGGUM_TASK_ID:+${WIGGUM_TASK_ID}: }pre-conflict" 2>/dev/null || true
     fi
 
     # Create standard directories

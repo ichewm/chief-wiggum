@@ -30,7 +30,7 @@ source "$WIGGUM_HOME/lib/core/platform.sh"
 agent_run() {
     local worker_dir="$1"
     local project_dir="$2"
-    local commit_message="${3:-fix: Automated changes}"
+    local commit_message="${3:-${WIGGUM_TASK_ID:+${WIGGUM_TASK_ID}: }${WIGGUM_STEP_ID:-commit} - commit-push}"
 
     local workspace="$worker_dir/workspace"
 
@@ -126,9 +126,7 @@ agent_run() {
 
         # Check for resolution plan to customize commit message
         if [ -f "$worker_dir/resolution-plan.md" ]; then
-            commit_message="fix: Resolve merge conflicts per coordination plan
-
-Automated resolution following multi-PR coordination plan."
+            commit_message="${WIGGUM_TASK_ID:+${WIGGUM_TASK_ID}: }${WIGGUM_STEP_ID:-resolve} - conflict-resolution"
         fi
 
         # Create commit
