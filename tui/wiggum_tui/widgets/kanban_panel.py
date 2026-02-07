@@ -125,7 +125,6 @@ class TaskDetailModal(ModalScreen[tuple | None]):
 
     BINDINGS = [
         Binding("escape", "close", "Close"),
-        Binding("enter", "close", "Close"),
         Binding("q", "close", "Close"),
     ]
 
@@ -864,10 +863,19 @@ class KanbanPanel(Widget):
             target_row = min(current_row, len(next_col) - 1)
             next_col[target_row].focus()
 
+    def _handle_modal_result(self, result: tuple | None) -> None:
+        """Handle modal dismiss result for cross-tab navigation."""
+        if result is not None:
+            task_id, target_tab = result
+            self.app.post_message(NavigateToTask(task_id, target_tab))
+
     def action_open_card(self) -> None:
         """Open focused card details (vim enter)."""
         cards = self._get_all_cards()
         for card in cards:
             if card.has_focus:
-                self.app.push_screen(TaskDetailModal(card._task_data, ralph_dir=self.ralph_dir))
+                self.app.push_screen(
+                    TaskDetailModal(card._task_data, ralph_dir=self.ralph_dir),
+                    callback=self._handle_modal_result,
+                )
                 break

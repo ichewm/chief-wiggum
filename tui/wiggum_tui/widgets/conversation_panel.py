@@ -866,9 +866,15 @@ class ConversationPanel(Widget):
                 result_node.add_leaf(f"[#a6adc8]{line}[/]")
 
     def on_select_changed(self, event: Select.Changed) -> None:
-        """Handle task selection change."""
+        """Handle task selection change.
+
+        Skips reload when current_task already matches to avoid redundant tree
+        rebuilds from the async Select.Changed event fired by select_task().
+        """
         if event.select.id == "worker-select" and event.value:
-            self._load_conversation(str(event.value))
+            task_id = str(event.value)
+            if task_id != self.current_task:
+                self._load_conversation(task_id)
 
     def refresh_data(self) -> None:
         """Refresh conversation data only if data changed."""

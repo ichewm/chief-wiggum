@@ -71,6 +71,7 @@ class PlanPanel(Widget):
         self._task_titles: dict[str, str] = {}  # task_id -> title
         self._selected_index: int = 0
         self._last_data_hash: str = ""
+        self._rebuilding: bool = False
 
     def _load_task_titles(self) -> None:
         """Parse kanban.md to build a task_id -> title map."""
@@ -163,6 +164,7 @@ class PlanPanel(Widget):
         self._load_task_titles()
         self._plan_files = self._scan_plans()
         self._filtered_plans = list(self._plan_files)
+        self._last_data_hash = self._compute_data_hash()
 
         yield FilterSortBar(
             sort_options=list(self.SORT_OPTIONS),
@@ -203,8 +205,15 @@ class PlanPanel(Widget):
             return "(Error reading file)"
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
-        """Handle plan selection from the option list."""
+        """Handle plan selection from the option list.
+
+        Ignores spurious events fired during programmatic option list rebuilds
+        (clear_options + add_option cycles) which would overwrite the current
+        selection with stale indices.
+        """
         if event.option_list.id != "plan-option-list":
+            return
+        if self._rebuilding:
             return
         index = event.option_index
         if 0 <= index < len(self._filtered_plans):
@@ -235,9 +244,11 @@ class PlanPanel(Widget):
             if self._filtered_plans and 0 <= self._selected_index < len(self._filtered_plans):
                 selected_stem = self._filtered_plans[self._selected_index].stem
 
+            self._rebuilding = True
             option_list.clear_options()
             for f in self._filtered_plans:
                 option_list.add_option(Option(self._get_plan_label(f), id=f.stem))
+            self._rebuilding = False
 
             # Restore selection
             if selected_stem:
@@ -258,7 +269,7 @@ class PlanPanel(Widget):
                 except Exception:
                     pass
         except Exception:
-            pass
+            self._rebuilding = False
 
     def refresh_data(self) -> None:
         """Refresh plan data only if changed."""
@@ -288,6 +299,9 @@ class PlanPanel(Widget):
         except Exception:
             self._filtered_plans = list(self._plan_files)
 
+        # Suppress OptionHighlighted events during the clear+rebuild cycle
+        # so they don't overwrite _selected_index with stale indices.
+        self._rebuilding = True
         try:
             option_list = self.query_one("#plan-option-list", OptionList)
             option_list.clear_options()
@@ -295,6 +309,8 @@ class PlanPanel(Widget):
                 option_list.add_option(Option(self._get_plan_label(f), id=f.stem))
         except Exception:
             pass
+        finally:
+            self._rebuilding = False
 
         # Try to restore selection by file name, fall back to clamped index
         if selected_stem:

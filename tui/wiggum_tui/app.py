@@ -6,7 +6,7 @@ from datetime import datetime
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Header, Footer, Static, TabbedContent, TabPane
+from textual.widgets import Header, Footer, Static, TabbedContent, TabPane, Tree, OptionList
 
 from .themes.htop import HTOP_THEME
 from .widgets.kanban_panel import KanbanPanel
@@ -78,6 +78,7 @@ class WiggumApp(App):
         self.watcher = RalphWatcher(ralph_dir)
         self.worker_service = WorkerStatusService(ralph_dir)
         self._active_tab: str = "kanban"
+        self._pending_navigation: tuple[str, str] | None = None
 
     def compose(self) -> ComposeResult:
         yield WiggumHeader(self.ralph_dir)
@@ -181,6 +182,13 @@ class WiggumApp(App):
         # Refresh the newly active panel immediately
         self._refresh_active_panel()
 
+        # Apply pending navigation after refresh so selection isn't overwritten
+        if self._pending_navigation:
+            target, task_id = self._pending_navigation
+            if event.pane.id == target:
+                self._pending_navigation = None
+                self._select_in_panel(target, task_id)
+
     TAB_ORDER = ["kanban", "workers", "logs", "conversations", "plans", "metrics"]
 
     def action_switch_tab(self, tab_id: str) -> None:
@@ -247,25 +255,42 @@ class WiggumApp(App):
         except Exception:
             pass
 
+    def _select_in_panel(self, target: str, task_id: str) -> None:
+        """Select a task in the target panel and focus it.
+
+        Explicitly moving focus to the target panel prevents Textual's focus
+        management from switching back to the previous tab (where the modal
+        dismiss restored focus to a kanban TaskCard).
+        """
+        try:
+            if target == "plans":
+                panel = self.query_one(PlanPanel)
+                panel.select_by_task_id(task_id)
+                panel.query_one("#plan-option-list", OptionList).focus()
+            elif target == "conversations":
+                panel = self.query_one(ConversationPanel)
+                panel.select_by_task_id(task_id)
+                panel.query_one("#conv-tree", Tree).focus()
+        except Exception:
+            pass
+
     def on_navigate_to_task(self, message: NavigateToTask) -> None:
         """Handle cross-tab navigation to a specific task."""
         target = message.target_tab
         task_id = message.task_id
 
-        # Switch to the target tab
         tabbed = self.query_one(TabbedContent)
-        tabbed.active = target
 
-        # Tell the target panel to select the matching item
-        try:
-            if target == "plans":
-                panel = self.query_one(PlanPanel)
-                panel.select_by_task_id(task_id)
-            elif target == "conversations":
-                panel = self.query_one(ConversationPanel)
-                panel.select_by_task_id(task_id)
-        except Exception:
-            pass
+        if tabbed.active == target:
+            # Already on the target tab — select immediately
+            self._refresh_active_panel()
+            self._select_in_panel(target, task_id)
+        else:
+            # Store pending navigation — selection will be applied after the tab
+            # switch triggers on_tabbed_content_tab_activated and refreshes the
+            # panel, so the selection isn't overwritten by the first refresh.
+            self._pending_navigation = (target, task_id)
+            tabbed.active = target
 
     def action_help(self) -> None:
         """Show help dialog."""
