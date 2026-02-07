@@ -61,6 +61,12 @@ _attempt_merge() {
         source "$WIGGUM_HOME/lib/github/issue-sync.sh"
         github_issue_sync_task_status "$ralph_dir" "$task_id" "x" || true
 
+        # Update PR labels: remove pending-approval, add completed
+        local completed_label pending_label
+        completed_label=$(github_sync_get_status_label "x")
+        pending_label=$(github_sync_get_status_label "P")
+        github_pr_set_status_label "$pr_number" "$completed_label" "$pending_label" || true
+
         local worker_dir
         worker_dir=$(jq -r --arg t "$task_id" '.prs[$t].worker_dir' "$state_file")
 

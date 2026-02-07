@@ -536,6 +536,13 @@ pr_merge_gather_all() {
             log "  $task_id (PR #$pr_number): Already merged - cleaning up"
             # Update kanban to complete
             update_kanban_status "$ralph_dir/kanban.md" "$task_id" "x" 2>/dev/null || true
+            # Update PR labels: remove pending-approval, add completed
+            source "$WIGGUM_HOME/lib/github/issue-sync.sh"
+            [ -n "${GITHUB_SYNC_STATUS_LABELS:-}" ] || load_github_sync_config
+            local completed_label pending_label
+            completed_label=$(github_sync_get_status_label "x")
+            pending_label=$(github_sync_get_status_label "P")
+            github_pr_set_status_label "$pr_number" "$completed_label" "$pending_label" || true
             # Clean up batch coordination before workspace deletion
             if batch_coord_has_worker_context "$worker_dir"; then
                 local batch_id
