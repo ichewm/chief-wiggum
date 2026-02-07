@@ -83,7 +83,11 @@ svc_memory_extract() {
     rm -f "$pending_list.current"
 
     [ -n "$worker_dir" ] || return 0
-    [ -d "$worker_dir" ] || return 0
+
+    # Resolve path (handles archived workers moved to .ralph/history/workers/)
+    local resolved
+    resolved=$(_memory_resolve_worker_path "$worker_dir" "$RALPH_DIR") || return 0
+    worker_dir="$resolved"
 
     # Extract task ID
     local worker_id task_id
@@ -150,9 +154,13 @@ svc_memory_analyze_complete() {
         memory_rebuild_indexes "$memory_dir"
     else
         log_warn "memory: Analysis incomplete for $task_id"
-        # Re-queue for retry if worker dir still exists
-        if [ -n "$worker_dir" ] && [ -d "$worker_dir" ]; then
-            memory_queue_worker "$worker_dir"
+        # Re-queue for retry if worker dir still exists (check archive too)
+        if [ -n "$worker_dir" ]; then
+            local resolved_dir
+            resolved_dir=$(_memory_resolve_worker_path "$worker_dir" "$RALPH_DIR") || true
+            if [ -n "$resolved_dir" ]; then
+                memory_queue_worker "$resolved_dir"
+            fi
         fi
     fi
 }

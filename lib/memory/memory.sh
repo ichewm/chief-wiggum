@@ -471,6 +471,44 @@ memory_rebuild_global_stats() {
 }
 
 # =============================================================================
+# PATH RESOLUTION
+# =============================================================================
+
+# Resolve a worker directory path, checking archive location if original is gone
+#
+# When workers are archived via `wiggum clean archive`, they move from
+# .ralph/workers/ to .ralph/history/workers/. Pending.list stores the
+# original absolute path which becomes stale after archival.
+#
+# Args:
+#   worker_dir - Original worker directory path (from pending.list)
+#   ralph_dir  - Path to .ralph directory
+#
+# Outputs: Resolved path on stdout
+# Returns: 0 if found, 1 if worker doesn't exist anywhere
+_memory_resolve_worker_path() {
+    local worker_dir="$1"
+    local ralph_dir="$2"
+
+    # Try original path first
+    if [ -d "$worker_dir" ]; then
+        echo "$worker_dir"
+        return 0
+    fi
+
+    # Try archived location
+    local basename
+    basename=$(basename "$worker_dir")
+    local archived="$ralph_dir/history/workers/$basename"
+    if [ -d "$archived" ]; then
+        echo "$archived"
+        return 0
+    fi
+
+    return 1
+}
+
+# =============================================================================
 # QUEUE MANAGEMENT
 # =============================================================================
 
@@ -544,7 +582,11 @@ memory_process_pending() {
     rm -f "$pending_list.current"
 
     [ -n "$worker_dir" ] || return 1
-    [ -d "$worker_dir" ] || return 1
+
+    # Resolve path (handles archived workers)
+    local resolved
+    resolved=$(_memory_resolve_worker_path "$worker_dir" "$ralph_dir") || return 1
+    worker_dir="$resolved"
 
     # Extract task ID
     local worker_id task_id

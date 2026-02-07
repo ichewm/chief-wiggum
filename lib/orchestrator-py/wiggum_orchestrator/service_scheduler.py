@@ -20,6 +20,9 @@ from wiggum_orchestrator.service_state import ServiceState
 class ServiceScheduler:
     """Core scheduling engine."""
 
+    # Maximum event chain depth to prevent unbounded cascades
+    _MAX_EVENT_DEPTH = 4
+
     def __init__(
         self,
         registry: ServiceRegistry,
@@ -32,6 +35,7 @@ class ServiceScheduler:
         self._executor = executor
         self._cb = circuit_breaker
         self._startup_complete = False
+        self._event_depth = 0
         # Background processes: service_id -> (Popen, ServiceConfig)
         self._background_procs: dict[str, tuple[subprocess.Popen, ServiceConfig]] = {}
 
@@ -199,6 +203,8 @@ class ServiceScheduler:
             rc = self._executor.run_function(svc)
         elif svc.exec_type == "command":
             rc = self._executor.run_command(svc)
+        elif svc.exec_type == "pipeline":
+            rc = self._executor.run_pipeline(svc)
         else:
             log.log_warn(f"Unknown exec type for {svc.id}: {svc.exec_type}")
             self._state.mark_failed(svc.id)
@@ -210,6 +216,8 @@ class ServiceScheduler:
         else:
             self._state.mark_failed(svc.id)
             self._cb.record_failure(svc)
+
+        self._fire_completion_events(svc.id, rc)
 
     def _run_single_service_background(self, svc: ServiceConfig) -> None:
         """Execute a service in background (non-blocking)."""
@@ -236,12 +244,12 @@ class ServiceScheduler:
 
     def _poll_background_procs(self) -> None:
         """Check background processes for completion."""
-        completed = []
+        completed: list[tuple[str, int]] = []
         for svc_id, (proc, svc) in self._background_procs.items():
             rc = proc.poll()
             if rc is not None:
                 # Process completed
-                completed.append(svc_id)
+                completed.append((svc_id, rc))
                 if rc == 0:
                     self._state.mark_completed(svc.id)
                     self._cb.record_success(svc)
@@ -251,9 +259,96 @@ class ServiceScheduler:
                     self._cb.record_failure(svc)
                     log.log_warn(f"Background service {svc.id} failed (rc={rc})")
 
-        # Remove completed from tracking
-        for svc_id in completed:
+        # Remove completed from tracking and fire events
+        for svc_id, rc in completed:
             del self._background_procs[svc_id]
+            self._fire_completion_events(svc_id, rc)
+
+    @staticmethod
+    def _trigger_matches_event(pattern: str, event: str) -> bool:
+        """Check if a trigger pattern matches an event.
+
+        Supports:
+          - Exact match: "service.completed:foo" == "service.completed:foo"
+          - Glob suffix: "service.completed:*" matches "service.completed:foo"
+
+        Mirrors bash _trigger_matches_event in lib/service/service-scheduler.sh.
+        """
+        if pattern == event:
+            return True
+        if pattern.endswith("*"):
+            prefix = pattern[:-1]
+            if event.startswith(prefix):
+                return True
+        return False
+
+    def trigger_event(self, event: str) -> None:
+        """Trigger event-based services that match the event.
+
+        Iterates all enabled event-type services, checks trigger patterns,
+        conditions, and circuit breakers, then runs matching services.
+
+        Mirrors bash service_trigger_event in lib/service/service-scheduler.sh.
+        """
+        for svc in self._registry.get_periodic_services():
+            if svc.schedule_type != "event":
+                continue
+
+            triggers = svc.schedule.get("trigger", [])
+            if isinstance(triggers, str):
+                triggers = [triggers]
+
+            matched = False
+            for pattern in triggers:
+                if self._trigger_matches_event(pattern, event):
+                    matched = True
+                    break
+
+            if not matched:
+                continue
+
+            # Check conditions before running
+            if not self._conditions_met(svc):
+                log.log_debug(
+                    f"Event '{event}' for service {svc.id} skipped (conditions)",
+                )
+                continue
+
+            if self._cb.blocks(svc):
+                log.log_debug(
+                    f"Event '{event}' for service {svc.id} skipped (circuit open)",
+                )
+                continue
+
+            log.log_debug(f"Event '{event}' triggered service: {svc.id}")
+            self._run_single_service(svc)
+
+    def _fire_completion_events(self, service_id: str, exit_code: int) -> None:
+        """Fire service completion events for chaining.
+
+        Fires three event types:
+          service.completed:{id} - always (success or failure)
+          service.succeeded:{id} - exit code 0 only
+          service.failed:{id}    - non-zero exit code only
+
+        Mirrors bash _fire_service_completion_events in lib/service/service-scheduler.sh.
+        """
+        if self._event_depth >= self._MAX_EVENT_DEPTH:
+            log.log_warn(
+                f"Event depth limit ({self._MAX_EVENT_DEPTH}) reached, "
+                f"skipping events for {service_id}",
+            )
+            return
+
+        self._event_depth += 1
+        try:
+            self.trigger_event(f"service.completed:{service_id}")
+            if exit_code == 0:
+                self.trigger_event(f"service.succeeded:{service_id}")
+            else:
+                self.trigger_event(f"service.failed:{service_id}")
+        finally:
+            self._event_depth -= 1
 
     def interrupt(self) -> None:
         """Interrupt the current foreground subprocess."""

@@ -10,6 +10,7 @@ from textual.widget import Widget
 
 from ..data.worker_scanner import scan_workers
 from ..data.models import WorkerStatus
+from ..data.status_reader import read_api_usage, read_memory_stats, read_worker_cost
 from ..utils import format_relative_time
 
 
@@ -168,6 +169,11 @@ def _parse_worker_logs(worker_dir: Path, worker_id: str, task_id: str, status: s
                 worker_metrics.output_tokens += usage.get("output_tokens", 0)
                 worker_metrics.cache_creation_tokens += usage.get("cache_creation_input_tokens", 0)
                 worker_metrics.cache_read_tokens += usage.get("cache_read_input_tokens", 0)
+
+    # Prefer cost-tracker.json for cost accuracy when available
+    tracker_cost = read_worker_cost(worker_dir)
+    if tracker_cost is not None:
+        worker_metrics.total_cost_usd = tracker_cost
 
     # Cache the result
     _worker_metrics_cache[cache_key] = (current_mtime, worker_metrics)
@@ -528,6 +534,54 @@ class MetricsPanel(Widget):
         ]
         return "\n".join(lines)
 
+    def _render_api_usage(self) -> str:
+        """Render API usage section text."""
+        api = read_api_usage(self.ralph_dir)
+        if api.cycle_prompts == 0 and api.weekly_prompts == 0:
+            return "[bold #cba6f7]API USAGE[/]\n[#7f849c]No API usage data[/]"
+
+        lines = ["[bold #cba6f7]API USAGE[/]"]
+        if api.cycle_prompts > 0:
+            hours_str = f"{api.cycle_hours:.0f}h" if api.cycle_hours >= 1 else "<1h"
+            lines.append(
+                f"[#7f849c]{hours_str} Cycle:[/] [#a6e3a1]{api.cycle_prompts}[/] prompts │ "
+                f"[#7f849c]In:[/] [#a6e3a1]{fmt_tokens(api.cycle_input_tokens)}[/] │ "
+                f"[#7f849c]Out:[/] [#a6e3a1]{fmt_tokens(api.cycle_output_tokens)}[/]"
+            )
+        if api.weekly_prompts > 0:
+            lines.append(
+                f"[#7f849c]Weekly:[/] [#a6e3a1]{api.weekly_prompts}[/] prompts │ "
+                f"[#7f849c]In:[/] [#a6e3a1]{fmt_tokens(api.weekly_input_tokens)}[/] │ "
+                f"[#7f849c]Out:[/] [#a6e3a1]{fmt_tokens(api.weekly_output_tokens)}[/]"
+            )
+        return "\n".join(lines)
+
+    def _render_memory_section(self) -> str:
+        """Render memory stats section text."""
+        mem = read_memory_stats(self.ralph_dir)
+        if mem.tasks_analyzed == 0:
+            return "[bold #cba6f7]MEMORY (historical)[/]\n[#7f849c]No memory data[/]"
+
+        # Format avg duration
+        s = int(mem.avg_total_duration_s)
+        if s >= 3600:
+            dur_str = f"{s // 3600}h {(s % 3600) // 60}m"
+        elif s >= 60:
+            dur_str = f"{s // 60}m {s % 60}s"
+        else:
+            dur_str = f"{s}s"
+
+        lines = [
+            "[bold #cba6f7]MEMORY (historical)[/]",
+            (
+                f"[#7f849c]Tasks:[/] [#a6e3a1]{mem.tasks_analyzed}[/] │ "
+                f"[#7f849c]Success:[/] [#a6e3a1]{mem.success_rate:.0f}%[/] │ "
+                f"[#7f849c]Avg Fix Cycles:[/] [#a6e3a1]{mem.avg_fix_cycles:.1f}[/] │ "
+                f"[#7f849c]Avg Duration:[/] [#a6e3a1]{dur_str}[/]"
+            ),
+        ]
+        return "\n".join(lines)
+
     def compose(self) -> ComposeResult:
         self._load_metrics()
 
@@ -540,7 +594,11 @@ class MetricsPanel(Widget):
             yield Static(self._render_tokens(), markup=True, classes="metrics-section", id="metrics-tokens")
             yield Static(self._render_pipeline_steps(), markup=True, classes="metrics-section", id="metrics-pipeline")
 
-        yield Static(self._render_conversation(), markup=True, classes="metrics-section", id="metrics-conversation")
+        with Horizontal(classes="metrics-top"):
+            yield Static(self._render_conversation(), markup=True, classes="metrics-section", id="metrics-conversation")
+            yield Static(self._render_api_usage(), markup=True, classes="metrics-section", id="metrics-api-usage")
+
+        yield Static(self._render_memory_section(), markup=True, classes="metrics-section", id="metrics-memory")
 
         # Workers by cost table (always created, populated in on_mount)
         table = DataTable(id="metrics-workers-table", classes="metrics-workers-table")
@@ -637,6 +695,14 @@ class MetricsPanel(Widget):
             pass
         try:
             self.query_one("#metrics-conversation", Static).update(self._render_conversation())
+        except Exception:
+            pass
+        try:
+            self.query_one("#metrics-api-usage", Static).update(self._render_api_usage())
+        except Exception:
+            pass
+        try:
+            self.query_one("#metrics-memory", Static).update(self._render_memory_section())
         except Exception:
             pass
         # Re-populate data tables

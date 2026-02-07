@@ -358,6 +358,64 @@ test_git_safety_restore_resets_commits() {
 }
 
 # =============================================================================
+# Worktree Config Tests (rerere + diff3)
+# =============================================================================
+
+test_worktree_rerere_enabled() {
+    # Create a project repo to host the worktree
+    local project_dir="$TEST_DIR/project"
+    mkdir -p "$project_dir"
+    git -C "$project_dir" init -q
+    git -C "$project_dir" config user.email "test@test.com"
+    git -C "$project_dir" config user.name "Test User"
+    echo "init" > "$project_dir/file.txt"
+    git -C "$project_dir" add .
+    git -C "$project_dir" commit -q -m "Initial"
+
+    local worker_dir_wt="$TEST_DIR/worker-WT-001-12345"
+    mkdir -p "$worker_dir_wt"
+
+    (
+        export WIGGUM_HOME
+        source "$WIGGUM_HOME/lib/git/worktree-helpers.sh"
+        export WIGGUM_SKIP_MERGE_CHECK=true
+        setup_worktree "$project_dir" "$worker_dir_wt" "WT-001"
+    )
+
+    local ws="$worker_dir_wt/workspace"
+    local rerere_val
+    rerere_val=$(git -C "$ws" config rerere.enabled 2>/dev/null)
+    assert_equals "true" "$rerere_val" "rerere.enabled should be true after setup_worktree"
+}
+
+test_worktree_diff3_conflictstyle() {
+    # Create a project repo to host the worktree
+    local project_dir="$TEST_DIR/project"
+    mkdir -p "$project_dir"
+    git -C "$project_dir" init -q
+    git -C "$project_dir" config user.email "test@test.com"
+    git -C "$project_dir" config user.name "Test User"
+    echo "init" > "$project_dir/file.txt"
+    git -C "$project_dir" add .
+    git -C "$project_dir" commit -q -m "Initial"
+
+    local worker_dir_wt="$TEST_DIR/worker-WT-002-12345"
+    mkdir -p "$worker_dir_wt"
+
+    (
+        export WIGGUM_HOME
+        source "$WIGGUM_HOME/lib/git/worktree-helpers.sh"
+        export WIGGUM_SKIP_MERGE_CHECK=true
+        setup_worktree "$project_dir" "$worker_dir_wt" "WT-002"
+    )
+
+    local ws="$worker_dir_wt/workspace"
+    local style_val
+    style_val=$(git -C "$ws" config merge.conflictstyle 2>/dev/null)
+    assert_equals "diff3" "$style_val" "merge.conflictstyle should be diff3 after setup_worktree"
+}
+
+# =============================================================================
 # Run All Tests
 # =============================================================================
 
@@ -381,6 +439,10 @@ run_test test_git_safety_checkpoint_creates_commit
 run_test test_git_safety_checkpoint_no_changes
 run_test test_git_safety_restore_discards_changes
 run_test test_git_safety_restore_resets_commits
+
+# worktree config tests
+run_test test_worktree_rerere_enabled
+run_test test_worktree_diff3_conflictstyle
 
 print_test_summary
 exit_with_test_result

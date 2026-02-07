@@ -32,6 +32,43 @@ agent_source_core
 agent_source_ralph
 source "$WIGGUM_HOME/lib/git/git-operations.sh"
 
+# Auto-resolve trivial conflicts that don't need LLM intervention.
+# Lockfiles: accept main's version — the build/test step regenerates them.
+#
+# Args:
+#   workspace - Path to the git workspace with merge conflicts
+_auto_resolve_trivial_conflicts() {
+    local workspace="$1"
+
+    local trivial_patterns=(
+        "Cargo.lock" "package-lock.json" "yarn.lock" "pnpm-lock.yaml"
+        "go.sum" "Gemfile.lock" "poetry.lock" "composer.lock"
+        "flake.lock" "uv.lock" "bun.lockb"
+    )
+
+    local unmerged auto_resolved=0
+    unmerged=$(git -C "$workspace" diff --name-only --diff-filter=U 2>/dev/null) || return 0
+
+    local file basename
+    while IFS= read -r file; do
+        [ -z "$file" ] && continue
+        basename=$(basename "$file")
+        for pattern in "${trivial_patterns[@]}"; do
+            if [[ "$basename" == "$pattern" ]]; then
+                log "Auto-resolving lockfile conflict (accept theirs): $file"
+                git -C "$workspace" checkout --theirs -- "$file" 2>/dev/null && \
+                    git -C "$workspace" add -- "$file" 2>/dev/null && \
+                    ((++auto_resolved))
+                break
+            fi
+        done
+    done <<< "$unmerged"
+
+    if [ "$auto_resolved" -gt 0 ]; then
+        log "Auto-resolved $auto_resolved trivial conflict(s)"
+    fi
+}
+
 # Main entry point
 agent_run() {
     local worker_dir="$1"
@@ -133,6 +170,25 @@ No merge conflicts were found in the workspace. The repository is in a clean sta
     conflict_count=$(echo "$conflicted_files" | wc -l)
     log "Found $conflict_count file(s) with merge conflicts"
 
+    # Auto-resolve trivial conflicts (lockfiles etc.) before LLM
+    _auto_resolve_trivial_conflicts "$workspace"
+
+    # Re-check remaining conflicts after auto-resolution
+    conflicted_files=$(git -C "$workspace" diff --name-only --diff-filter=U 2>/dev/null)
+    if [ -z "$conflicted_files" ]; then
+        log "All conflicts auto-resolved"
+        agent_setup_context "$worker_dir" "$workspace" "$project_dir"
+        agent_write_report "$worker_dir" "# Conflict Resolution Summary
+
+**Status:** All conflicts auto-resolved (trivial files only)
+
+No LLM resolution was needed."
+        agent_write_result "$worker_dir" "PASS"
+        return 0
+    fi
+    conflict_count=$(echo "$conflicted_files" | wc -l)
+    log "Remaining non-trivial conflicts: $conflict_count file(s)"
+
     # Check for resolution plan from multi-PR planner
     local has_plan=false
     local plan_file="$worker_dir/resolution-plan.md"
@@ -145,6 +201,7 @@ No merge conflicts were found in the workspace. The repository is in a clean sta
     agent_setup_context "$worker_dir" "$workspace" "$project_dir"
     _RESOLVER_HAS_PLAN="$has_plan"
     _RESOLVER_PLAN_FILE="$plan_file"
+    _RESOLVER_STAGED_MARKER_FILES=""
 
     log "Starting conflict resolution..."
 
@@ -220,9 +277,29 @@ PLAN_EOF
     fi
 
     if [ "$iteration" -gt 0 ]; then
-        # Add continuation context for subsequent iterations
-        local prev_iter=$((iteration - 1))
-        cat << CONTINUE_EOF
+        if [ -n "${_RESOLVER_STAGED_MARKER_FILES:-}" ]; then
+            cat << STAGED_EOF
+
+CRITICAL - STAGED FILES STILL CONTAIN CONFLICT MARKERS:
+
+These files were staged with 'git add' but still have conflict markers.
+They will NOT appear in 'git diff --diff-filter=U' because staging removed them from unmerged state.
+
+Files to fix:
+$(echo "$_RESOLVER_STAGED_MARKER_FILES" | sed 's/^/  - /')
+
+You MUST:
+1. Read each file above
+2. Find and remove ALL remaining conflict markers (<<<<<<< / ||||||| / ======= / >>>>>>>)
+3. Verify zero markers: grep -c '<<<<<<< \|=======$\|>>>>>>> ' <file>
+4. Re-stage: git add <file>
+
+Do NOT report PASS until all markers are gone.
+STAGED_EOF
+        else
+            # Add continuation context for subsequent iterations
+            local prev_iter=$((iteration - 1))
+            cat << CONTINUE_EOF
 
 CONTINUATION CONTEXT (Iteration $iteration):
 
@@ -236,6 +313,7 @@ Please continue resolving conflicts:
 
 Run 'git diff --name-only --diff-filter=U' to see remaining conflicts.
 CONTINUE_EOF
+        fi
     fi
 }
 
@@ -243,6 +321,8 @@ CONTINUE_EOF
 _conflict_completion_check() {
     local workspace
     workspace=$(agent_get_workspace)
+
+    _RESOLVER_STAGED_MARKER_FILES=""
 
     # Check if any unresolved conflicts remain (git index state)
     local unresolved
@@ -255,8 +335,10 @@ _conflict_completion_check() {
     # Also check staged files for leftover conflict markers.
     # A file can be staged (no longer "unmerged") but still contain markers
     # if the agent ran `git add` on an incompletely resolved file.
-    if git_staged_has_conflict_markers "$workspace" >/dev/null; then
-        log_warn "No unmerged files but staged content still has conflict markers"
+    local marker_files
+    if marker_files=$(git_staged_has_conflict_markers "$workspace"); then
+        _RESOLVER_STAGED_MARKER_FILES="$marker_files"
+        log_warn "No unmerged files but staged content still has conflict markers: $(echo "$marker_files" | tr '\n' ' ')"
         return 1
     fi
 
@@ -302,6 +384,13 @@ $plan_section
 * You MUST stage resolved files with 'git add <file>'
 * You must NOT commit - only resolve and stage
 * If unsure about intent, preserve BOTH sides rather than dropping code
+* Conflict markers use diff3 format with a common ancestor section:
+    <<<<<<< HEAD (your branch)
+    ||||||| <base> (common ancestor — what the code was before both changes)
+    ======= (divider)
+    >>>>>>> origin/main (incoming)
+  Use the common ancestor to understand INTENT — what each side was trying to change
+* BEFORE running 'git add', verify no markers remain: grep -c '<<<<<<< \|=======$\|>>>>>>> ' <file> — if count > 0, fix first
 $([ "$has_plan" = true ] && echo "* Follow the resolution-plan.md guidance EXACTLY")
 EOF
     agent_get_memory_context
@@ -318,13 +407,17 @@ Resolve all merge conflicts in this workspace.
 
 1. **List conflicts**: `git diff --name-only --diff-filter=U`
 2. **For each file**:
-   - Read the file to see conflict markers (<<<<<<< / ======= / >>>>>>>)
+   - Read the file to see conflict markers (<<<<<<< / ||||||| / ======= / >>>>>>>)
+   - The ||||||| section shows the common ancestor — use it to understand what each side intended
    - Read surrounding context to understand what both sides intended
    - Determine the correct resolution
    - Edit file to remove markers and produce correct merged code
    - Verify file is syntactically valid
+   - **Verify clean**: grep -c '<<<<<<< \|=======$\|>>>>>>> ' <file> must be 0
    - Stage with `git add <file>`
-3. **Verify**: `git diff --name-only --diff-filter=U` should show no remaining conflicts
+3. **Verify**:
+   - `git diff --name-only --diff-filter=U` should show no remaining unmerged files
+   - `git diff --cached -G '<<<<<<< ' --name-only` should return empty (no staged markers)
 
 ## Resolution Strategies
 

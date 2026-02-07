@@ -87,6 +87,14 @@ setup_worktree() {
         fi
     fi
 
+    # Enable conflict-reduction features:
+    # - rerere: records resolutions so identical conflicts auto-resolve on retry.
+    #   Shared across worktrees via common .git object store.
+    # - diff3: includes common ancestor in conflict markers, giving the resolver
+    #   context about what the original code looked like before either side changed it.
+    git -C "$workspace" config rerere.enabled true
+    git -C "$workspace" config merge.conflictstyle diff3
+
     # Pre-flight merge conflict check: detect unresolvable conflicts with
     # origin/main BEFORE the pipeline starts. Failing fast here saves an
     # entire pipeline run on work that can't be committed.
@@ -234,6 +242,10 @@ setup_worktree_from_branch() {
         log_error "setup_worktree_from_branch: workspace not created at $workspace"
         return 1
     fi
+
+    # Enable conflict-reduction features (same as setup_worktree)
+    git -C "$workspace" config rerere.enabled true
+    git -C "$workspace" config merge.conflictstyle diff3
 
     # Setup environment for workspace boundary enforcement
     export WORKER_WORKSPACE="$workspace"

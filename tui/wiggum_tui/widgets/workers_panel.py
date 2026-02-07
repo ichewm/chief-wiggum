@@ -11,6 +11,7 @@ from textual.message import Message
 
 from ..data.worker_scanner import scan_workers, get_worker_counts
 from ..data.models import Worker, WorkerStatus
+from ..data.status_reader import read_worker_cost
 from ..actions.worker_control import stop_worker, kill_worker
 from .filter_sort_bar import FilterSortBar, SortOption, FilterOption
 
@@ -89,7 +90,7 @@ class WorkersPanel(Widget):
         SortOption("Task ID", "task_id"),
         SortOption("Duration", "duration"),
         SortOption("Agent", "agent"),
-        SortOption("Pipeline", "pipeline"),
+        SortOption("Cost", "cost"),
     ]
 
     FILTER_OPTIONS = [
@@ -113,7 +114,8 @@ class WorkersPanel(Widget):
         data = [
             (
                 w.id, w.task_id, w.status.value, w.pid, w.pr_url,
-                (w.pipeline_info.pipeline_name, w.pipeline_info.step_id, w.pipeline_info.agent)
+                (w.pipeline_info.pipeline_name, w.pipeline_info.step_id, w.pipeline_info.agent,
+                 w.pipeline_info.step_idx, w.pipeline_info.total_steps)
                 if w.pipeline_info else None,
             )
             for w in workers
@@ -146,7 +148,7 @@ class WorkersPanel(Widget):
         """Set up the data table."""
         try:
             table = self.query_one("#workers-table", DataTable)
-            table.add_columns("Status", "Worker ID", "Task", "PID", "Pipeline", "Step", "Agent", "Duration", "PR URL")
+            table.add_columns("Status", "Task", "Progress", "Agent", "Cost", "Duration", "PR URL")
             self._populate_table(table)
         except Exception as e:
             self.log.error(f"Failed to populate workers table: {e}")
@@ -188,32 +190,34 @@ class WorkersPanel(Widget):
             except (ValueError, OSError):
                 duration = "-"
 
-            # Format PID
-            pid_str = str(worker.pid) if worker.pid else "-"
-
-            # Truncate worker ID and PR URL for display
-            worker_id = worker.id
-            if len(worker_id) > 25:
-                worker_id = worker_id[:22] + "..."
-
             pr_url = worker.pr_url or ""
             if len(pr_url) > 30:
                 pr_url = pr_url[:27] + "..."
 
-            # Pipeline info columns
+            # Pipeline info: Progress column as "N/M step_id"
             pi = worker.pipeline_info
-            pipeline_name = pi.pipeline_name if pi else ""
-            step_id = pi.step_id if pi else ""
+            if pi and pi.total_steps > 0:
+                progress = f"{pi.step_idx + 1}/{pi.total_steps} {pi.step_id}"
+            elif pi and pi.step_id:
+                progress = pi.step_id
+            else:
+                progress = "-"
+
             agent_short = pi.agent_short if pi else ""
+
+            # Cost from cost-tracker.json
+            worker_dir = self.ralph_dir / "workers" / worker.id
+            if not worker_dir.is_dir():
+                worker_dir = self.ralph_dir / "history" / worker.id
+            cost = read_worker_cost(worker_dir)
+            cost_str = f"${cost:.2f}" if cost is not None else "-"
 
             table.add_row(
                 status_text,
-                f"{dim_open}{worker_id}{dim_close}",
                 f"{dim_open}{worker.task_id}{dim_close}",
-                f"{dim_open}{pid_str}{dim_close}",
-                f"{dim_open}{pipeline_name}{dim_close}",
-                f"{dim_open}{step_id}{dim_close}",
+                f"{dim_open}{progress}{dim_close}",
                 f"{dim_open}{agent_short}{dim_close}",
+                f"{dim_open}{cost_str}{dim_close}",
                 f"{dim_open}{duration}{dim_close}",
                 f"{dim_open}{pr_url}{dim_close}",
                 key=worker.id,
@@ -302,11 +306,14 @@ class WorkersPanel(Widget):
                 key=lambda w: (w.pipeline_info.agent_short if w.pipeline_info else ""),
                 reverse=not sort_ascending,
             )
-        elif sort_key == "pipeline":
-            result.sort(
-                key=lambda w: (w.pipeline_info.pipeline_name if w.pipeline_info else ""),
-                reverse=not sort_ascending,
-            )
+        elif sort_key == "cost":
+            def _get_cost(w: Worker) -> float:
+                worker_dir = self.ralph_dir / "workers" / w.id
+                if not worker_dir.is_dir():
+                    worker_dir = self.ralph_dir / "history" / w.id
+                c = read_worker_cost(worker_dir)
+                return c if c is not None else 0.0
+            result.sort(key=_get_cost, reverse=not sort_ascending)
 
         return result
 
@@ -353,6 +360,45 @@ class WorkersPanel(Widget):
         except Exception:
             pass
         return None
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle Enter on a table row - open detail modal."""
+        self.action_open_detail()
+
+    def action_open_detail(self) -> None:
+        """Open detail modal for selected worker."""
+        worker = self._get_selected_worker()
+        if not worker:
+            self.app.notify("No worker selected", severity="warning")
+            return
+
+        from .kanban_panel import TaskDetailModal
+        from ..data.models import Task, TaskStatus
+        from ..messages import NavigateToTask
+
+        # Build a minimal Task from the worker's info
+        status_map = {
+            WorkerStatus.RUNNING: TaskStatus.IN_PROGRESS,
+            WorkerStatus.COMPLETED: TaskStatus.COMPLETE,
+            WorkerStatus.FAILED: TaskStatus.FAILED,
+            WorkerStatus.MERGED: TaskStatus.COMPLETE,
+            WorkerStatus.STOPPED: TaskStatus.IN_PROGRESS,
+        }
+        task = Task(
+            id=worker.task_id,
+            title=worker.task_id,
+            status=status_map.get(worker.status, TaskStatus.IN_PROGRESS),
+        )
+
+        def _handle_result(result: tuple | None) -> None:
+            if result is not None:
+                task_id, target = result
+                self.post_message(NavigateToTask(task_id=task_id, target_tab=target))
+
+        self.app.push_screen(
+            TaskDetailModal(task, ralph_dir=self.ralph_dir, worker=worker),
+            _handle_result,
+        )
 
     def action_stop_worker(self) -> None:
         """Stop the selected worker."""

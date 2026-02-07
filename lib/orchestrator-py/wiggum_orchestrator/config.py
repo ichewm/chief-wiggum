@@ -141,6 +141,9 @@ def load_services(
             overrides = json.load(f)
         _apply_overrides(services, overrides)
 
+    # Normalize triggers (on_complete/on_failure/on_finish -> schedule.trigger)
+    _normalize_triggers(services)
+
     return services
 
 
@@ -161,6 +164,33 @@ def _apply_overrides(
                 svc.schedule.update(override["schedule"])
             if "concurrency" in override:
                 svc.concurrency.update(override["concurrency"])
+
+
+def _normalize_triggers(services: list[ServiceConfig]) -> None:
+    """Convert triggers.on_complete/on_failure/on_finish to schedule.trigger patterns.
+
+    Mirrors bash _normalize_service_triggers() in lib/service/service-loader.sh.
+
+    Converts:
+        triggers: { on_complete: ["X"] } -> schedule: { type: "event", trigger: ["service.succeeded:X"] }
+        triggers: { on_failure: ["Y"] }  -> schedule: { type: "event", trigger: ["service.failed:Y"] }
+        triggers: { on_finish: ["Z"] }   -> schedule: { type: "event", trigger: ["service.completed:Z"] }
+    """
+    for svc in services:
+        if svc.triggers is None:
+            continue
+
+        trigger_list: list[str] = []
+        for svc_id in svc.triggers.get("on_complete", []):
+            trigger_list.append(f"service.succeeded:{svc_id}")
+        for svc_id in svc.triggers.get("on_failure", []):
+            trigger_list.append(f"service.failed:{svc_id}")
+        for svc_id in svc.triggers.get("on_finish", []):
+            trigger_list.append(f"service.completed:{svc_id}")
+
+        if trigger_list:
+            svc.schedule = {"type": "event", "trigger": trigger_list}
+            svc.triggers = None
 
 
 def apply_run_mode_filters(

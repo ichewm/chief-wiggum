@@ -6,7 +6,8 @@ from unittest.mock import patch, MagicMock
 
 from textual.widgets import TabbedContent, Footer
 
-from wiggum_tui.app import WiggumApp, WiggumHeader
+from wiggum_tui.app import WiggumApp
+from wiggum_tui.widgets.header import WiggumHeader
 
 
 class TestWiggumHeader:
@@ -17,20 +18,21 @@ class TestWiggumHeader:
         ralph_dir.mkdir(parents=True)
 
         header = WiggumHeader(ralph_dir)
-        content = header._render_header()
+        content = header.render()
 
         assert "WIGGUM MONITOR" in content
         assert "my-project" in content
 
-    def test_update_header(self, tmp_path: Path):
+    def test_update_stats(self, tmp_path: Path):
         ralph_dir = tmp_path / "test-project" / ".ralph"
         ralph_dir.mkdir(parents=True)
 
         header = WiggumHeader(ralph_dir)
-        header.update_header()
+        header.update_stats(worker_count=5, running_count=2)
 
-        # Should not raise
-        assert True
+        # Should not raise and should update internal state
+        assert header.worker_count == 5
+        assert header.running_count == 2
 
 
 class TestWiggumAppStartup:
@@ -140,7 +142,7 @@ class TestWiggumAppTabNavigation:
 
             # Press L to go to last tab
             await pilot.press("L")
-            assert tabbed.active == "metrics"
+            assert tabbed.active == "memory"
 
             # Press H to go to first tab
             await pilot.press("H")
@@ -170,7 +172,7 @@ class TestWiggumAppTabNavigation:
 
             # Go to last tab
             await pilot.press("L")
-            assert tabbed.active == "metrics"
+            assert tabbed.active == "memory"
 
             # Press l should wrap to first
             await pilot.press("l")
@@ -178,7 +180,7 @@ class TestWiggumAppTabNavigation:
 
             # Press h should wrap to last
             await pilot.press("h")
-            assert tabbed.active == "metrics"
+            assert tabbed.active == "memory"
 
 
 class TestWiggumAppRefresh:

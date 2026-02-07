@@ -43,6 +43,7 @@ class PipelineInfo:
     step_id: str = ""
     step_idx: int = 0
     agent: str = ""  # e.g. "engineering.test-runner"
+    total_steps: int = 0  # len(steps) from pipeline-config.json
 
     @property
     def agent_short(self) -> str:

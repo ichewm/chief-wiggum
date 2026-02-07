@@ -9,6 +9,7 @@ import pytest
 from wiggum_orchestrator.config import (
     ServiceConfig,
     ServiceRegistry,
+    _normalize_triggers,
     apply_run_mode_filters,
     load_services,
 )
@@ -224,3 +225,82 @@ def test_override_services(services_json):
     services = load_services(wiggum_home, str(ralph_dir))
     by_id = {s.id: s for s in services}
     assert by_id["github-issue-sync"].enabled is False
+
+
+def test_normalize_triggers():
+    """on_complete/on_failure/on_finish should become schedule.trigger patterns."""
+    services = [
+        ServiceConfig(
+            id="analyze",
+            phase="periodic",
+            triggers={"on_complete": ["memory-extract"]},
+            execution={"type": "pipeline", "pipeline": "memory-extract"},
+        ),
+        ServiceConfig(
+            id="analyze-complete",
+            phase="periodic",
+            triggers={"on_finish": ["analyze"]},
+            execution={"type": "function", "function": "svc_analyze_complete"},
+        ),
+        ServiceConfig(
+            id="error-handler",
+            phase="periodic",
+            triggers={"on_failure": ["task-spawner"]},
+            execution={"type": "function", "function": "svc_error_handler"},
+        ),
+        ServiceConfig(
+            id="no-triggers",
+            phase="periodic",
+            schedule={"type": "interval", "interval": 60},
+            execution={"type": "function", "function": "svc_no_triggers"},
+        ),
+    ]
+
+    _normalize_triggers(services)
+    by_id = {s.id: s for s in services}
+
+    # on_complete -> service.succeeded:
+    svc = by_id["analyze"]
+    assert svc.schedule_type == "event"
+    assert svc.schedule["trigger"] == ["service.succeeded:memory-extract"]
+    assert svc.triggers is None
+
+    # on_finish -> service.completed:
+    svc = by_id["analyze-complete"]
+    assert svc.schedule_type == "event"
+    assert svc.schedule["trigger"] == ["service.completed:analyze"]
+    assert svc.triggers is None
+
+    # on_failure -> service.failed:
+    svc = by_id["error-handler"]
+    assert svc.schedule_type == "event"
+    assert svc.schedule["trigger"] == ["service.failed:task-spawner"]
+    assert svc.triggers is None
+
+    # No triggers -> unchanged
+    svc = by_id["no-triggers"]
+    assert svc.schedule_type == "interval"
+    assert svc.triggers is None
+
+
+def test_normalize_triggers_combined():
+    """Multiple trigger types on one service should all be normalized."""
+    services = [
+        ServiceConfig(
+            id="combined",
+            phase="periodic",
+            triggers={
+                "on_complete": ["svc-a"],
+                "on_failure": ["svc-b"],
+                "on_finish": ["svc-c"],
+            },
+            execution={"type": "function", "function": "svc_combined"},
+        ),
+    ]
+
+    _normalize_triggers(services)
+    svc = services[0]
+    assert svc.schedule_type == "event"
+    assert "service.succeeded:svc-a" in svc.schedule["trigger"]
+    assert "service.failed:svc-b" in svc.schedule["trigger"]
+    assert "service.completed:svc-c" in svc.schedule["trigger"]

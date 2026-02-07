@@ -11,7 +11,13 @@ from textual.binding import Binding
 from textual import events
 
 from ..data.kanban_parser import parse_kanban_with_status, group_tasks_by_status
-from ..data.models import Task, TaskStatus
+from ..data.models import Task, TaskStatus, Worker
+from ..data.status_reader import (
+    read_cost_tracker,
+    read_resume_state,
+    read_git_state,
+    read_pipeline_steps_ordered,
+)
 from ..messages import NavigateToTask
 
 
@@ -128,10 +134,11 @@ class TaskDetailModal(ModalScreen[tuple | None]):
         Binding("q", "close", "Close"),
     ]
 
-    def __init__(self, task: Task, ralph_dir: Path | None = None) -> None:
+    def __init__(self, task: Task, ralph_dir: Path | None = None, worker: Worker | None = None) -> None:
         super().__init__()
         self._task_info = task
         self._ralph_dir = ralph_dir
+        self._worker = worker
 
     def compose(self) -> ComposeResult:
         task = self._task_info
@@ -182,6 +189,10 @@ class TaskDetailModal(ModalScreen[tuple | None]):
                 for item in task.acceptance_criteria:
                     yield Static(f"  • {item}", classes="detail-list-item")
 
+            # Worker detail sections (when opened from workers panel)
+            if self._worker and self._ralph_dir:
+                yield from self._compose_worker_detail()
+
             # Navigation buttons
             has_plan = False
             if self._ralph_dir:
@@ -192,6 +203,93 @@ class TaskDetailModal(ModalScreen[tuple | None]):
                 yield Button("View Plan", id="btn-view-plan")
             yield Button("View Conversations", id="btn-view-conversations")
             yield Button("Close [Esc]", variant="primary", id="btn-close")
+
+    def _compose_worker_detail(self) -> ComposeResult:
+        """Yield worker detail sections (pipeline, cost, retry, git)."""
+        worker = self._worker
+        ralph_dir = self._ralph_dir
+        worker_dir = ralph_dir / "workers" / worker.id
+        if not worker_dir.is_dir():
+            worker_dir = ralph_dir / "history" / worker.id
+
+        yield Static("", classes="detail-section")  # spacer
+        yield Static(
+            f"[bold #a6adc8]Worker[/]  [#7f849c]{worker.id}[/]",
+            classes="detail-section",
+        )
+
+        # Pipeline progress
+        pi = worker.pipeline_info
+        if pi:
+            steps = read_pipeline_steps_ordered(worker_dir)
+            if steps:
+                current_idx = pi.step_idx
+                parts = []
+                for i, step in enumerate(steps):
+                    if i < current_idx:
+                        parts.append(f"[#a6e3a1]✓ {step}[/]")
+                    elif i == current_idx:
+                        parts.append(f"[#fab387]▸ {step}[/]")
+                    else:
+                        parts.append(f"[#7f849c]{step}[/]")
+                total = pi.total_steps or len(steps)
+                yield Static(
+                    f"  {' → '.join(parts)}\n"
+                    f"  Step {current_idx + 1} of {total} │ Pipeline: {pi.pipeline_name}",
+                    classes="detail-value",
+                )
+            else:
+                yield Static(
+                    f"  Pipeline: {pi.pipeline_name} │ Step: {pi.step_id}",
+                    classes="detail-value",
+                )
+
+        # Cost breakdown
+        cost_data = read_cost_tracker(worker_dir)
+        if cost_data.total_cost > 0 or cost_data.steps:
+            yield Static("[bold #a6adc8]Cost[/]", classes="detail-section")
+            lines = [f"  Total: [#a6e3a1]${cost_data.total_cost:.2f}[/]"]
+            if cost_data.steps:
+                step_parts = [
+                    f"{s.step_id}: ${s.cost:.2f}"
+                    for s in sorted(cost_data.steps, key=lambda s: s.cost, reverse=True)
+                    if s.cost > 0
+                ]
+                if step_parts:
+                    for i in range(0, len(step_parts), 3):
+                        lines.append("  " + " │ ".join(step_parts[i:i + 3]))
+            yield Static("\n".join(lines), classes="detail-value")
+
+        # Retry history
+        resume = read_resume_state(worker_dir)
+        if resume.attempt_count > 0 or resume.history:
+            max_str = f"/{resume.max_attempts}" if resume.max_attempts > 0 else ""
+            yield Static(
+                f"[bold #a6adc8]Retries[/]  {resume.attempt_count}{max_str} attempts",
+                classes="detail-section",
+            )
+            for entry in resume.history:
+                decision_color = "#a6e3a1" if entry.decision in ("RETRY", "CONTINUE") else "#f38ba8"
+                step_info = f" → {entry.resume_from}" if entry.resume_from else ""
+                reason_info = f" ({entry.reason})" if entry.reason else ""
+                yield Static(
+                    f"  #{entry.attempt} [{decision_color}]{entry.decision}[/]{step_info}{reason_info}",
+                    classes="detail-list-item",
+                )
+
+        # Git state
+        git = read_git_state(worker_dir)
+        if git.current_state:
+            pr_str = f" │ PR: [#89b4fa]#{git.pr_number}[/]" if git.pr_number else ""
+            yield Static(
+                f"[bold #a6adc8]Git[/]  [#a6e3a1]{git.current_state}[/]{pr_str}",
+                classes="detail-section",
+            )
+            if git.transitions:
+                yield Static(
+                    f"  {' → '.join(git.transitions)}",
+                    classes="detail-value",
+                )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id

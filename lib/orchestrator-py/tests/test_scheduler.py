@@ -247,3 +247,175 @@ def test_condition_env_not_equals(state, mock_executor, cb):
         mock_executor.run_function.assert_not_called()
     finally:
         os.environ.pop("WIGGUM_RUN_MODE", None)
+
+
+# =============================================================================
+# Event system tests
+# =============================================================================
+
+
+def test_trigger_matches_event_exact():
+    """Exact pattern should match identical event."""
+    assert ServiceScheduler._trigger_matches_event(
+        "service.completed:foo", "service.completed:foo",
+    ) is True
+
+
+def test_trigger_matches_event_glob():
+    """Glob suffix pattern should match events with that prefix."""
+    assert ServiceScheduler._trigger_matches_event(
+        "service.completed:*", "service.completed:foo",
+    ) is True
+    assert ServiceScheduler._trigger_matches_event(
+        "service.*", "service.completed:foo",
+    ) is True
+
+
+def test_trigger_matches_event_no_match():
+    """Non-matching pattern should return False."""
+    assert ServiceScheduler._trigger_matches_event(
+        "service.completed:foo", "service.completed:bar",
+    ) is False
+    assert ServiceScheduler._trigger_matches_event(
+        "service.failed:*", "service.completed:foo",
+    ) is False
+
+
+def test_event_service_triggered_on_success(state, mock_executor, cb):
+    """Event chain should fire after function completes with rc=0."""
+    # memory-extract (interval) triggers memory-analyze (event) on success
+    services = [
+        ServiceConfig(
+            id="memory-extract",
+            phase="periodic",
+            order=10,
+            schedule={"type": "interval", "interval": 60, "run_on_startup": False},
+            execution={"type": "function", "function": "svc_memory_extract"},
+        ),
+        ServiceConfig(
+            id="memory-analyze",
+            phase="periodic",
+            order=20,
+            schedule={"type": "event", "trigger": ["service.succeeded:memory-extract"]},
+            execution={"type": "function", "function": "svc_memory_analyze"},
+        ),
+    ]
+    scheduler = _make_scheduler(services, state, mock_executor, cb)
+    scheduler._startup_complete = True
+
+    # Make memory-extract due
+    state.get("memory-extract").last_run = time.time() - 120
+
+    # run_function returns 0 (success) for both calls
+    mock_executor.run_function.return_value = 0
+
+    scheduler.run_phase("periodic")
+
+    # Both services should have been called
+    calls = mock_executor.run_function.call_args_list
+    called_ids = [c.args[0].id for c in calls]
+    assert "memory-extract" in called_ids
+    assert "memory-analyze" in called_ids
+
+
+def test_event_service_triggered_on_failure(state, mock_executor, cb):
+    """on_finish (service.completed:) should fire on failure too."""
+    services = [
+        ServiceConfig(
+            id="memory-analyze",
+            phase="periodic",
+            order=10,
+            schedule={"type": "interval", "interval": 60, "run_on_startup": False},
+            execution={"type": "function", "function": "svc_memory_analyze"},
+        ),
+        ServiceConfig(
+            id="memory-complete",
+            phase="periodic",
+            order=20,
+            schedule={"type": "event", "trigger": ["service.completed:memory-analyze"]},
+            execution={"type": "function", "function": "svc_memory_complete"},
+        ),
+    ]
+    scheduler = _make_scheduler(services, state, mock_executor, cb)
+    scheduler._startup_complete = True
+
+    state.get("memory-analyze").last_run = time.time() - 120
+
+    # First call (memory-analyze) fails, second call (memory-complete) succeeds
+    mock_executor.run_function.side_effect = [1, 0]
+
+    scheduler.run_phase("periodic")
+
+    calls = mock_executor.run_function.call_args_list
+    called_ids = [c.args[0].id for c in calls]
+    assert "memory-analyze" in called_ids
+    # service.completed fires on both success and failure
+    assert "memory-complete" in called_ids
+
+
+def test_event_service_conditions_checked(state, mock_executor, cb):
+    """Conditions should be evaluated before running event-triggered service."""
+    import os
+    services = [
+        ServiceConfig(
+            id="extract",
+            phase="periodic",
+            order=10,
+            schedule={"type": "interval", "interval": 60, "run_on_startup": False},
+            execution={"type": "function", "function": "svc_extract"},
+        ),
+        ServiceConfig(
+            id="analyze",
+            phase="periodic",
+            order=20,
+            schedule={"type": "event", "trigger": ["service.succeeded:extract"]},
+            execution={"type": "function", "function": "svc_analyze"},
+            # Condition that won't be met: file doesn't exist
+            condition={"file_exists": "/nonexistent/path/that/does/not/exist.json"},
+        ),
+    ]
+    scheduler = _make_scheduler(services, state, mock_executor, cb)
+    scheduler._startup_complete = True
+
+    state.get("extract").last_run = time.time() - 120
+    mock_executor.run_function.return_value = 0
+
+    scheduler.run_phase("periodic")
+
+    # Only extract should run, analyze skipped due to conditions
+    calls = mock_executor.run_function.call_args_list
+    called_ids = [c.args[0].id for c in calls]
+    assert "extract" in called_ids
+    assert "analyze" not in called_ids
+
+
+def test_pipeline_exec_type(state, mock_executor, cb):
+    """Pipeline exec type should call executor.run_pipeline."""
+    mock_executor.run_pipeline = MagicMock(return_value=0)
+    services = [
+        ServiceConfig(
+            id="trigger-svc",
+            phase="periodic",
+            order=10,
+            schedule={"type": "interval", "interval": 60, "run_on_startup": False},
+            execution={"type": "function", "function": "svc_trigger"},
+        ),
+        ServiceConfig(
+            id="pipeline-svc",
+            phase="periodic",
+            order=20,
+            schedule={"type": "event", "trigger": ["service.succeeded:trigger-svc"]},
+            execution={"type": "pipeline", "pipeline": "test-pipeline"},
+        ),
+    ]
+    scheduler = _make_scheduler(services, state, mock_executor, cb)
+    scheduler._startup_complete = True
+
+    state.get("trigger-svc").last_run = time.time() - 120
+    mock_executor.run_function.return_value = 0
+
+    scheduler.run_phase("periodic")
+
+    mock_executor.run_pipeline.assert_called_once()
+    called_svc = mock_executor.run_pipeline.call_args.args[0]
+    assert called_svc.id == "pipeline-svc"

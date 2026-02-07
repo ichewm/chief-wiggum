@@ -1,7 +1,6 @@
 """Main Textual application for Wiggum TUI."""
 
 from pathlib import Path
-from datetime import datetime
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -9,44 +8,19 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Header, Footer, Static, TabbedContent, TabPane, Tree, OptionList
 
 from .themes.htop import HTOP_THEME
+from .widgets.header import WiggumHeader
 from .widgets.kanban_panel import KanbanPanel
 from .widgets.workers_panel import WorkersPanel
 from .widgets.logs_panel import LogsPanel
 from .widgets.metrics_panel import MetricsPanel
 from .widgets.conversation_panel import ConversationPanel
 from .widgets.plan_panel import PlanPanel
+from .widgets.memory_panel import MemoryPanel
 from .data.watcher import RalphWatcher
 from .data.worker_status_service import WorkerStatusService
+from .data.worker_scanner import get_orchestrator_status, get_worker_counts
+from .data.status_reader import read_api_usage, read_memory_stats, aggregate_session_cost
 from .messages import NavigateToTask
-
-
-class WiggumHeader(Static):
-    """Custom header showing project info and stats."""
-
-    DEFAULT_CSS = """
-    WiggumHeader {
-        background: #181825;
-        color: #cdd6f4;
-        height: 1;
-        dock: top;
-        padding: 0 1;
-    }
-    """
-
-    def __init__(self, ralph_dir: Path) -> None:
-        super().__init__("")
-        self.ralph_dir = ralph_dir
-        self.project_dir = ralph_dir.parent
-        self.update(self._render_header())
-
-    def _render_header(self) -> str:
-        time_str = datetime.now().strftime("%H:%M:%S")
-        project_name = self.project_dir.name
-        return f" WIGGUM MONITOR │ {project_name} │ {time_str}"
-
-    def update_header(self) -> None:
-        """Update header content."""
-        self.update(self._render_header())
 
 
 class WiggumApp(App):
@@ -63,6 +37,7 @@ class WiggumApp(App):
         Binding("4", "switch_tab('conversations')", "Chat", show=True),
         Binding("5", "switch_tab('plans')", "Plans", show=True),
         Binding("6", "switch_tab('metrics')", "Metrics", show=True),
+        Binding("7", "switch_tab('memory')", "Memory", show=True),
         Binding("r", "refresh", "Refresh"),
         Binding("?", "help", "Help"),
         # Vim-style tab navigation
@@ -95,6 +70,8 @@ class WiggumApp(App):
                 yield PlanPanel(self.ralph_dir)
             with TabPane("Metrics", id="metrics"):
                 yield MetricsPanel(self.ralph_dir)
+            with TabPane("Memory", id="memory"):
+                yield MemoryPanel(self.ralph_dir)
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -108,8 +85,11 @@ class WiggumApp(App):
         # Start watching
         self.watcher.start()
 
-        # Set up header update timer
+        # Set up header update timer (fast - 1s)
         self.set_interval(1, self._update_header)
+
+        # Set up header slow update timer (5s for expensive reads)
+        self.set_interval(5, self._update_header_slow)
 
         # Set up 1-second auto-refresh timer for active panel only
         self.set_interval(1, self._refresh_active_panel)
@@ -151,10 +131,41 @@ class WiggumApp(App):
             pass
 
     def _update_header(self) -> None:
-        """Update header time."""
+        """Update header with fast-changing data (worker counts)."""
         try:
             header = self.query_one(WiggumHeader)
-            header.update_header()
+            workers = self.worker_service.get_workers()
+            counts = get_worker_counts(workers)
+            header.update_stats(
+                worker_count=counts.get("total", 0),
+                running_count=counts.get("running", 0),
+            )
+        except Exception:
+            pass
+
+    def _update_header_slow(self) -> None:
+        """Update header with slow-changing data (orchestrator, API, costs)."""
+        try:
+            header = self.query_one(WiggumHeader)
+
+            # Orchestrator status
+            orch_running, _ = get_orchestrator_status(self.ralph_dir)
+
+            # API usage
+            api_usage = read_api_usage(self.ralph_dir)
+
+            # Memory stats for success rate
+            mem_stats = read_memory_stats(self.ralph_dir)
+
+            # Aggregated session cost
+            total_cost = aggregate_session_cost(self.ralph_dir)
+
+            header.update_slow_stats(
+                orchestrator_running=orch_running,
+                api_usage=api_usage,
+                success_rate=mem_stats.success_rate,
+                total_cost=total_cost,
+            )
         except Exception:
             pass
 
@@ -173,6 +184,8 @@ class WiggumApp(App):
                 self.query_one(ConversationPanel).refresh_data()
             elif self._active_tab == "plans":
                 self.query_one(PlanPanel).refresh_data()
+            elif self._active_tab == "memory":
+                self.query_one(MemoryPanel).refresh_data()
         except Exception:
             pass
 
@@ -189,7 +202,7 @@ class WiggumApp(App):
                 self._pending_navigation = None
                 self._select_in_panel(target, task_id)
 
-    TAB_ORDER = ["kanban", "workers", "logs", "conversations", "plans", "metrics"]
+    TAB_ORDER = ["kanban", "workers", "logs", "conversations", "plans", "metrics", "memory"]
 
     def action_switch_tab(self, tab_id: str) -> None:
         """Switch to a specific tab."""
@@ -254,6 +267,10 @@ class WiggumApp(App):
             self.query_one(PlanPanel).refresh_data()
         except Exception:
             pass
+        try:
+            self.query_one(MemoryPanel).refresh_data()
+        except Exception:
+            pass
 
     def _select_in_panel(self, target: str, task_id: str) -> None:
         """Select a task in the target panel and focus it.
@@ -296,9 +313,9 @@ class WiggumApp(App):
         """Show help dialog."""
         self.notify(
             "Keyboard shortcuts:\n"
-            "1-6: Switch tabs │ h/l: Prev/Next tab │ H/L: First/Last tab\n"
+            "1-7: Switch tabs │ h/l: Prev/Next tab │ H/L: First/Last tab\n"
             "j/k: Down/Up │ g/G: Top/Bottom │ Ctrl+d/u: Half page\n"
-            "Workers: s-Stop K-Kill c-Chat L-Logs │ Logs: f-Filter\n"
+            "Workers: s-Stop K-Kill c-Chat L-Logs Enter-Detail\n"
             "Tree: h/l-Collapse/Expand o-Toggle e-ExpandAll C-CollapseAll\n"
             "r: Refresh │ q: Quit",
             title="Help",

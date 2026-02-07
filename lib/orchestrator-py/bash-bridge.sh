@@ -188,8 +188,61 @@ case "$mode" in
         _validate_func "$func" || exit 1
         "$func" "$@"
         ;;
+    pipeline)
+        svc_id="${1:?Missing service ID}"
+        pipeline_name="${2:?Missing pipeline name}"
+        use_workspace="${3:-false}"
+        shift 3
+
+        # Source pipeline loader and runner
+        source "$WIGGUM_HOME/lib/pipeline/pipeline-loader.sh"
+        source "$WIGGUM_HOME/lib/pipeline/pipeline-runner.sh"
+
+        # Provide no-op stubs for task-worker functions that pipeline-runner calls.
+        # Same stubs as _run_service_pipeline in lib/service/service-runner.sh.
+        _phase_start()              { :; }
+        _phase_end()                { :; }
+        _commit_subagent_changes()  { :; }
+
+        # Look for pipeline config
+        pipeline_config=""
+        for _path in "$RALPH_DIR/pipelines/${pipeline_name}.json" \
+                      "$WIGGUM_HOME/config/pipelines/${pipeline_name}.json"; do
+            if [ -f "$_path" ]; then
+                pipeline_config="$_path"
+                break
+            fi
+        done
+
+        if [ -z "$pipeline_config" ]; then
+            echo "ERROR: Pipeline config not found for service $svc_id: $pipeline_name" >&2
+            exit 1
+        fi
+
+        # Resolve workspace
+        worker_dir="$RALPH_DIR/services/$svc_id"
+        mkdir -p "$worker_dir/results" "$worker_dir/logs"
+        if [ "$use_workspace" = "true" ]; then
+            workspace_path="$worker_dir/workspace"
+            mkdir -p "$workspace_path"
+        else
+            workspace_path="$PROJECT_DIR"
+        fi
+
+        export SERVICE_ID="$svc_id"
+
+        # Load and run the pipeline
+        _exit_code=0
+        pipeline_load "$pipeline_config" || _exit_code=$?
+
+        if [ "$_exit_code" -eq 0 ]; then
+            pipeline_run_all "$worker_dir" "$PROJECT_DIR" "$workspace_path" "" || _exit_code=$?
+        fi
+
+        exit "$_exit_code"
+        ;;
     *)
-        echo "ERROR: Unknown mode: $mode (expected: phase|function)" >&2
+        echo "ERROR: Unknown mode: $mode (expected: phase|function|pipeline)" >&2
         exit 1
         ;;
 esac

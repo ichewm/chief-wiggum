@@ -498,6 +498,40 @@ test_memory_collect_stats_invalid_worker_name() {
 }
 
 # =============================================================================
+# _memory_resolve_worker_path tests
+# =============================================================================
+
+test_resolve_worker_path_active_worker() {
+    local ralph_dir="$TEST_DIR/ralph"
+    mkdir -p "$ralph_dir/workers/worker-UX-016-1738000000"
+
+    local resolved
+    resolved=$(_memory_resolve_worker_path "$ralph_dir/workers/worker-UX-016-1738000000" "$ralph_dir")
+    assert_equals "$ralph_dir/workers/worker-UX-016-1738000000" "$resolved" \
+        "Should resolve to original path when worker exists"
+}
+
+test_resolve_worker_path_archived_worker() {
+    local ralph_dir="$TEST_DIR/ralph"
+    # Worker moved to history (original gone)
+    mkdir -p "$ralph_dir/history/workers/worker-UX-016-1738000000"
+
+    local resolved
+    resolved=$(_memory_resolve_worker_path "$ralph_dir/workers/worker-UX-016-1738000000" "$ralph_dir")
+    assert_equals "$ralph_dir/history/workers/worker-UX-016-1738000000" "$resolved" \
+        "Should resolve to archived path when original is gone"
+}
+
+test_resolve_worker_path_missing() {
+    local ralph_dir="$TEST_DIR/ralph"
+    mkdir -p "$ralph_dir"
+
+    local rc=0
+    _memory_resolve_worker_path "$ralph_dir/workers/worker-UX-016-1738000000" "$ralph_dir" > /dev/null || rc=$?
+    assert_equals "1" "$rc" "Should return 1 when worker doesn't exist anywhere"
+}
+
+# =============================================================================
 # Run all tests
 # =============================================================================
 
@@ -524,5 +558,8 @@ run_test test_memory_is_analyzed_false_when_missing
 run_test test_memory_is_analyzed_true_when_exists
 run_test test_memory_collect_stats_no_results_dir
 run_test test_memory_collect_stats_invalid_worker_name
+run_test test_resolve_worker_path_active_worker
+run_test test_resolve_worker_path_archived_worker
+run_test test_resolve_worker_path_missing
 
 print_test_summary

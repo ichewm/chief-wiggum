@@ -69,11 +69,14 @@ def read_pipeline_config(worker_dir: Path) -> PipelineInfo | None:
         if step_id and step_id in steps:
             agent = steps[step_id].get("agent", "")
 
+        total_steps = len(steps) if isinstance(steps, dict) else 0
+
         info = PipelineInfo(
             pipeline_name=pipeline_name,
             step_id=step_id,
             step_idx=step_idx,
             agent=agent,
+            total_steps=total_steps,
         )
         _pipeline_config_cache[cache_key] = (mtime, info)
         return info

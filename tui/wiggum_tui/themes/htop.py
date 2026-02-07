@@ -276,4 +276,40 @@ OptionList > .option-list--option-highlighted {{
     padding: 0 1;
     height: auto;
 }}
+
+/* Memory Panel */
+MemoryPanel .memory-header {{
+    height: 1;
+    background: {CATPPUCCIN["mantle"]};
+    padding: 0 1;
+}}
+
+MemoryPanel .memory-body {{
+    height: 1fr;
+    width: 100%;
+}}
+
+MemoryPanel #memory-tree {{
+    width: 25;
+    min-width: 20;
+    max-width: 35;
+    height: 1fr;
+    border-right: solid {CATPPUCCIN["surface1"]};
+    background: {CATPPUCCIN["base"]};
+}}
+
+MemoryPanel #memory-content {{
+    width: 1fr;
+    height: 1fr;
+    padding: 0 1;
+}}
+
+MemoryPanel #memory-agent-table {{
+    height: 1fr;
+}}
+
+MemoryPanel #memory-detail {{
+    height: 1fr;
+    padding: 0 1;
+}}
 """

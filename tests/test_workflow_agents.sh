@@ -254,6 +254,159 @@ test_git_conflict_resolver_reads_plan_file() {
 }
 
 # =============================================================================
+# git-conflict-resolver Completion Check & Staged Markers Tests
+# =============================================================================
+
+test_conflict_resolver_completion_check_detects_staged_markers() {
+    # Source the engineering agent (not workflow wrapper) so we get internals
+    source "$WIGGUM_HOME/lib/agents/engineering/git-conflict-resolver.sh"
+
+    local workspace="$WORKER_DIR/workspace"
+
+    # Set up context so agent_get_workspace works
+    agent_setup_context "$WORKER_DIR" "$workspace" "$TEST_DIR"
+    _RESOLVER_STAGED_MARKER_FILES=""
+
+    # Create a file with conflict markers and stage it
+    cat > "$workspace/conflicted.txt" << 'MARKERS'
+line before
+<<<<<<< HEAD
+our change
+=======
+their change
+>>>>>>> origin/main
+line after
+MARKERS
+    git -C "$workspace" add conflicted.txt
+
+    # Completion check should detect staged markers and return 1
+    local result=0
+    _conflict_completion_check 2>/dev/null || result=$?
+
+    assert_equals "1" "$result" "Should return 1 when staged files have conflict markers"
+    assert_not_empty "$_RESOLVER_STAGED_MARKER_FILES" "Should populate _RESOLVER_STAGED_MARKER_FILES"
+    assert_output_contains "$_RESOLVER_STAGED_MARKER_FILES" "conflicted.txt" "Should list the conflicted file"
+}
+
+test_conflict_resolver_completion_check_clean() {
+    source "$WIGGUM_HOME/lib/agents/engineering/git-conflict-resolver.sh"
+
+    local workspace="$WORKER_DIR/workspace"
+    agent_setup_context "$WORKER_DIR" "$workspace" "$TEST_DIR"
+    _RESOLVER_STAGED_MARKER_FILES=""
+
+    # Create and stage a clean file (no markers)
+    echo "clean content" > "$workspace/clean.txt"
+    git -C "$workspace" add clean.txt
+
+    local result=0
+    _conflict_completion_check 2>/dev/null || result=$?
+
+    assert_equals "0" "$result" "Should return 0 when staged files are clean"
+    assert_equals "" "$_RESOLVER_STAGED_MARKER_FILES" "Should leave _RESOLVER_STAGED_MARKER_FILES empty"
+}
+
+test_conflict_resolver_staged_marker_prompt() {
+    source "$WIGGUM_HOME/lib/agents/engineering/git-conflict-resolver.sh"
+
+    local workspace="$WORKER_DIR/workspace"
+    agent_setup_context "$WORKER_DIR" "$workspace" "$TEST_DIR"
+
+    # Simulate staged marker state
+    _RESOLVER_STAGED_MARKER_FILES="src/main.rs
+lib/utils.rs"
+    _RESOLVER_HAS_PLAN=false
+    _RESOLVER_PLAN_FILE=""
+
+    # Call prompt with iteration > 0 to trigger continuation block
+    local output
+    output=$(_conflict_user_prompt 1 "$WORKER_DIR/output" "" "")
+
+    assert_output_contains "$output" "CRITICAL - STAGED FILES STILL CONTAIN CONFLICT MARKERS" \
+        "Should contain critical warning"
+    assert_output_contains "$output" "src/main.rs" "Should list first file"
+    assert_output_contains "$output" "lib/utils.rs" "Should list second file"
+}
+
+test_auto_resolve_lockfile() {
+    source "$WIGGUM_HOME/lib/agents/engineering/git-conflict-resolver.sh"
+
+    local workspace="$WORKER_DIR/workspace"
+
+    # Create a branch with a Cargo.lock
+    echo "lockfile-v1" > "$workspace/Cargo.lock"
+    git -C "$workspace" add Cargo.lock
+    git -C "$workspace" commit -q -m "Add Cargo.lock"
+
+    # Create a side branch
+    git -C "$workspace" checkout -b side-branch 2>/dev/null
+    echo "lockfile-side" > "$workspace/Cargo.lock"
+    git -C "$workspace" add Cargo.lock
+    git -C "$workspace" commit -q -m "Side branch lock"
+
+    # Go back to main and make a different change
+    git -C "$workspace" checkout - 2>/dev/null
+    echo "lockfile-main" > "$workspace/Cargo.lock"
+    git -C "$workspace" add Cargo.lock
+    git -C "$workspace" commit -q -m "Main branch lock"
+
+    # Merge side-branch to create conflict
+    git -C "$workspace" merge side-branch 2>/dev/null || true
+
+    # Verify conflict exists
+    local unmerged_before
+    unmerged_before=$(git -C "$workspace" diff --name-only --diff-filter=U 2>/dev/null)
+    assert_output_contains "$unmerged_before" "Cargo.lock" "Cargo.lock should be in conflict before auto-resolve"
+
+    # Auto-resolve
+    _auto_resolve_trivial_conflicts "$workspace" 2>/dev/null
+
+    # Verify resolved
+    local unmerged_after
+    unmerged_after=$(git -C "$workspace" diff --name-only --diff-filter=U 2>/dev/null)
+    assert_equals "" "$unmerged_after" "Should have no unmerged files after auto-resolve"
+}
+
+test_auto_resolve_skips_source_files() {
+    source "$WIGGUM_HOME/lib/agents/engineering/git-conflict-resolver.sh"
+
+    local workspace="$WORKER_DIR/workspace"
+
+    # Create a branch with a source file
+    echo "fn main() { v1 }" > "$workspace/main.rs"
+    git -C "$workspace" add main.rs
+    git -C "$workspace" commit -q -m "Add main.rs"
+
+    # Create a side branch
+    git -C "$workspace" checkout -b side-branch 2>/dev/null
+    echo "fn main() { side }" > "$workspace/main.rs"
+    git -C "$workspace" add main.rs
+    git -C "$workspace" commit -q -m "Side branch"
+
+    # Go back to main and make conflicting change
+    git -C "$workspace" checkout - 2>/dev/null
+    echo "fn main() { main-change }" > "$workspace/main.rs"
+    git -C "$workspace" add main.rs
+    git -C "$workspace" commit -q -m "Main branch"
+
+    # Merge to create conflict
+    git -C "$workspace" merge side-branch 2>/dev/null || true
+
+    # Verify conflict exists
+    local unmerged_before
+    unmerged_before=$(git -C "$workspace" diff --name-only --diff-filter=U 2>/dev/null)
+    assert_output_contains "$unmerged_before" "main.rs" "main.rs should be in conflict"
+
+    # Auto-resolve should NOT touch source files
+    _auto_resolve_trivial_conflicts "$workspace" 2>/dev/null
+
+    # Verify still unresolved
+    local unmerged_after
+    unmerged_after=$(git -C "$workspace" diff --name-only --diff-filter=U 2>/dev/null)
+    assert_output_contains "$unmerged_after" "main.rs" "main.rs should still be unresolved after auto-resolve"
+}
+
+# =============================================================================
 # multi-pr-planner Agent Tests
 # =============================================================================
 
@@ -328,6 +481,11 @@ run_test test_git_conflict_resolver_agent_sources
 run_test test_git_conflict_resolver_no_conflicts_skips
 run_test test_git_conflict_resolver_missing_workspace_fails
 run_test test_git_conflict_resolver_reads_plan_file
+run_test test_conflict_resolver_completion_check_detects_staged_markers
+run_test test_conflict_resolver_completion_check_clean
+run_test test_conflict_resolver_staged_marker_prompt
+run_test test_auto_resolve_lockfile
+run_test test_auto_resolve_skips_source_files
 run_test test_multi_pr_planner_agent_exists
 run_test test_multi_pr_planner_agent_sources
 run_test test_multi_pr_planner_missing_batch_file_fails

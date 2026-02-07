@@ -185,6 +185,39 @@ class ServiceExecutor:
                 self._current_proc = None
         return proc.returncode
 
+    def run_pipeline(self, svc: ServiceConfig) -> int:
+        """Run a pipeline-type service via the bridge.
+
+        Args:
+            svc: Service config with execution.pipeline.
+
+        Returns:
+            Exit code from the subprocess (124 on timeout).
+        """
+        pipeline_name = svc.execution.get("pipeline", svc.id)
+        use_workspace = "true" if svc.execution.get("workspace", False) else "false"
+        cmd = ["bash", self._bridge, "pipeline", svc.id, pipeline_name, use_workspace]
+        log.log_debug(f"Bridge pipeline: {svc.id}")
+        timeout = svc.timeout or 600
+        proc = subprocess.Popen(
+            cmd,
+            env=self._env,
+            cwd=self._env.get("PROJECT_DIR"),
+        )
+        with self._proc_lock:
+            self._current_proc = proc
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            log.log_warn(f"Service {svc.id} pipeline timed out after {timeout}s")
+            return 124
+        finally:
+            with self._proc_lock:
+                self._current_proc = None
+        return proc.returncode
+
     def run_function_background(
         self,
         svc: ServiceConfig,
