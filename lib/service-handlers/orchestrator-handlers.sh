@@ -264,11 +264,14 @@ svc_orch_init_terminal() {
     echo "=========================================="
     echo ""
 
-    # Prime scheduler state so the first post-phase status display has data.
-    # Don't display status here — periodic startup services (e.g. github-issue-sync)
-    # modify the kanban before the first post-phase tick, which would show stale counts.
-    scheduler_tick
+    # Run initial scheduler tick and status display so the terminal shows
+    # real data immediately. Use svc_orch_scheduler_tick (not bare scheduler_tick)
+    # so hybrid/distributed modes go through scheduler_tick_distributed and see
+    # the same task source as the post-phase — avoiding a stale local-only count
+    # followed by a different distributed count.
+    svc_orch_scheduler_tick
     SCHED_SCHEDULING_EVENT=true
+    svc_orch_status_display
 }
 
 # =============================================================================
