@@ -344,11 +344,12 @@ scheduler_shutdown_distributed() {
 
     log "Shutting down distributed scheduler..."
 
-    # Post final heartbeats
+    # Post final heartbeats with shutdown notice
     heartbeat_shutdown "$_SCHED_RALPH_DIR" "$server_id" || true
 
-    # Release all claimed tasks
-    claim_release_all "$server_id" "$_SCHED_RALPH_DIR" "Server shutdown" || true
+    # Keep server labels and assignees intact — workers may still be running
+    # and the orchestrator will re-track them on restart. Orphan recovery
+    # handles truly stale claims via heartbeat age detection.
 
     log "Distributed scheduler shutdown complete"
 }

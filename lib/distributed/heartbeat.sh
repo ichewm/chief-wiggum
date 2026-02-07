@@ -467,9 +467,7 @@ heartbeat_shutdown() {
         shutdown_body="$_HEARTBEAT_MARKER
 **Server:** $server_id
 **Last Update:** $(iso_now)
-**Status:** Server shutting down
-
-Tasks will be released. Other servers may claim after stale threshold."
+**Status:** Server shutting down — will resume on restart"
 
         gh issue comment "$issue_number" --body "$shutdown_body" >/dev/null 2>&1 || true
     done <<< "$owned_issues"

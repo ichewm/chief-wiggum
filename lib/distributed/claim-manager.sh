@@ -519,3 +519,90 @@ Previous claim was stale (no heartbeat). Reclaiming for new server." 2>/dev/null
     # Claim for new server
     claim_task "$issue_number" "$new_server_id" "$ralph_dir"
 }
+
+# Reclaim an issue for this server on worker restore
+#
+# Used during orchestrator restart to re-establish ownership of issues
+# whose workers are still running. Skips if another server has a fresh
+# heartbeat (< reclaim_threshold). Otherwise adds our server label and
+# assignee, and removes any other server labels and assignees.
+#
+# Args:
+#   issue_number      - GitHub issue number
+#   server_id         - This server's identifier
+#   ralph_dir         - Path to .ralph directory (optional)
+#   reclaim_threshold - Max heartbeat age (seconds) to consider another
+#                       server still active (default: 600 = 10 min)
+#
+# Returns: 0 on success, 1 if skipped (another server is active)
+claim_reclaim_on_restore() {
+    local issue_number="$1"
+    local server_id="$2"
+    local ralph_dir="${3:-}"
+    local reclaim_threshold="${4:-600}"
+
+    # Check current owner
+    local current_owner
+    current_owner=$(claim_get_owner "$issue_number")
+
+    # Already ours — just ensure assignee is set
+    if [ "$current_owner" = "$server_id" ]; then
+        timeout "$_CLAIM_GH_TIMEOUT" gh issue edit "$issue_number" \
+            --add-assignee "@me" >/dev/null 2>&1 || true
+        return 0
+    fi
+
+    # Another server owns it — check heartbeat freshness
+    if [ -n "$current_owner" ]; then
+        local last_hb
+        last_hb=$(claim_get_heartbeat_time "$issue_number")
+        last_hb="${last_hb:-0}"
+
+        if [ "$last_hb" -gt 0 ]; then
+            local now age
+            now=$(epoch_now)
+            age=$((now - last_hb))
+            if [ "$age" -lt "$reclaim_threshold" ]; then
+                log_debug "Skipping reclaim of #$issue_number — $current_owner heartbeat ${age}s ago (< ${reclaim_threshold}s)"
+                return 1
+            fi
+        fi
+    fi
+
+    log "Reclaiming issue #$issue_number for server $server_id (previous: ${current_owner:-none})"
+
+    # Remove other server labels
+    local labels
+    labels=$(timeout "$_CLAIM_GH_TIMEOUT" gh issue view "$issue_number" \
+        --json labels --jq '.labels[].name' 2>/dev/null) || true
+    while IFS= read -r label; do
+        [ -n "$label" ] || continue
+        if [[ "$label" == "$_CLAIM_SERVER_LABEL_PREFIX"* ]] && [ "$label" != "${_CLAIM_SERVER_LABEL_PREFIX}${server_id}" ]; then
+            gh issue edit "$issue_number" --remove-label "$label" >/dev/null 2>&1 || true
+        fi
+    done <<< "$labels"
+
+    # Remove other assignees
+    local assignees
+    assignees=$(timeout "$_CLAIM_GH_TIMEOUT" gh issue view "$issue_number" \
+        --json assignees --jq '.assignees[].login' 2>/dev/null) || true
+    while IFS= read -r assignee; do
+        [ -n "$assignee" ] || continue
+        gh issue edit "$issue_number" --remove-assignee "$assignee" >/dev/null 2>&1 || true
+    done <<< "$assignees"
+
+    # Add our server label and assignee
+    local server_label="${_CLAIM_SERVER_LABEL_PREFIX}${server_id}"
+    gh issue edit "$issue_number" \
+        --add-label "$server_label" --add-assignee "@me" >/dev/null 2>&1 || {
+        log_warn "Failed to reclaim issue #$issue_number"
+        return 1
+    }
+
+    # Update local cache
+    if [ -n "$ralph_dir" ]; then
+        server_claims_update "$ralph_dir" "GH-$issue_number" "add" || true
+    fi
+
+    return 0
+}

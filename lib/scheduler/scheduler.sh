@@ -164,6 +164,11 @@ scheduler_restore_workers() {
             log "Restored tracking for $restored_count worker(s)"
         fi
 
+        # Re-claim issues for restored workers in distributed mode
+        if [[ "${WIGGUM_TASK_SOURCE_MODE:-local}" != "local" ]] && [ "$restored_count" -gt 0 ]; then
+            _scheduler_reclaim_restored_workers
+        fi
+
         # Migrate legacy .needs-fix markers to git-state.json
         for worker_dir in "$_SCHED_RALPH_DIR/workers"/worker-*; do
             [ -d "$worker_dir" ] || continue
@@ -175,6 +180,46 @@ scheduler_restore_workers() {
                 log "Migrated legacy .needs-fix for $migrated_task_id to git-state.json"
             fi
         done
+    fi
+}
+
+# Re-claim GitHub issues for restored workers
+#
+# After worker pool restoration, ensures this server owns the associated
+# GitHub issues. Skips issues where another server has a fresh heartbeat
+# (< 10 min). Removes other servers' labels and assignees.
+_scheduler_reclaim_restored_workers() {
+    # Populate issue cache so we can resolve task_id -> issue_number
+    if declare -F _github_refresh_cache &>/dev/null; then
+        _github_refresh_cache 2>/dev/null || true
+    fi
+
+    local server_id="${WIGGUM_SERVER_ID:-}"
+    [ -n "$server_id" ] || return 0
+
+    local reclaimed=0
+    _reclaim_worker_cb() {
+        local _pid="$1" _type="$2" _task_id="$3"
+
+        # Resolve issue number from task ID
+        local issue_number=""
+        if declare -F _github_find_issue_by_task_id &>/dev/null; then
+            issue_number=$(_github_find_issue_by_task_id "$_task_id" 2>/dev/null) || true
+        fi
+
+        if [ -z "$issue_number" ]; then
+            log_debug "reclaim: no issue found for $_task_id — skipping"
+            return 0
+        fi
+
+        if claim_reclaim_on_restore "$issue_number" "$server_id" "$_SCHED_RALPH_DIR"; then
+            ((++reclaimed)) || true
+        fi
+    }
+    pool_foreach "all" _reclaim_worker_cb
+
+    if [ "$reclaimed" -gt 0 ]; then
+        log "Re-claimed $reclaimed issue(s) for server $server_id"
     fi
 }
 
