@@ -6,13 +6,13 @@
 # Uses gh CLI for all GitHub interactions.
 #
 # Label conventions:
-#   wiggum                - Gate label: issue is a Wiggum task
-#   wiggum:pending        - Status: pending [ ]
-#   wiggum:in-progress    - Status: in-progress [=]
-#   wiggum:pending-review - Status: pending approval [P]
-#   wiggum:complete       - Status: complete [x]
-#   wiggum:failed         - Status: failed [*]
-#   wiggum:not-planned    - Status: not planned [N]
+#   wiggum                  - Gate label: issue is a Wiggum task
+#   wiggum:pending          - Status: pending [ ]
+#   wiggum:in-progress      - Status: in-progress [=]
+#   wiggum:pending-approval - Status: pending approval [P]
+#   wiggum:completed        - Status: complete [x]
+#   wiggum:failed           - Status: failed [*]
+#   wiggum:not-planned      - Status: not planned [N]
 #   wiggum:server:$ID     - Ownership: claimed by server $ID
 #   priority:critical     - Priority mapping
 #   priority:high
@@ -45,8 +45,8 @@ _GH_GATE_LABEL="wiggum"
 declare -gA _GH_STATUS_LABELS=(
     [" "]="wiggum:pending"
     ["="]="wiggum:in-progress"
-    ["P"]="wiggum:pending-review"
-    ["x"]="wiggum:complete"
+    ["P"]="wiggum:pending-approval"
+    ["x"]="wiggum:completed"
     ["*"]="wiggum:failed"
     ["N"]="wiggum:not-planned"
 )
@@ -310,10 +310,15 @@ _github_parse_task_id() {
     title=$(echo "$issue_json" | jq -r '.title // ""')
     body=$(echo "$issue_json" | jq -r '.body // ""')
 
-    # Check title for **[TASK-ID]** pattern
+    # Check title for **[TASK-ID]** pattern (bold) or [TASK-ID] (plain)
     local task_id
     task_id=$(echo "$title" | grep -oE '\*\*\[[A-Za-z]{2,10}-[0-9]{1,4}\]\*\*' | \
               sed 's/\*\*\[\(.*\)\]\*\*/\1/' | head -1)
+
+    if [ -z "$task_id" ]; then
+        task_id=$(echo "$title" | grep -oE '\[[A-Za-z]{2,10}-[0-9]{1,4}\]' | \
+                  sed 's/\[\(.*\)\]/\1/' | head -1)
+    fi
 
     if [ -n "$task_id" ]; then
         echo "$task_id"
