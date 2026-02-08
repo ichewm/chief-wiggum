@@ -75,8 +75,9 @@ WIGGUM_NO_RESUME=false     # --no-resume: disable resume-workers, resume-poll
 WIGGUM_NO_FIX=false        # --no-fix: disable fix-workers, multi-pr-planner
 WIGGUM_NO_MERGE=false      # --no-merge: disable resolve-workers
 WIGGUM_NO_SYNC=false       # --no-sync: disable github-issue-sync, github-plan-sync, pr-sync
-WIGGUM_USE_PYTHON=false    # --python: use Python service scheduler
-WIGGUM_TASK_SOURCE_MODE="${WIGGUM_TASK_SOURCE_MODE:-local}"  # local | github | hybrid
+WIGGUM_USE_PYTHON=true     # default: Python scheduler (--no-python for Bash)
+WIGGUM_SMART_MODE="${WIGGUM_SMART_MODE:-true}"  # default: smart routing (--no-smart to disable)
+WIGGUM_TASK_SOURCE_MODE="${WIGGUM_TASK_SOURCE_MODE:-hybrid}"  # local | github | hybrid
 WIGGUM_SERVER_ID="${WIGGUM_SERVER_ID:-}"   # Custom server ID for distributed modes
 
 show_help() {
@@ -86,12 +87,10 @@ wiggum run - Orchestrate workers for incomplete tasks
 Usage: wiggum run [mode] [options]
 
 Modes:
-  (default)            Use system.task-worker agent (standard execution)
-  plan                 Use system.task-worker agent with plan mode enabled (creates
-                       implementation plan before execution)
-  --smart              Dynamically select pipeline and plan mode per task based on
-                       complexity inferred from kanban metadata (scope items,
-                       acceptance criteria, description length)
+  (default)            Smart mode: dynamically select pipeline and plan mode per
+                       task based on complexity, Python scheduler, hybrid task source
+  --plan               Use system.task-worker agent with plan mode enabled (creates
+                       implementation plan before execution; disables smart routing)
   --fix-only           Skip spawning new workers. Only fix existing PRs (review
                        comments, test failures) and merge them
   --merge-only         Skip new workers AND fix workers. Only merge PRs that are
@@ -104,14 +103,13 @@ Options:
   --max-iters N        Maximum iterations per worker (default: 20)
   --max-turns N        Maximum turns per Claude session (default: 50)
   --fix-agents N       Maximum concurrent fix/resolve workers (default: 2, or config)
-  --pipeline NAME      Pipeline config to use (from config/pipelines/ or config/)
-  --mode MODE          Task source mode: local (default), github, or hybrid
-                       - local:  Use .ralph/kanban.md (single-user, current behavior)
+  --pipeline NAME      Pipeline config to use (disables smart routing)
+  --mode MODE          Task source mode: local, github, or hybrid (default: hybrid)
+                       - local:  Use .ralph/kanban.md only (single-user)
                        - github: Use GitHub Issues as source (distributed servers)
-                       - hybrid: GitHub primary, kanban.md as local cache
+                       - hybrid: GitHub primary, kanban.md as local cache (default)
   --server-id ID       Custom server identifier for distributed modes (optional)
                        Default: auto-generated unique ID per machine
-  --python             Use Python service scheduler (reduced fork overhead)
   --force              Override stale orchestrator lock
   -v, --verbose        Verbose output (same as default)
   -vv                  Debug output (detailed diagnostics)
@@ -120,28 +118,29 @@ Options:
   -h, --help           Show this help message
 
 Modifier Flags (combinable with each other and with modes):
+  --no-python          Use Bash service scheduler instead of Python
   --no-resume          Don't auto-resume stopped workers
   --no-fix             Don't spawn fix workers or plan multi-PR fixes
   --no-merge           Don't resolve/merge PRs
   --no-sync            Don't sync with GitHub (issues, plans, PRs)
 
 Examples:
-  wiggum run                              # Start orchestration with defaults
-  wiggum run plan                         # Use planning mode for all workers
-  wiggum run --smart                      # Auto-select pipeline/plan per task
-  wiggum run --smart --max-workers 2      # Smart mode with 2 workers
+  wiggum run                              # Smart + Python + hybrid (defaults)
+  wiggum run --max-workers 2              # Limit to 2 concurrent workers
   wiggum run --max-workers 8              # Start with max 8 workers
-  wiggum run plan --max-workers 2         # Planning mode with 2 workers
-  wiggum run --pipeline fast              # Use the fast pipeline
+  wiggum run --plan                       # Planning mode for all workers
+  wiggum run --plan --max-workers 2       # Planning mode with 2 workers
+  wiggum run --pipeline fast              # Use fast pipeline (disables smart)
+  wiggum run --no-python                  # Use Bash scheduler
+  wiggum run --mode local                 # Local kanban only (single-user)
+  wiggum run --mode github                # Distributed mode with GitHub Issues
+  wiggum run --mode github --server-id s1 # Custom server ID for distributed
   wiggum run --fix-only                   # Only fix and merge existing PRs
   wiggum run --merge-only                 # Only merge ready PRs
   wiggum run --resume-only                # Only resume stopped workers
   wiggum run --no-sync                    # Run without GitHub sync
   wiggum run --no-resume --no-fix         # No resume, no fix workers
   wiggum run --fix-only --no-merge        # Fix PRs but don't merge them
-  wiggum run --mode github                # Distributed mode with GitHub Issues
-  wiggum run --mode hybrid                # GitHub primary, local kanban cache
-  wiggum run --mode github --server-id s1 # Custom server ID for distributed
 
 Behavior:
   - Chief assigns pending tasks [ ] to workers based on dependency graph
@@ -297,7 +296,7 @@ main() {
     export MAX_WORKERS MAX_ITERATIONS MAX_TURNS AGENT_TYPE
     export WIGGUM_RUN_MODE
     export WIGGUM_NO_RESUME WIGGUM_NO_FIX WIGGUM_NO_MERGE WIGGUM_NO_SYNC
-    export WIGGUM_TASK_SOURCE_MODE WIGGUM_SERVER_ID
+    export WIGGUM_SMART_MODE WIGGUM_TASK_SOURCE_MODE WIGGUM_SERVER_ID
     export FIX_WORKER_LIMIT FIX_WORKER_TIMEOUT RESOLVE_WORKER_TIMEOUT
     export AGING_FACTOR SIBLING_WIP_PENALTY PLAN_BONUS DEP_BONUS_PER_TASK
     export RESUME_INITIAL_BONUS RESUME_FAIL_PENALTY RESUME_MIN_RETRY_INTERVAL

@@ -16,22 +16,22 @@ _ORCHESTRATOR_ARG_PARSER_LOADED=1
 #
 # Sets global variables:
 #   MAX_WORKERS, MAX_ITERATIONS, MAX_TURNS, WIGGUM_RUN_MODE,
-#   WIGGUM_PLAN_MODE, WIGGUM_SMART_MODE, WIGGUM_PIPELINE,
-#   FIX_WORKER_LIMIT, FORCE_LOCK, WIGGUM_USE_PYTHON,
+#   WIGGUM_PLAN_MODE, WIGGUM_SMART_MODE (default: true), WIGGUM_PIPELINE,
+#   FIX_WORKER_LIMIT, FORCE_LOCK, WIGGUM_USE_PYTHON (default: true),
 #   WIGGUM_NO_RESUME, WIGGUM_NO_FIX, WIGGUM_NO_MERGE, WIGGUM_NO_SYNC,
-#   WIGGUM_TASK_SOURCE_MODE, WIGGUM_SERVER_ID
+#   WIGGUM_TASK_SOURCE_MODE (default: hybrid), WIGGUM_SERVER_ID
 #
 # Args:
 #   "$@" - Command line arguments (after verbose flags removed)
 _parse_run_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            plan)
+            plan|--plan)
                 export WIGGUM_PLAN_MODE=true
                 shift
                 ;;
             --smart)
-                export WIGGUM_SMART_MODE=true
+                # No-op: smart mode is now the default
                 shift
                 ;;
             --fix-only)
@@ -135,8 +135,12 @@ _parse_run_args() {
                 shift
                 ;;
             --python)
+                # No-op: Python scheduler is now the default
+                shift
+                ;;
+            --no-python)
                 # shellcheck disable=SC2034
-                WIGGUM_USE_PYTHON=true
+                WIGGUM_USE_PYTHON=false
                 shift
                 ;;
             --force)
@@ -165,21 +169,16 @@ _parse_run_args() {
 
     # Validate mutually exclusive options
     if [[ "$WIGGUM_RUN_MODE" != "default" && "${WIGGUM_PLAN_MODE:-false}" == "true" ]]; then
-        echo "Error: --${WIGGUM_RUN_MODE} cannot be combined with plan mode"
+        echo "Error: --${WIGGUM_RUN_MODE} cannot be combined with --plan"
         exit $EXIT_USAGE
     fi
-    if [[ "${WIGGUM_SMART_MODE:-false}" == "true" ]]; then
-        if [[ "${WIGGUM_PLAN_MODE:-false}" == "true" ]]; then
-            echo "Error: --smart cannot be combined with plan mode"
-            exit $EXIT_USAGE
-        fi
-        if [[ -n "${WIGGUM_PIPELINE:-}" ]]; then
-            echo "Error: --smart cannot be combined with --pipeline"
-            exit $EXIT_USAGE
-        fi
-        if [[ "$WIGGUM_RUN_MODE" != "default" ]]; then
-            echo "Error: --smart cannot be combined with --${WIGGUM_RUN_MODE}"
-            exit $EXIT_USAGE
+    # Smart mode (default) is incompatible with explicit plan/pipeline/run-mode
+    # overrides. Silently disable it when these are set.
+    if [[ "${WIGGUM_SMART_MODE:-true}" == "true" ]]; then
+        if [[ "${WIGGUM_PLAN_MODE:-false}" == "true" ]] \
+            || [[ -n "${WIGGUM_PIPELINE:-}" ]] \
+            || [[ "$WIGGUM_RUN_MODE" != "default" ]]; then
+            WIGGUM_SMART_MODE=false
         fi
     fi
 
