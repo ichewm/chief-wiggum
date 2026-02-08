@@ -14,6 +14,13 @@ export PROJECT_DIR RALPH_DIR
 
 ORCH_DIR="$WIGGUM_HOME/lib/orchestrator-py"
 
+# Ensure venv exists before exec so we always exec directly into python,
+# preserving the PID. Without this, `uv run` spawns python as a child with
+# a new PID, which breaks orchestrator lock handoff from the bash caller.
+if [ ! -f "$ORCH_DIR/.venv/bin/python" ] && command -v uv &>/dev/null; then
+    uv sync --project "$ORCH_DIR" 2>&1
+fi
+
 if [ -f "$ORCH_DIR/.venv/bin/python" ]; then
     exec "$ORCH_DIR/.venv/bin/python" -m wiggum_orchestrator "$@"
 elif command -v uv &>/dev/null; then
