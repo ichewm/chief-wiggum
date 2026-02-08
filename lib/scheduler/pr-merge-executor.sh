@@ -354,10 +354,11 @@ pr_merge_handle_remaining() {
         mergeable=$(jq -r --arg t "$task_id" '.prs[$t].mergeable_to_main' "$state_file")
         conflict_files=$(jq -r --arg t "$task_id" '.prs[$t].conflict_files_with_main' "$state_file")
 
-        # Case 1: Has new comments → needs_fix
+        # Case 1: Has new comments → needs_fix (via lifecycle engine)
         if [ "$has_comments" = "true" ]; then
             log "  $task_id: needs_fix (has new comments)"
-            git_state_set "$worker_dir" "needs_fix" "pr-merge-optimizer" "New comments need addressing"
+            emit_event "$worker_dir" "pr.comments_detected" "pr-merge-executor.handle_remaining" || \
+                git_state_set "$worker_dir" "needs_fix" "pr-merge-optimizer" "New comments need addressing"
             echo "$task_id" >> "$ralph_dir/orchestrator/tasks-needing-fix.txt"
             ((++needs_fix))
             continue
@@ -419,9 +420,11 @@ pr_merge_handle_remaining() {
             local files_modified
             files_modified=$(jq -r --arg t "$task_id" '.prs[$t].files_modified' "$state_file")
             conflict_registry_add "$ralph_dir" "$task_id" "$pr_number" "$(echo "$files_modified" | jq -r '.[]')"
-            conflict_queue_add "$ralph_dir" "$task_id" "$worker_dir" "$pr_number" "$files_modified"
-
-            git_state_set "$worker_dir" "needs_multi_resolve" "pr-merge-optimizer" "Multi-PR conflict detected"
+            emit_event "$worker_dir" "pr.multi_conflict_detected" "pr-merge-executor.handle_remaining" \
+                "$(jq -n --arg pr "$pr_number" --argjson af "$files_modified" '{pr_number: $pr, affected_files: $af}')" || {
+                conflict_queue_add "$ralph_dir" "$task_id" "$worker_dir" "$pr_number" "$files_modified"
+                git_state_set "$worker_dir" "needs_multi_resolve" "pr-merge-optimizer" "Multi-PR conflict detected"
+            }
             ((++needs_multi_resolve))
         else
             # Check current state - don't interrupt active resolution or post-resolution states
@@ -437,7 +440,9 @@ pr_merge_handle_remaining() {
 
             log "  $task_id: needs_resolve (single-PR conflict with main)"
 
-            git_state_set "$worker_dir" "needs_resolve" "pr-merge-optimizer" "Merge conflict with main"
+            emit_event "$worker_dir" "pr.conflict_detected" "pr-merge-executor.handle_remaining" \
+                "$(jq -n --arg pr "$pr_number" --argjson af "$conflict_files" '{pr_number: $pr, affected_files: $af}')" || \
+                git_state_set "$worker_dir" "needs_resolve" "pr-merge-optimizer" "Merge conflict with main"
             ((++needs_resolve))
         fi
     done <<< "$task_ids"

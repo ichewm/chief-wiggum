@@ -50,6 +50,7 @@
     { "event": "fix.fail",              "from": "fixing",     "to": "failed",       "effects": ["check_permanent"] },
     { "event": "fix.timeout",           "from": "fixing",     "to": "needs_fix" },
     { "event": "fix.already_merged",    "from": "needs_fix",  "to": "merged",       "kanban": "x", "effects": ["sync_github"] },
+    { "event": "fix.detected",          "from": "failed",     "to": "needs_fix",    "guard": "recovery_attempts_lt_max", "effects": ["inc_recovery"] },
 
     { "event": "merge.start",           "from": "needs_merge","to": "merging",      "guard": "merge_attempts_lt_max", "effects": ["inc_merge_attempts"] },
     { "event": "merge.start",           "from": "needs_merge","to": "failed",       "effects": ["check_permanent"] },
@@ -84,6 +85,22 @@
     { "event": "resolve.max_exceeded",  "from": "needs_multi_resolve","to": "failed",      "effects": ["check_permanent"] },
     { "event": "resolve.batch_failed",  "from": "needs_multi_resolve","to": "needs_resolve" },
     { "event": "resolve.batch_failed",  "from": "needs_resolve",      "to": "needs_resolve" },
+
+    { "event": "pr.conflict_detected",  "from": "none",              "to": "needs_resolve", "effects": ["add_conflict_queue"] },
+    { "event": "pr.conflict_detected",  "from": "needs_merge",       "to": "needs_resolve", "effects": ["add_conflict_queue"] },
+    { "event": "pr.conflict_detected",  "from": "needs_fix",         "to": "needs_resolve", "effects": ["add_conflict_queue"] },
+    { "event": "pr.conflict_detected",  "from": "failed",            "to": "needs_resolve", "guard": "recovery_attempts_lt_max", "effects": ["inc_recovery", "reset_merge", "add_conflict_queue"] },
+
+    { "event": "pr.multi_conflict_detected", "from": "none",              "to": "needs_multi_resolve", "effects": ["add_conflict_queue"] },
+    { "event": "pr.multi_conflict_detected", "from": "needs_merge",       "to": "needs_multi_resolve", "effects": ["add_conflict_queue"] },
+    { "event": "pr.multi_conflict_detected", "from": "needs_fix",         "to": "needs_multi_resolve", "effects": ["add_conflict_queue"] },
+    { "event": "pr.multi_conflict_detected", "from": "failed",            "to": "needs_multi_resolve", "guard": "recovery_attempts_lt_max", "effects": ["inc_recovery", "reset_merge", "add_conflict_queue"] },
+
+    { "event": "pr.comments_detected",  "from": "none",              "to": "needs_fix" },
+    { "event": "pr.comments_detected",  "from": "needs_merge",       "to": "needs_fix" },
+    { "event": "pr.comments_detected",  "from": "failed",            "to": "needs_fix", "guard": "recovery_attempts_lt_max", "effects": ["inc_recovery"] },
+
+    { "event": "pr.retrack",            "from": "none",              "to": "needs_merge" },
 
     { "event": "recovery.to_resolve",   "from": "failed",     "to": "needs_resolve","guard": "recovery_attempts_lt_max", "effects": ["inc_recovery", "reset_merge"] },
     { "event": "recovery.to_fix",       "from": "failed",     "to": "needs_fix",    "guard": "recovery_attempts_lt_max", "effects": ["inc_recovery"] },

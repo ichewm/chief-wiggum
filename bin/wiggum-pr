@@ -24,6 +24,7 @@ source "$WIGGUM_HOME/lib/backend/claude/usage-tracker.sh"
 source "$WIGGUM_HOME/lib/github/pr-labels.sh"
 source "$WIGGUM_HOME/lib/github/issue-sync.sh"
 source "$WIGGUM_HOME/lib/scheduler/pr-merge-data.sh"
+source "$WIGGUM_HOME/lib/core/lifecycle-engine.sh"
 
 show_help() {
     cat << 'EOF'
@@ -274,6 +275,9 @@ cmd_global_sync() {
         return 1
     fi
 
+    # Load lifecycle engine for emit_event
+    lifecycle_is_loaded || lifecycle_load
+
     local sync_state_file="$RALPH_DIR/orchestrator/sync-state.json"
     local tasks_needing_fix="$RALPH_DIR/orchestrator/tasks-needing-fix.txt"
 
@@ -288,7 +292,7 @@ cmd_global_sync() {
     # Get all task/* PRs (both open and merged)
     log "Syncing PRs..."
     local all_prs gh_exit=0 gh_output
-    gh_output=$(gh pr list --search "head:task/" --state all --json number,headRefName,state,mergedAt 2>&1) || gh_exit=$?
+    gh_output=$(gh pr list --search "head:task/" --state all --json number,headRefName,state,mergedAt,mergeable 2>&1) || gh_exit=$?
 
     if [ "$gh_exit" -ne 0 ]; then
         if gh_is_network_error "$gh_exit" "$gh_output"; then
@@ -308,6 +312,7 @@ cmd_global_sync() {
 
     local merged_count=0
     local comments_count=0
+    local conflicts_count=0
 
     # Pre-scan: collect task IDs that have an OPEN PR.
     # When a task has both a merged PR (old) and an open PR (new), the merged
@@ -403,7 +408,8 @@ cmd_global_sync() {
 
                     if [ "$relevant_comment_count" -gt 0 ]; then
                         echo "$task_id" >> "$tasks_needing_fix"
-                        git_state_set "$worker_dir" "needs_fix" "wiggum-pr.sync" "New PR comments detected ($relevant_comment_count relevant)"
+                        emit_event "$worker_dir" "pr.comments_detected" "wiggum-pr.sync" || \
+                            git_state_set "$worker_dir" "needs_fix" "wiggum-pr.sync" "New PR comments detected ($relevant_comment_count relevant)"
                         ((++comments_count))
                     else
                         log_debug "  $task_id: no relevant comments"
@@ -437,12 +443,37 @@ cmd_global_sync() {
             else
                 log_debug "  $task_id: unchanged"
             fi
+
+            # Check for merge conflicts (fallback when fast-merge is down)
+            local mergeable
+            mergeable=$(echo "$pr" | jq -r '.mergeable // "UNKNOWN"')
+            if [ "$mergeable" = "CONFLICTING" ]; then
+                local worker_dir
+                worker_dir=${worker_dir:-$(find_worker_by_task_id "$RALPH_DIR" "$task_id" 2>/dev/null)}
+                if [ -n "$worker_dir" ] && [ -d "$worker_dir" ]; then
+                    local current_state
+                    current_state=$(git_state_get "$worker_dir" 2>/dev/null || echo "none")
+                    # Only emit if not already being resolved
+                    case "$current_state" in
+                        needs_resolve|needs_multi_resolve|resolving|resolved)
+                            log_debug "  $task_id: conflict detected but already $current_state"
+                            ;;
+                        *)
+                            log "  $task_id: conflict detected (mergeable=CONFLICTING)"
+                            emit_event "$worker_dir" "pr.conflict_detected" "wiggum-pr.sync" \
+                                "$(jq -n --arg pr "$pr_number" '{pr_number: $pr, affected_files: []}')" || \
+                                log_debug "  $task_id: emit pr.conflict_detected failed (state=$current_state)"
+                            ((++conflicts_count))
+                            ;;
+                    esac
+                fi
+            fi
         fi
     done < <(echo "$all_prs" | jq -c '.[]')
 
     # Compact summary
-    if [ "$merged_count" -gt 0 ] || [ "$comments_count" -gt 0 ]; then
-        log "Sync: $merged_count merged, $comments_count with comments"
+    if [ "$merged_count" -gt 0 ] || [ "$comments_count" -gt 0 ] || [ "$conflicts_count" -gt 0 ]; then
+        log "Sync: $merged_count merged, $comments_count with comments, $conflicts_count with conflicts"
     fi
 
     if [ -s "$tasks_needing_fix" ]; then
