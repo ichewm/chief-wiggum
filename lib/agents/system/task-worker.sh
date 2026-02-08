@@ -290,6 +290,14 @@ agent_run() {
         return "$EXIT_AGENT_VALIDATION_FAILED"
     fi
 
+    # Check test result from pipeline step
+    local test_result
+    test_result=$(agent_read_step_result "$worker_dir" "test")
+    if [ "$test_result" = "FIX" ] || [ "$test_result" = "FAIL" ]; then
+        log_error "Test step result: $test_result - marking task as failed"
+        final_status="FAILED"
+    fi
+
     local pr_url="N/A"
     local task_desc=""
 

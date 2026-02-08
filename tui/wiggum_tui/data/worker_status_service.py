@@ -7,7 +7,7 @@ calls when multiple panels query worker status within a short time window.
 import time
 from pathlib import Path
 
-from .worker_scanner import scan_workers, get_task_running_status as _get_task_running_status
+from .worker_scanner import scan_workers
 from .models import Worker, WorkerStatus
 
 

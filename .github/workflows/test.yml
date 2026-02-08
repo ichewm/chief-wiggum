@@ -111,10 +111,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Run orchestrator-py tests
-        working-directory: lib/orchestrator-py
-        run: |
-          uv sync --extra dev --quiet
-          uv run pytest tests/ -v
+        run: ./tests/orchestrator-py-test-runner.sh -v
 
   python-lint:
     name: Python Lint
@@ -126,14 +123,5 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
-      - name: Lint TUI
-        working-directory: tui
-        run: |
-          uv sync --extra dev --quiet
-          uv run ruff check .
-
-      - name: Lint orchestrator-py
-        working-directory: lib/orchestrator-py
-        run: |
-          uv sync --extra dev --quiet
-          uv run ruff check .
+      - name: Run Python lint
+        run: ./tests/python-lint-runner.sh

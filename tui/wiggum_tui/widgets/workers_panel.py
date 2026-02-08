@@ -2,7 +2,6 @@
 
 import time
 from pathlib import Path
-from datetime import datetime
 from textual.app import ComposeResult
 from textual.widgets import DataTable, Static
 from textual.widget import Widget

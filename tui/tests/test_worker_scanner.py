@@ -1,6 +1,5 @@
 """Tests for worker_scanner module."""
 
-import pytest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -193,8 +192,6 @@ class TestScanWorkers:
         assert workers[2].task_id == "TASK-001"
 
     def test_running_worker_uses_pid_mtime_for_timestamp(self, tmp_path: Path):
-        import os
-        import time
 
         ralph_dir = tmp_path / ".ralph"
         workers_dir = ralph_dir / "workers"

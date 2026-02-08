@@ -4,7 +4,6 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.widgets import Static, DataTable, Tree
-from textual.widgets.tree import TreeNode
 from textual.widget import Widget
 from textual.binding import Binding
 

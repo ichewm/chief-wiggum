@@ -1,6 +1,5 @@
 """Tests for log_reader module."""
 
-import pytest
 from pathlib import Path
 
 from wiggum_tui.data.log_reader import (

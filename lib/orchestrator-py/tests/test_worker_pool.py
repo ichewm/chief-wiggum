@@ -1,6 +1,5 @@
 """Tests for worker_pool.py — PID tracking and persistence."""
 
-import json
 import os
 
 import pytest

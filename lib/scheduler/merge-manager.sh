@@ -26,6 +26,7 @@ source "$WIGGUM_HOME/lib/scheduler/batch-coordination.sh"
 source "$WIGGUM_HOME/lib/core/safe-path.sh"
 source "$WIGGUM_HOME/lib/core/lifecycle-engine.sh"
 source "$WIGGUM_HOME/lib/github/issue-sync.sh"
+source "$WIGGUM_HOME/lib/core/agent-result.sh"
 
 # Seconds to wait for GitHub to report PR as mergeable after a push
 MERGE_POLL_TIMEOUT="${WIGGUM_MERGE_POLL_TIMEOUT:-30}"

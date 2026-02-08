@@ -6,7 +6,6 @@ import argparse
 import os
 import signal
 import sys
-import time
 import threading
 
 from wiggum_orchestrator import logging_bridge as log

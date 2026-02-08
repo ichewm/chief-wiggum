@@ -1,7 +1,6 @@
 """Tests for service_state.py — state persistence and lifecycle marks."""
 
 import json
-import os
 import time
 
 import pytest

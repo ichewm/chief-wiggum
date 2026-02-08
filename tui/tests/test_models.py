@@ -1,6 +1,5 @@
 """Tests for data models."""
 
-import pytest
 from wiggum_tui.data.models import (
     Task,
     TaskStatus,

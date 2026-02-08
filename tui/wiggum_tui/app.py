@@ -4,8 +4,7 @@ from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Header, Footer, Static, TabbedContent, TabPane, Tree, OptionList
+from textual.widgets import Footer, TabbedContent, TabPane, Tree, OptionList
 
 from .themes.htop import HTOP_THEME
 from .widgets.header import WiggumHeader

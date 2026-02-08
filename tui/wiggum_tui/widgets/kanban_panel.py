@@ -3,12 +3,11 @@
 import time
 from pathlib import Path
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical, VerticalScroll, Center
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Static, Button
 from textual.widget import Widget
 from textual.screen import ModalScreen
 from textual.binding import Binding
-from textual import events
 
 from ..data.kanban_parser import parse_kanban_with_status, group_tasks_by_status
 from ..data.models import Task, TaskStatus, Worker

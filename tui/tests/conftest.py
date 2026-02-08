@@ -1,6 +1,5 @@
 """Pytest configuration and fixtures for TUI tests."""
 
-import json
 import pytest
 from pathlib import Path
 

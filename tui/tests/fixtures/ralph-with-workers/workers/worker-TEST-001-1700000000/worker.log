@@ -1,0 +1,7 @@
+[2024-01-15 10:00:00] INFO: Starting worker for TEST-001
+[2024-01-15 10:00:01] DEBUG: Loading configuration
+[2024-01-15 10:00:02] INFO: Executing plan-mode agent
+[2024-01-15 10:00:10] WARN: Rate limit approaching
+[2024-01-15 10:00:15] ERROR: API call failed, retrying
+[2024-01-15 10:00:20] INFO: Retry successful
+[2024-01-15 10:00:30] INFO: Agent completed successfully

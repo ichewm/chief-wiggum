@@ -1,0 +1,5 @@
+{"type": "iteration_start", "iteration": 0, "timestamp": "2024-01-15T10:00:00Z", "system_prompt": "You are a helpful assistant.", "user_prompt": "Implement the feature"}
+{"type": "assistant", "timestamp": "2024-01-15T10:00:05Z", "message": {"content": [{"type": "text", "text": "I'll implement this feature."}]}}
+{"type": "assistant", "timestamp": "2024-01-15T10:00:10Z", "message": {"content": [{"type": "tool_use", "id": "tool_001", "name": "Read", "input": {"file_path": "/path/to/file.py"}}]}}
+{"type": "user", "timestamp": "2024-01-15T10:00:11Z", "tool_use_result": {"type": "text", "content": "file content"}, "message": {"content": [{"type": "tool_result", "tool_use_id": "tool_001", "content": "file content"}]}}
+{"type": "result", "iteration": 0, "subtype": "success", "duration_ms": 15000, "duration_api_ms": 12000, "num_turns": 3, "total_cost_usd": 0.15, "is_error": false, "usage": {"input_tokens": 3000, "output_tokens": 1000, "cache_creation_input_tokens": 200, "cache_read_input_tokens": 1500}}

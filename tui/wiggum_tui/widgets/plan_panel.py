@@ -3,8 +3,8 @@
 from pathlib import Path
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Static, OptionList, Markdown
+from textual.containers import Horizontal, VerticalScroll
+from textual.widgets import OptionList, Markdown
 from textual.widgets.option_list import Option
 from textual.widget import Widget
 

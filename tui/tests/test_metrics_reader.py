@@ -1,7 +1,6 @@
 """Tests for metrics_reader module."""
 
 import json
-import pytest
 from pathlib import Path
 
 from wiggum_tui.data.metrics_reader import (

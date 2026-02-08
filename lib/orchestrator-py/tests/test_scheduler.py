@@ -355,7 +355,6 @@ def test_event_service_triggered_on_failure(state, mock_executor, cb):
 
 def test_event_service_conditions_checked(state, mock_executor, cb):
     """Conditions should be evaluated before running event-triggered service."""
-    import os
     services = [
         ServiceConfig(
             id="extract",

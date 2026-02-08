@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal
 from textual.widgets import Static, Select, Input, Tree
 from textual.widgets.tree import TreeNode
 from textual.widget import Widget
@@ -16,7 +16,6 @@ from ..data.conversation_parser import (
     truncate_text,
     format_tool_result,
     has_logs_changed,
-    get_logs_max_mtime,
 )
 from ..data.worker_scanner import scan_workers
 from ..data.models import Conversation, ConversationTurn, ToolCall, Worker

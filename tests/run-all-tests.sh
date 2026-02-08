@@ -40,7 +40,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --quick, -q     Skip slow tests"
             echo "  --verbose, -v   Show detailed output"
-            echo "  --suite, -s     Run specific suite (syntax, integration, e2e, tui)"
+            echo "  --suite, -s     Run specific suite (syntax, integration, e2e, tui, orchestrator-py, lint)"
             echo "  --help, -h      Show this help"
             exit 0
             ;;
@@ -258,6 +258,12 @@ main() {
             tui)
                 run_suite "TUI Tests" "$SCRIPT_DIR/tui-test-runner.sh"
                 ;;
+            orchestrator-py)
+                run_suite "Orchestrator-py Tests" "$SCRIPT_DIR/orchestrator-py-test-runner.sh"
+                ;;
+            lint)
+                run_suite "Python Lint" "$SCRIPT_DIR/python-lint-runner.sh"
+                ;;
             *)
                 echo "Unknown suite: $SPECIFIC_SUITE"
                 exit 1
@@ -288,6 +294,12 @@ main() {
 
         # 6. TUI tests (Python)
         run_suite "TUI Tests" "$SCRIPT_DIR/tui-test-runner.sh"
+
+        # 7. Orchestrator-py tests (Python)
+        run_suite "Orchestrator-py Tests" "$SCRIPT_DIR/orchestrator-py-test-runner.sh"
+
+        # 8. Python lint (ruff)
+        run_suite "Python Lint" "$SCRIPT_DIR/python-lint-runner.sh"
     fi
 
     # Print summary

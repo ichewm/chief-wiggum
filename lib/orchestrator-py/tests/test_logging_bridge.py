@@ -1,7 +1,6 @@
 """Tests for logging_bridge.py — log format and level filtering."""
 
 import os
-import tempfile
 
 from wiggum_orchestrator import logging_bridge
 

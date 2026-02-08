@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from textual.widgets import TabbedContent, Footer
 
@@ -43,7 +43,7 @@ class TestWiggumAppStartup:
         """Test that app creates all expected panels."""
         app = WiggumApp(ralph_with_workers)
 
-        async with app.run_test() as pilot:
+        async with app.run_test() as _pilot:
             # Check that TabbedContent exists
             tabbed = app.query_one(TabbedContent)
             assert tabbed is not None

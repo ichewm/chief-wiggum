@@ -12,7 +12,6 @@ from textual.binding import Binding
 from ..data.log_reader import (
     LogTailer,
     filter_by_level,
-    read_log,
     parse_activity_log,
 )
 from ..data.models import LogLevel, LogLine

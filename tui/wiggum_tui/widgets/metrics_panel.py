@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from dataclasses import dataclass, field
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal
 from textual.widgets import Static, DataTable
 from textual.widget import Widget
 

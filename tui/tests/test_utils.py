@@ -1,7 +1,6 @@
 """Tests for shared utilities."""
 
 import time
-import pytest
 from wiggum_tui.utils import format_relative_time
 
 

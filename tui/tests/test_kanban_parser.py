@@ -1,6 +1,5 @@
 """Tests for kanban_parser module."""
 
-import pytest
 from pathlib import Path
 
 from wiggum_tui.data.kanban_parser import (
