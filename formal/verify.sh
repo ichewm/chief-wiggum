@@ -66,11 +66,25 @@ TOTAL_COUNT=0
 
 run_check() {
     local spec="$1" inv="$2" length="$3"
-    local label="${spec}::${inv}"
+    local spec_name="${spec%.tla}"
 
-    # Filter
-    if [[ -n "$FILTER" ]] && [[ "$label" != *"$FILTER"* ]]; then
-        return 0
+    # Filter: if FILTER contains "::", match each side independently against
+    # spec name and invariant name. Otherwise match as substring against either.
+    if [[ -n "$FILTER" ]]; then
+        if [[ "$FILTER" == *"::"* ]]; then
+            local fspec="${FILTER%%::*}"
+            local finv="${FILTER#*::}"
+            if [[ -n "$fspec" ]] && [[ "$spec_name" != *"$fspec"* ]]; then
+                return 0
+            fi
+            if [[ -n "$finv" ]] && [[ "$inv" != *"$finv"* ]]; then
+                return 0
+            fi
+        else
+            if [[ "$spec_name" != *"$FILTER"* ]] && [[ "$inv" != *"$FILTER"* ]]; then
+                return 0
+            fi
+        fi
     fi
 
     ((++TOTAL_COUNT)) || true
@@ -78,14 +92,14 @@ run_check() {
     # Interactive prompt
     if [[ "$INTERACTIVE" == true ]]; then
         local answer=""
-        read -rp "Run $label? [Y/n/q] " answer </dev/tty
+        read -rp "Run ${spec_name}::${inv}? [Y/n/q] " answer </dev/tty
         case "${answer,,}" in
             q) echo "Quit."; _print_summary; exit "$( (( FAIL_COUNT > 0 )) && echo 1 || echo 0 )" ;;
             n) ((++SKIP_COUNT)) || true; return 0 ;;
         esac
     fi
 
-    printf "%-55s " "$label"
+    printf "%-55s " "${spec_name}::${inv}"
 
     local tmpout
     tmpout=$(mktemp)
