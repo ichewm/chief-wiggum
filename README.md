@@ -1,5 +1,8 @@
 # Chief Wiggum
 
+> [!CAUTION]
+> This tool is highly opinionated. For general development, use releases [v0.10.x](https://github.com/wiggum-cc/chief-wiggum/releases/tag/v0.10.3).
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bash](https://img.shields.io/badge/Language-Bash-blue)](https://www.gnu.org/software/bash/)
 
