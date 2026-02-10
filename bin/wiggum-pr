@@ -408,10 +408,15 @@ cmd_global_sync() {
                     fi
 
                     if [ "$relevant_comment_count" -gt 0 ]; then
-                        echo "$task_id" >> "$tasks_needing_fix"
-                        emit_event "$worker_dir" "pr.comments_detected" "wiggum-pr.sync" || \
-                            git_state_set "$worker_dir" "needs_fix" "wiggum-pr.sync" "New PR comments detected ($relevant_comment_count relevant)"
-                        ((++comments_count))
+                        # Use lifecycle engine exclusively — do NOT fall back to
+                        # git_state_set, which bypasses guards and can transition
+                        # terminal states (e.g., merged → needs_fix).
+                        if emit_event "$worker_dir" "pr.comments_detected" "wiggum-pr.sync"; then
+                            echo "$task_id" >> "$tasks_needing_fix"
+                            ((++comments_count))
+                        else
+                            log_debug "  $task_id: pr.comments_detected rejected by lifecycle (state=$(git_state_get "$worker_dir" 2>/dev/null))"
+                        fi
                     else
                         log_debug "  $task_id: no relevant comments"
                     fi

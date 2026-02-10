@@ -303,8 +303,25 @@ agent_run() {
 
     log_debug "Finalization check: has_violations=$has_violations, final_status=$final_status"
 
+    # Skip PR creation if the pipeline already merged the PR (e.g., fix pipeline).
+    # The merge step handles the full push+merge cycle; creating a new PR here
+    # would produce a duplicate that triggers spurious fix cycles.
+    local merge_step_result
+    merge_step_result=$(agent_read_step_result "$worker_dir" "merge")
+    local pipeline_already_merged=false
+    if [ "$merge_step_result" = "PASS" ]; then
+        pipeline_already_merged=true
+        log "Pipeline merge step already merged the PR — skipping commit/PR creation"
+    fi
+
     # Only create commits and PRs if no violations and task is complete
-    if [ "$has_violations" = false ] && [ "$final_status" = "COMPLETE" ]; then
+    if [ "$pipeline_already_merged" = true ]; then
+        log_debug "Finalization: no PR creation needed (pipeline merged)"
+        # Pick up existing PR URL for cleanup/kanban (pr_url.txt written by earlier pipeline run)
+        if [ -f "$worker_dir/pr_url.txt" ]; then
+            pr_url=$(cat "$worker_dir/pr_url.txt")
+        fi
+    elif [ "$has_violations" = false ] && [ "$final_status" = "COMPLETE" ]; then
         log "Creating commit and PR for task $task_id"
         if [ -d "$workspace" ]; then
             cd "$workspace" || return 1

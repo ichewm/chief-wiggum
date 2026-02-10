@@ -356,11 +356,16 @@ pr_merge_handle_remaining() {
 
         # Case 1: Has new comments → needs_fix (via lifecycle engine)
         if [ "$has_comments" = "true" ]; then
-            log "  $task_id: needs_fix (has new comments)"
-            emit_event "$worker_dir" "pr.comments_detected" "pr-merge-executor.handle_remaining" || \
-                git_state_set "$worker_dir" "needs_fix" "pr-merge-optimizer" "New comments need addressing"
-            echo "$task_id" >> "$ralph_dir/orchestrator/tasks-needing-fix.txt"
-            ((++needs_fix))
+            # Use lifecycle engine exclusively — do NOT fall back to
+            # git_state_set, which bypasses guards and can transition
+            # terminal states (e.g., merged → needs_fix).
+            if emit_event "$worker_dir" "pr.comments_detected" "pr-merge-executor.handle_remaining"; then
+                log "  $task_id: needs_fix (has new comments)"
+                echo "$task_id" >> "$ralph_dir/orchestrator/tasks-needing-fix.txt"
+                ((++needs_fix))
+            else
+                log_debug "  $task_id: pr.comments_detected rejected by lifecycle (state=$(git_state_get "$worker_dir" 2>/dev/null))"
+            fi
             continue
         fi
 

@@ -24,6 +24,7 @@ agent_required_paths() {
 # Source dependencies
 agent_source_core
 source "$WIGGUM_HOME/lib/worker/git-state.sh"
+source "$WIGGUM_HOME/lib/core/lifecycle-engine.sh"
 
 # Main entry point
 agent_run() {
@@ -81,7 +82,10 @@ agent_run() {
 
     if [ "$pr_state" = "MERGED" ]; then
         log "PR #$pr_number is already merged"
-        git_state_set "$worker_dir" "merged" "workflow.pr-merge" "PR already merged"
+        # Use merge.pr_merged (wildcard from: "*") to transition through lifecycle
+        # engine, which runs effects (sync_github, cleanup_worktree, etc.)
+        lifecycle_is_loaded || lifecycle_load
+        emit_event "$worker_dir" "merge.pr_merged" "workflow.pr-merge" || true
         agent_write_result "$worker_dir" "PASS" \
             "{\"pr_number\":$pr_number,\"merge_status\":\"already_merged\"}"
         return 0
@@ -104,17 +108,24 @@ agent_run() {
 
     if [ $merge_exit -eq 0 ]; then
         log "PR #$pr_number merged successfully"
-        git_state_set "$worker_dir" "merged" "workflow.pr-merge" "PR merged successfully"
+        # Use merge.pr_merged (wildcard from: "*") to transition through lifecycle
+        # engine, which runs effects (sync_github, cleanup_worktree, etc.)
+        lifecycle_is_loaded || lifecycle_load
+        emit_event "$worker_dir" "merge.pr_merged" "workflow.pr-merge" || true
         agent_write_result "$worker_dir" "PASS" \
             "{\"pr_number\":$pr_number,\"merge_status\":\"merged\",\"attempts\":$merge_attempts}"
         return 0
     fi
 
+    # Failure paths: do NOT set lifecycle state directly. The pipeline runner
+    # reads the gate result (FAIL) and the orchestrator's worker_complete_fix()
+    # handles lifecycle transitions from "fixing" state. Direct git_state_set
+    # here would corrupt the lifecycle state mid-pipeline.
+
     # Check if failure is due to merge conflict
     if echo "$merge_output" | grep -qiE "(conflict|cannot be merged|out of date|not mergeable)"; then
         log "Merge conflict detected for PR #$pr_number"
         git_state_set_error "$worker_dir" "Merge conflict: ${merge_output:0:200}"
-        git_state_set "$worker_dir" "merge_conflict" "workflow.pr-merge" "Merge failed due to conflict"
         agent_write_result "$worker_dir" "FAIL" \
             "{\"pr_number\":$pr_number,\"merge_status\":\"conflict\",\"attempts\":$merge_attempts}"
         return 0  # FAIL is a valid gate result, not an error
@@ -132,7 +143,6 @@ agent_run() {
     # Other merge failure
     log_error "Merge failed for PR #$pr_number: $merge_output"
     git_state_set_error "$worker_dir" "Merge failed: ${merge_output:0:200}"
-    git_state_set "$worker_dir" "failed" "workflow.pr-merge" "Merge failed"
     agent_write_result "$worker_dir" "FAIL" \
         "{\"pr_number\":$pr_number,\"merge_status\":\"error\",\"attempts\":$merge_attempts}" \
         '["Merge failed: '"${merge_output:0:200}"'"]'
