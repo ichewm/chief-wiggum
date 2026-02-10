@@ -20,6 +20,7 @@ _GITHUB_ISSUE_CONFIG_LOADED=1
 # =============================================================================
 
 GITHUB_SYNC_ENABLED="${WIGGUM_GITHUB_ISSUE_SYNC:-}"
+GITHUB_SYNC_AUTO_CREATE="${WIGGUM_GITHUB_AUTO_CREATE:-}"
 GITHUB_SYNC_ALLOWED_USER_IDS="${WIGGUM_GITHUB_ALLOWED_USER_IDS:-}"
 GITHUB_SYNC_LABEL_FILTER="${WIGGUM_GITHUB_LABEL_FILTER:-}"
 GITHUB_SYNC_DEFAULT_PRIORITY="${WIGGUM_GITHUB_DEFAULT_PRIORITY:-}"
@@ -55,7 +56,8 @@ _extract_github_sync_config() {
         (.github.issue_sync.status_labels // {} | tojson),
         (.github.issue_sync.close_on // [] | join(",")),
         (.github.issue_sync.context_events // ""),
-        (.github.issue_sync.complexity_labels // {} | tojson)
+        (.github.issue_sync.complexity_labels // {} | tojson),
+        (.github.issue_sync.auto_create // "")
     ] | join("\u001f")' "$config_file" 2>/dev/null || return 1
 }
 
@@ -82,7 +84,7 @@ load_github_sync_config() {
     local _cfg_enabled="" _cfg_user_ids=""
     local _cfg_label_filter="" _cfg_default_priority=""
     local _cfg_priority_labels="" _cfg_status_labels="" _cfg_close_on=""
-    local _cfg_context_events="" _cfg_complexity_labels=""
+    local _cfg_context_events="" _cfg_complexity_labels="" _cfg_auto_create=""
 
     # Try project-specific config first, then global
     local extracted=""
@@ -103,6 +105,7 @@ load_github_sync_config() {
                          _cfg_label_filter _cfg_default_priority \
                          _cfg_priority_labels _cfg_status_labels _cfg_close_on \
                          _cfg_context_events _cfg_complexity_labels \
+                         _cfg_auto_create \
                          <<< "$extracted"
     fi
 
@@ -140,7 +143,11 @@ load_github_sync_config() {
     # Context events: emit events when in-progress task content changes on GitHub
     GITHUB_SYNC_CONTEXT_EVENTS="${WIGGUM_CONTEXT_EVENTS:-${_cfg_context_events:-false}}"
 
+    # Auto-create: automatically create GitHub issues for untracked kanban tasks during periodic sync
+    GITHUB_SYNC_AUTO_CREATE="${WIGGUM_GITHUB_AUTO_CREATE:-${_cfg_auto_create:-true}}"
+
     export GITHUB_SYNC_ENABLED
+    export GITHUB_SYNC_AUTO_CREATE
     export GITHUB_SYNC_ALLOWED_USER_IDS
     export GITHUB_SYNC_LABEL_FILTER
     export GITHUB_SYNC_DEFAULT_PRIORITY
@@ -159,6 +166,13 @@ load_github_sync_config() {
 # Returns: 0 if enabled, 1 if disabled
 github_sync_is_enabled() {
     [[ "$GITHUB_SYNC_ENABLED" == "true" ]]
+}
+
+# Check if auto-creation of GitHub issues for untracked tasks is enabled
+#
+# Returns: 0 if enabled, 1 if disabled
+github_sync_auto_create_enabled() {
+    [[ "${GITHUB_SYNC_AUTO_CREATE:-true}" == "true" ]]
 }
 
 # Validate that the sync configuration is usable

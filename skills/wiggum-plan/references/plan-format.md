@@ -123,9 +123,10 @@ CRITICAL: Every requirement from PRD AND relevant spec/ documents must appear he
 |------|--------|-------|-------------|
 | path/file.sh:L10-L45 | CREATE | [line range] | R1 |
 | path/other.sh:L5-L20 | MODIFY | [line range] | R2 |
+| tests/main.rs:L1-L5 | MODIFY(minor) | [line range] | R2 |
 | path/pattern.sh:L30-L60 | REFERENCE | — | [pattern to follow] |
 
-Actions: **CREATE** (new file), **MODIFY** (change existing), **REFERENCE** (pattern to follow, do not modify)
+Actions: **CREATE** (new file), **MODIFY** (change existing), **MODIFY(minor)** (trivial/auto-mergeable change, e.g. test harness registration — excluded from conflict detection), **REFERENCE** (pattern to follow, do not modify)
 
 ### Incompatible With (only if applicable)
 TASK-029
@@ -223,6 +224,7 @@ Explicit and specific:
 Table format required:
 - **CREATE**: New files to create
 - **MODIFY**: Existing files to change (with line ranges)
+- **MODIFY(minor)**: Trivially auto-mergeable changes (e.g., adding a `mod` line to a test harness, appending to a list). Excluded from conflict detection so concurrent tasks touching the same file aren't blocked
 - **REFERENCE**: Files to use as patterns (don't modify)
 - List all significant files (not just 3-5)
 

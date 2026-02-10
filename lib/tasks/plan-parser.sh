@@ -15,7 +15,12 @@ get_plan_critical_files() {
         /^##+ Critical Files/ { in_section = 1; next }
         in_section && /^##/ { in_section = 0 }
         in_section {
-            # Match table rows with CREATE or MODIFY action
+            # Match table rows with CREATE or bare MODIFY action
+            # MODIFY(minor) is intentionally excluded — it indicates trivially
+            # auto-mergeable changes (e.g., test harness registrations) that
+            # should NOT trigger file-conflict detection between concurrent tasks.
+            # The regex requires MODIFY followed by " |", so "MODIFY(minor) |"
+            # does not match.
             # Format: | File | Action | Reason |
             if (/^\| .+ \| (CREATE|MODIFY) \|/) {
                 # Extract first column (File)

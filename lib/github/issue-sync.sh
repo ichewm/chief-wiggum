@@ -1038,6 +1038,22 @@ github_issue_sync() {
         return 1
     }
 
+    # Auto-create issues for untracked local tasks (before status sync)
+    if github_sync_auto_create_enabled; then
+        local kanban_file="$ralph_dir/kanban.md"
+        if [ -f "$kanban_file" ]; then
+            github_sync_state_init "$ralph_dir"
+            local untracked_ids
+            untracked_ids=$(_get_untracked_task_ids "$kanban_file" "$ralph_dir")
+            if [ -n "$untracked_ids" ]; then
+                log "Auto-creating GitHub issues for untracked local tasks..."
+                github_issue_sync_up_create "$ralph_dir" "all" "$dry_run" "true" || {
+                    log_warn "Auto-create failed for some tasks (will retry next cycle)"
+                }
+            fi
+        fi
+    fi
+
     # Up sync (kanban status -> GitHub)
     github_issue_sync_up "$ralph_dir" "$dry_run" || {
         log_error "Up-sync failed"

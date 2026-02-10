@@ -86,6 +86,63 @@ EOF
     assert_equals "src/app.js" "$output" "Should remove backticks from file path"
 }
 
+test_plan_parser_excludes_modify_minor() {
+    source "$WIGGUM_HOME/lib/tasks/plan-parser.sh"
+
+    local plan_file="$TEST_DIR/plan.md"
+    cat > "$plan_file" << 'EOF'
+## Critical Files
+
+| File | Action | Reason |
+|------|--------|--------|
+| `src/main.py` | CREATE | Main entry point |
+| `src/util.py` | MODIFY | Update helper functions |
+| `tests/main.rs` | MODIFY(minor) | Add test module registration |
+| `tests/integration.rs` | MODIFY(minor) | Add integration test import |
+| `docs/README.md` | REFERENCE | Documentation only |
+EOF
+
+    local output
+    output=$(get_plan_critical_files "$plan_file")
+
+    assert_output_contains "$output" "src/main.py" "Should extract CREATE file"
+    assert_output_contains "$output" "src/util.py" "Should extract MODIFY file"
+    assert_output_not_contains "$output" "tests/main.rs" "Should NOT extract MODIFY(minor) file"
+    assert_output_not_contains "$output" "tests/integration.rs" "Should NOT extract second MODIFY(minor) file"
+    assert_output_not_contains "$output" "docs/README.md" "Should NOT extract REFERENCE file"
+}
+
+test_conflict_detection_modify_minor_no_conflict() {
+    source "$WIGGUM_HOME/lib/tasks/conflict-detection.sh"
+
+    mkdir -p "$RALPH_DIR/plans"
+
+    # Task A uses MODIFY on shared.rs, MODIFY(minor) on tests/main.rs
+    cat > "$RALPH_DIR/plans/TASK-001.md" << 'EOF'
+## Critical Files
+| File | Action | Reason |
+|------|--------|--------|
+| `src/feature_a.rs` | CREATE | New feature |
+| `tests/main.rs` | MODIFY(minor) | Add test module |
+EOF
+
+    # Task B also uses MODIFY(minor) on tests/main.rs
+    cat > "$RALPH_DIR/plans/TASK-002.md" << 'EOF'
+## Critical Files
+| File | Action | Reason |
+|------|--------|--------|
+| `src/feature_b.rs` | CREATE | New feature |
+| `tests/main.rs` | MODIFY(minor) | Add test module |
+EOF
+
+    local -A active_workers=([12345]="TASK-002")
+
+    local exit_code=0
+    has_file_conflict "$RALPH_DIR" "TASK-001" active_workers || exit_code=$?
+
+    assert_equals "1" "$exit_code" "MODIFY(minor) files should NOT trigger conflict detection"
+}
+
 test_plan_parser_handles_missing_section() {
     source "$WIGGUM_HOME/lib/tasks/plan-parser.sh"
 
@@ -824,6 +881,7 @@ test_wdoc_registry_idempotent_initialization() {
 
 # Plan parser tests
 run_test test_plan_parser_extracts_create_and_modify_files
+run_test test_plan_parser_excludes_modify_minor
 run_test test_plan_parser_removes_backticks
 run_test test_plan_parser_handles_missing_section
 run_test test_plan_parser_handles_missing_file
@@ -836,6 +894,7 @@ run_test test_conflict_detection_no_overlap_returns_1
 run_test test_conflict_detection_overlap_returns_0
 run_test test_conflict_detection_self_exclusion
 run_test test_conflict_detection_no_plan_no_conflict
+run_test test_conflict_detection_modify_minor_no_conflict
 run_test test_get_conflicting_files_returns_intersection
 run_test test_get_conflicting_tasks_returns_task_ids
 

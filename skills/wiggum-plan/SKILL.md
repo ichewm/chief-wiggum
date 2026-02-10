@@ -356,7 +356,7 @@ questions:
 - Patterns discovered during exploration (with file references)
 - Step-by-step implementation sequence with file paths, line numbers, current code snippets, and precise change descriptions
 - Module impact summary and whether modules should be combined or reorganized
-- Critical files table (CREATE/MODIFY/REFERENCE with line ranges)
+- Critical files table (CREATE/MODIFY/MODIFY(minor)/REFERENCE with line ranges)
 - Optimization goals: whether this simplifies or adds complexity
 - Future considerations: migration, compatibility, follow-up work
 - Testing plan: specific tests to add/modify/run, with success criteria

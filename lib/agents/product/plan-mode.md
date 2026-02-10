@@ -257,9 +257,10 @@ CRITICAL: Every requirement from PRD AND relevant spec/ documents must appear he
 |------|--------|-------|-------------|
 | path/file.sh:L10-L45 | CREATE | [line range] | R1 |
 | path/other.sh:L5-L20 | MODIFY | [line range] | R2 |
+| tests/main.rs:L1-L5 | MODIFY(minor) | [line range] | R2 |
 | path/pattern.sh:L30-L60 | REFERENCE | — | [pattern to follow] |
 
-Actions: **CREATE** (new file), **MODIFY** (change existing), **REFERENCE** (pattern to follow, do not modify)
+Actions: **CREATE** (new file), **MODIFY** (change existing), **MODIFY(minor)** (trivial/auto-mergeable change excluded from conflict detection), **REFERENCE** (pattern to follow, do not modify)
 ```
 
 ## Signaling Completion (REQUIRED)
