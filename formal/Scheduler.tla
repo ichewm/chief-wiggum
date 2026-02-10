@@ -12,7 +12,10 @@
  *   - 3 tasks, MaxWorkers=2, PriorityLimit=1
  *   - Sibling grouping via explicit TaskGroup constant (not string prefix)
  *   - Linear sibling penalty (not sqrt - sufficient for property verification)
- *   - Skip cooldown uses linear decrement (not exponential backoff)
+ *
+ * QUICK WIN #3: Exponential backoff skip cooldown
+ * Skip cooldown now uses exponential backoff values {0,1,2,4,8,16,30} matching
+ * the real implementation (1,2,4,8,16 capped at 30 cycles).
  *
  * NOTE: Bound variables in set comprehensions use distinct names (w, u, v)
  * to avoid shadowing operator parameters -- Apalache's SubstRule cannot
@@ -41,7 +44,9 @@ CONSTANTS
     \* @type: Str -> Bool;
     HasPlan,               \* task -> TRUE if .ralph/plans/<TASK-ID>.md exists
     \* @type: Str -> Str;
-    TaskGroup              \* task -> group ID (sibling detection)
+    TaskGroup,             \* task -> group ID (sibling detection)
+    \* @type: Int;
+    AgingFactor            \* divisor for aging bonus (default 7 in impl)
 
 VARIABLES
     \* @type: Str -> Str;
@@ -69,6 +74,34 @@ vars == <<taskStatus, skipCount, readySince, workerType, mainCount, priorityCoun
 StatusValues == {"pending", "spawned", "merged", "failed"}
 WorkerTypeValues == {"none", "main", "fix"}
 
+\* Exponential backoff skip cooldown values (Quick Win #3)
+\* Matches implementation: 1,2,4,8,16 capped at 30
+SkipCooldownValues == {0, 1, 2, 4, 8, 16, 30}
+
+\* Helper: compute next exponential backoff value
+\* @type: (Int) => Int;
+NextSkipValue(current) ==
+    CASE current = 0  -> 1
+      [] current = 1  -> 2
+      [] current = 2  -> 4
+      [] current = 4  -> 8
+      [] current = 8  -> 16
+      [] current = 16 -> 30
+      [] current = 30 -> 30
+      [] OTHER        -> 1
+
+\* Helper: compute previous (halved) cooldown value for decay
+\* @type: (Int) => Int;
+PrevSkipValue(current) ==
+    CASE current = 0  -> 0
+      [] current = 1  -> 0
+      [] current = 2  -> 1
+      [] current = 4  -> 2
+      [] current = 8  -> 4
+      [] current = 16 -> 8
+      [] current = 30 -> 16
+      [] OTHER        -> 0
+
 \* =========================================================================
 \* Init and CInit
 \* =========================================================================
@@ -91,6 +124,7 @@ CInit ==
     /\ MaxWorkers = 2
     /\ PriorityLimit = 1
     /\ MAX_SKIP = 3
+    /\ AgingFactor = 7
     /\ BasePriority = [u \in {"T1", "T2", "T3"} |->
         CASE u = "T1" -> 10000
           [] u = "T2" -> 20000
@@ -147,7 +181,7 @@ BlockedByCount(q) ==
 EffectivePriority(q) ==
     LET raw == BasePriority[q]
                - (IF HasPlan[q] THEN 15000 ELSE 0)
-               - (readySince[q] * 8000)
+               - ((readySince[q] * 8000) \div AgingFactor)
                - (BlockedByCount(q) * 7000)
                + (SiblingActiveCount(q) * 20000)
     IN IF raw < 0 THEN 0 ELSE raw
@@ -195,14 +229,15 @@ WorkerPass(t) ==
     /\ mainCount' = mainCount - 1
     /\ UNCHANGED <<skipCount, readySince, priorityCount, tick>>
 
-\* Main worker fails: spawned -> failed, apply skip cooldown
+\* Main worker fails: spawned -> failed, apply skip cooldown (exponential backoff)
 WorkerFail(t) ==
     /\ taskStatus[t] = "spawned"
     /\ workerType[t] = "main"
     /\ taskStatus' = [taskStatus EXCEPT ![t] = "failed"]
     /\ workerType' = [workerType EXCEPT ![t] = "none"]
     /\ mainCount' = mainCount - 1
-    /\ skipCount' = [skipCount EXCEPT ![t] = IF skipCount[t] < MAX_SKIP THEN skipCount[t] + 1 ELSE MAX_SKIP]
+    \* Quick Win #3: Exponential backoff instead of linear increment
+    /\ skipCount' = [skipCount EXCEPT ![t] = NextSkipValue(skipCount[t])]
     /\ UNCHANGED <<readySince, priorityCount, tick>>
 
 \* =========================================================================
@@ -241,17 +276,17 @@ FixFail(t) ==
 \* Actions - Aging and Skip Decay
 \* =========================================================================
 
-\* Tick: increment aging for pending tasks with met deps, decrement skip cooldown
+\* Tick: increment aging for pending tasks with met deps, decay skip cooldown
+\* Quick Win #3: Skip cooldown decays using halving (inverse of exponential backoff)
 TickAging ==
     /\ tick' = tick + 1
     /\ readySince' = [u \in Tasks |->
         IF taskStatus[u] = "pending" /\ DepsCompleted(u)
         THEN readySince[u] + 1
         ELSE readySince[u]]
-    /\ skipCount' = [u \in Tasks |->
-        IF skipCount[u] > 0
-        THEN skipCount[u] - 1
-        ELSE 0]
+    \* Exponential decay: halve the cooldown each tick (matches implementation's
+    \* "decrement each check" behavior in scheduler_can_spawn_task)
+    /\ skipCount' = [u \in Tasks |-> PrevSkipValue(skipCount[u])]
     /\ UNCHANGED <<taskStatus, workerType, mainCount, priorityCount>>
 
 \* =========================================================================
@@ -288,7 +323,8 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 \* TypeInvariant: all variables within declared domains
 TypeInvariant ==
     /\ \A t \in Tasks : taskStatus[t] \in StatusValues
-    /\ \A t \in Tasks : skipCount[t] \in 0..MAX_SKIP
+    \* Quick Win #3: skipCount uses exponential backoff values
+    /\ \A t \in Tasks : skipCount[t] \in SkipCooldownValues
     /\ \A t \in Tasks : readySince[t] \in 0..100
     /\ \A t \in Tasks : workerType[t] \in WorkerTypeValues
     /\ mainCount \in 0..MaxWorkers
@@ -310,9 +346,9 @@ FileConflictInvariant ==
     \A t1, t2 \in ActiveMainWorkers :
         t1 /= t2 => TaskFiles[t1] \cap TaskFiles[t2] = {}
 
-\* SkipBoundInvariant: skip cooldown never exceeds MAX_SKIP
+\* SkipBoundInvariant: skip cooldown only takes valid exponential values
 SkipBoundInvariant ==
-    \A t \in Tasks : skipCount[t] <= MAX_SKIP
+    \A t \in Tasks : skipCount[t] \in SkipCooldownValues
 
 \* =========================================================================
 \* Liveness Properties (require fairness)

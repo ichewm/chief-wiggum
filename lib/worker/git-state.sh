@@ -192,6 +192,17 @@ git_state_set_error() {
         && mv "$state_file.tmp" "$state_file"
 }
 
+# Clear error message (convenience wrapper for set_error "")
+#
+# Args:
+#   worker_dir - Worker directory path
+#
+# Returns: 1 if state file doesn't exist
+git_state_clear_error() {
+    local worker_dir="$1"
+    git_state_set_error "$worker_dir" ""
+}
+
 # Get last error message
 #
 # Args:

@@ -7,8 +7,16 @@
  * chains collapse into a single transition. merge_conflict is modeled
  * as a real state since it persists until a conflict.* event fires.
  *
- * Null-target transitions (resume.retry, task.reclaim) are omitted --
- * they don't change state.
+ * EFFECT-STATE MODELING (Quick Win #1):
+ * Models side effects as explicit state variables to catch partial-effect
+ * and crash-recovery bugs:
+ *   - inConflictQueue: whether task is queued for conflict resolution
+ *   - worktreeState: worktree lifecycle (absent/present/cleaning)
+ *   - lastError: error category from last failure
+ *
+ * CRASH/RESTART MODELING (Quick Win #2):
+ * Includes Crash action that can interrupt running states, leaving effects
+ * partially applied. StartupReset actions model orchestrator restart recovery.
  *
  * Designed for Apalache symbolic model checking (type annotations, CInit).
  *)
@@ -29,10 +37,19 @@ VARIABLES
     \* @type: Int;
     recoveryAttempts,
     \* @type: Str;
-    kanban
+    kanban,
+    \* === EFFECT-STATE VARIABLES (Quick Win #1) ===
+    \* @type: Bool;
+    inConflictQueue,       \* TRUE if task is in conflict resolution queue
+    \* @type: Str;
+    worktreeState,         \* "absent", "present", "cleaning"
+    \* @type: Str;
+    lastError,             \* "", "merge_conflict", "rebase_failed", "hard_fail"
+    \* @type: Bool;
+    githubSynced           \* TRUE if GitHub issue status matches kanban
 
-\* @type: <<Str, Int, Int, Str>>;
-vars == <<state, mergeAttempts, recoveryAttempts, kanban>>
+\* @type: <<Str, Int, Int, Str, Bool, Str, Str, Bool>>;
+vars == <<state, mergeAttempts, recoveryAttempts, kanban, inConflictQueue, worktreeState, lastError, githubSynced>>
 
 \* =========================================================================
 \* Type and state definitions
@@ -44,9 +61,15 @@ AllStates == {
     "resolving", "merged", "failed"
 }
 
+RunningStates == {"fixing", "merging", "resolving"}
+
 TerminalStates == {"merged", "failed"}
 
 KanbanValues == {" ", "=", "x", "*"}
+
+WorktreeValues == {"absent", "present", "cleaning"}
+
+ErrorValues == {"", "merge_conflict", "rebase_failed", "hard_fail"}
 
 \* =========================================================================
 \* Init and CInit
@@ -57,11 +80,18 @@ Init ==
     /\ mergeAttempts = 0
     /\ recoveryAttempts = 0
     /\ kanban = " "
+    /\ inConflictQueue = FALSE
+    /\ worktreeState = "absent"
+    /\ lastError = ""
+    /\ githubSynced = TRUE
 
 \* Apalache constant initialization (replaces .cfg)
 CInit ==
     /\ MAX_MERGE_ATTEMPTS = 2
     /\ MAX_RECOVERY_ATTEMPTS = 1
+
+\* Helper: unchanged effect-state variables
+EffectVarsUnchanged == UNCHANGED <<inConflictQueue, worktreeState, lastError, githubSynced>>
 
 \* =========================================================================
 \* Helper: check_permanent effect (inline)
@@ -79,11 +109,14 @@ KanbanAfterCheckPermanent(currentKanban) ==
 \* =========================================================================
 
 \* worker.spawned: none -> needs_merge, kanban "="
+\* Effect: creates worktree, marks github out of sync
 WorkerSpawned ==
     /\ state = "none"
     /\ state' = "needs_merge"
     /\ kanban' = "="
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ worktreeState' = "present"
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, lastError>>
 
 \* =========================================================================
 \* Actions - Fix Cycle
@@ -94,12 +127,14 @@ FixDetectedFromNone ==
     /\ state = "none"
     /\ state' = "needs_fix"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* fix.detected: needs_merge -> needs_fix
 FixDetectedFromNeedsMerge ==
     /\ state = "needs_merge"
     /\ state' = "needs_fix"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* fix.detected: failed -> needs_fix (guarded: recovery_attempts_lt_max)
 \* kanban "=" (clear permanent failure marker on recovery)
@@ -109,22 +144,26 @@ FixDetectedFromFailed ==
     /\ state' = "needs_fix"
     /\ recoveryAttempts' = recoveryAttempts + 1
     /\ kanban' = "="
-    /\ UNCHANGED mergeAttempts
+    /\ lastError' = ""
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, inConflictQueue, worktreeState>>
 
 \* fix.started: needs_fix -> fixing
 FixStarted ==
     /\ state = "needs_fix"
     /\ state' = "fixing"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* fix.pass: fixing -> needs_merge (guarded: merge_attempts_lt_max)
-\* Chains through fix_completed, atomic. Effect: inc_merge_attempts
+\* Chains through fix_completed, atomic. Effects: inc_merge_attempts, rm_conflict_queue
 FixPassGuarded ==
     /\ state = "fixing"
     /\ mergeAttempts < MAX_MERGE_ATTEMPTS
     /\ state' = "needs_merge"
     /\ mergeAttempts' = mergeAttempts + 1
-    /\ UNCHANGED <<recoveryAttempts, kanban>>
+    /\ inConflictQueue' = FALSE
+    /\ UNCHANGED <<recoveryAttempts, kanban, worktreeState, lastError, githubSynced>>
 
 \* fix.pass: fixing -> failed (fallback when merge budget exhausted)
 \* Effect: check_permanent
@@ -133,38 +172,50 @@ FixPassFallback ==
     /\ mergeAttempts >= MAX_MERGE_ATTEMPTS
     /\ state' = "failed"
     /\ kanban' = KanbanAfterCheckPermanent(kanban)
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* fix.skip: fixing -> needs_merge (chains through fix_completed, atomic)
+\* Effect: rm_conflict_queue
 FixSkip ==
     /\ state = "fixing"
     /\ state' = "needs_merge"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ inConflictQueue' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, worktreeState, lastError, githubSynced>>
 
 \* fix.partial: fixing -> needs_fix (retry)
 FixPartial ==
     /\ state = "fixing"
     /\ state' = "needs_fix"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* fix.fail: fixing -> failed, effect: check_permanent
 FixFail ==
     /\ state = "fixing"
     /\ state' = "failed"
     /\ kanban' = KanbanAfterCheckPermanent(kanban)
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* fix.timeout: fixing -> needs_fix
 FixTimeout ==
     /\ state = "fixing"
     /\ state' = "needs_fix"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* fix.already_merged: needs_fix -> merged, kanban "x"
+\* Effects: sync_github, cleanup_worktree
+\* Clears error state since merge succeeded externally
 FixAlreadyMerged ==
     /\ state = "needs_fix"
     /\ state' = "merged"
     /\ kanban' = "x"
+    /\ githubSynced' = TRUE
+    /\ worktreeState' = "cleaning"
+    /\ inConflictQueue' = FALSE
+    /\ lastError' = ""
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
 
 \* =========================================================================
@@ -179,6 +230,7 @@ MergeStartGuarded ==
     /\ state' = "merging"
     /\ mergeAttempts' = mergeAttempts + 1
     /\ UNCHANGED <<recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* merge.start: needs_merge -> failed (fallback when guard fails)
 \* Effect: check_permanent
@@ -187,27 +239,39 @@ MergeStartFallback ==
     /\ mergeAttempts >= MAX_MERGE_ATTEMPTS
     /\ state' = "failed"
     /\ kanban' = KanbanAfterCheckPermanent(kanban)
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* merge.succeeded: merging -> merged, kanban "x"
+\* Effects: sync_github, cleanup_batch, cleanup_worktree, release_claim
 MergeSucceeded ==
     /\ state = "merging"
     /\ state' = "merged"
     /\ kanban' = "x"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = TRUE
+    /\ worktreeState' = "cleaning"
+    /\ inConflictQueue' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, lastError>>
 
 \* merge.already_merged: merging -> merged, kanban "x"
+\* Effects: sync_github, cleanup_batch, cleanup_worktree, release_claim
 MergeAlreadyMerged ==
     /\ state = "merging"
     /\ state' = "merged"
     /\ kanban' = "x"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = TRUE
+    /\ worktreeState' = "cleaning"
+    /\ inConflictQueue' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, lastError>>
 
 \* merge.conflict: merging -> merge_conflict
+\* Effects: set_error, add_conflict_queue
 MergeConflict ==
     /\ state = "merging"
     /\ state' = "merge_conflict"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ lastError' = "merge_conflict"
+    /\ inConflictQueue' = TRUE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, worktreeState, githubSynced>>
 
 \* merge.out_of_date: merging -> needs_merge (guarded: rebase_succeeded)
 \* Modeled as nondeterministic boolean
@@ -215,14 +279,17 @@ MergeOutOfDateRebaseOk ==
     /\ state = "merging"
     /\ state' = "needs_merge"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* merge.out_of_date: merging -> failed (fallback: rebase failed)
-\* Effect: check_permanent
+\* Effects: set_error, check_permanent
 MergeOutOfDateRebaseFail ==
     /\ state = "merging"
     /\ state' = "failed"
     /\ kanban' = KanbanAfterCheckPermanent(kanban)
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ lastError' = "rebase_failed"
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState>>
 
 \* merge.transient_fail: merging -> needs_merge (guarded: merge_attempts_lt_max)
 MergeTransientFailRetry ==
@@ -230,29 +297,39 @@ MergeTransientFailRetry ==
     /\ mergeAttempts < MAX_MERGE_ATTEMPTS
     /\ state' = "needs_merge"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* merge.transient_fail: merging -> failed (fallback)
-\* Effect: check_permanent
+\* Effects: set_error, check_permanent
 MergeTransientFailAbort ==
     /\ state = "merging"
     /\ mergeAttempts >= MAX_MERGE_ATTEMPTS
     /\ state' = "failed"
     /\ kanban' = KanbanAfterCheckPermanent(kanban)
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* merge.hard_fail: merging -> failed
-\* Effect: check_permanent
+\* Effects: set_error, check_permanent
 MergeHardFail ==
     /\ state = "merging"
     /\ state' = "failed"
     /\ kanban' = KanbanAfterCheckPermanent(kanban)
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ lastError' = "hard_fail"
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState>>
 
 \* merge.pr_merged: * -> merged, kanban "x" (wildcard from)
+\* Effects: sync_github, cleanup_batch, cleanup_worktree, release_claim
+\* Clears error state since merge succeeded externally
 MergePrMerged ==
     /\ state \notin {"merged"}
     /\ state' = "merged"
     /\ kanban' = "x"
+    /\ githubSynced' = TRUE
+    /\ worktreeState' = "cleaning"
+    /\ inConflictQueue' = FALSE
+    /\ lastError' = ""
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
 
 \* =========================================================================
@@ -265,6 +342,7 @@ ConflictNeedsResolveGuarded ==
     /\ mergeAttempts < MAX_MERGE_ATTEMPTS
     /\ state' = "needs_resolve"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* conflict.needs_resolve: merge_conflict -> failed (fallback)
 \* Effect: check_permanent
@@ -273,13 +351,15 @@ ConflictNeedsResolveFallback ==
     /\ mergeAttempts >= MAX_MERGE_ATTEMPTS
     /\ state' = "failed"
     /\ kanban' = KanbanAfterCheckPermanent(kanban)
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* conflict.needs_multi: merge_conflict -> needs_multi_resolve
 ConflictNeedsMulti ==
     /\ state = "merge_conflict"
     /\ state' = "needs_multi_resolve"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* =========================================================================
 \* Actions - Resolve Cycle
@@ -291,12 +371,14 @@ ResolveStartupResetFromResolving ==
     /\ state' = "needs_resolve"
     /\ mergeAttempts' = 0
     /\ UNCHANGED <<recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* resolve.startup_reset: none -> needs_resolve
 ResolveStartupResetFromNone ==
     /\ state = "none"
     /\ state' = "needs_resolve"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* resolve.startup_reset: resolved is transient and skipped, but this
 \* transition is from a state that in the JSON exists. Since we skip
@@ -308,24 +390,29 @@ ResolveStartedFromNeedsResolve ==
     /\ state = "needs_resolve"
     /\ state' = "resolving"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* resolve.started: needs_multi_resolve -> resolving
 ResolveStartedFromNeedsMulti ==
     /\ state = "needs_multi_resolve"
     /\ state' = "resolving"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* resolve.started: resolving -> null (idempotent re-entry, no state change)
 ResolveStartedFromResolving ==
     /\ state = "resolving"
     /\ UNCHANGED <<state, mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* resolve.succeeded: resolving -> needs_merge (chains through resolved, atomic)
-\* Effect: rm_conflict_queue (abstracted away)
+\* Effects: rm_conflict_queue, clear_error
 ResolveSucceeded ==
     /\ state = "resolving"
     /\ state' = "needs_merge"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ inConflictQueue' = FALSE
+    /\ lastError' = ""
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, worktreeState, githubSynced>>
 
 \* resolve.fail: resolving -> failed
 \* Effect: check_permanent
@@ -333,7 +420,8 @@ ResolveFailFromResolving ==
     /\ state = "resolving"
     /\ state' = "failed"
     /\ kanban' = KanbanAfterCheckPermanent(kanban)
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* resolve.fail: needs_resolve -> failed
 \* Effect: check_permanent
@@ -341,7 +429,8 @@ ResolveFailFromNeedsResolve ==
     /\ state = "needs_resolve"
     /\ state' = "failed"
     /\ kanban' = KanbanAfterCheckPermanent(kanban)
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* resolve.fail: needs_multi_resolve -> failed
 \* Effect: check_permanent
@@ -349,13 +438,15 @@ ResolveFailFromNeedsMulti ==
     /\ state = "needs_multi_resolve"
     /\ state' = "failed"
     /\ kanban' = KanbanAfterCheckPermanent(kanban)
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* resolve.timeout: resolving -> needs_resolve
 ResolveTimeout ==
     /\ state = "resolving"
     /\ state' = "needs_resolve"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* resolve.stuck_reset: resolving -> needs_resolve (guarded: merge_attempts_lt_max)
 \* Effect: inc_merge_attempts
@@ -365,6 +456,7 @@ ResolveStuckResetGuarded ==
     /\ state' = "needs_resolve"
     /\ mergeAttempts' = mergeAttempts + 1
     /\ UNCHANGED <<recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* resolve.stuck_reset: resolving -> failed (fallback)
 \* Effect: check_permanent
@@ -373,20 +465,33 @@ ResolveStuckResetFallback ==
     /\ mergeAttempts >= MAX_MERGE_ATTEMPTS
     /\ state' = "failed"
     /\ kanban' = KanbanAfterCheckPermanent(kanban)
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* resolve.already_merged: needs_resolve -> merged, kanban "x"
+\* Effects: sync_github, cleanup_worktree
+\* Clears error state since merge succeeded externally
 ResolveAlreadyMergedFromNeedsResolve ==
     /\ state = "needs_resolve"
     /\ state' = "merged"
     /\ kanban' = "x"
+    /\ githubSynced' = TRUE
+    /\ worktreeState' = "cleaning"
+    /\ inConflictQueue' = FALSE
+    /\ lastError' = ""
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
 
 \* resolve.already_merged: needs_multi_resolve -> merged, kanban "x"
+\* Effects: sync_github, cleanup_worktree
+\* Clears error state since merge succeeded externally
 ResolveAlreadyMergedFromNeedsMulti ==
     /\ state = "needs_multi_resolve"
     /\ state' = "merged"
     /\ kanban' = "x"
+    /\ githubSynced' = TRUE
+    /\ worktreeState' = "cleaning"
+    /\ inConflictQueue' = FALSE
+    /\ lastError' = ""
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
 
 \* resolve.max_exceeded: needs_resolve -> failed
@@ -395,7 +500,8 @@ ResolveMaxExceededFromNeedsResolve ==
     /\ state = "needs_resolve"
     /\ state' = "failed"
     /\ kanban' = KanbanAfterCheckPermanent(kanban)
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* resolve.max_exceeded: needs_multi_resolve -> failed
 \* Effect: check_permanent
@@ -403,19 +509,22 @@ ResolveMaxExceededFromNeedsMulti ==
     /\ state = "needs_multi_resolve"
     /\ state' = "failed"
     /\ kanban' = KanbanAfterCheckPermanent(kanban)
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* resolve.batch_failed: needs_multi_resolve -> needs_resolve
 ResolveBatchFailedFromNeedsMulti ==
     /\ state = "needs_multi_resolve"
     /\ state' = "needs_resolve"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* resolve.batch_failed: needs_resolve -> needs_resolve (no-op on state)
 ResolveBatchFailedFromNeedsResolve ==
     /\ state = "needs_resolve"
     /\ state' = "needs_resolve"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* =========================================================================
 \* Actions - PR Events
@@ -426,27 +535,34 @@ PrConflictFromMergeConflict ==
     /\ state = "merge_conflict"
     /\ state' = "needs_resolve"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* pr.conflict_detected: none -> needs_resolve
+\* Effect: add_conflict_queue
 PrConflictFromNone ==
     /\ state = "none"
     /\ state' = "needs_resolve"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ inConflictQueue' = TRUE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, worktreeState, lastError, githubSynced>>
 
 \* pr.conflict_detected: needs_merge -> needs_resolve
+\* Effect: add_conflict_queue
 PrConflictFromNeedsMerge ==
     /\ state = "needs_merge"
     /\ state' = "needs_resolve"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ inConflictQueue' = TRUE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, worktreeState, lastError, githubSynced>>
 
 \* pr.conflict_detected: needs_fix -> needs_resolve
+\* Effect: add_conflict_queue
 PrConflictFromNeedsFix ==
     /\ state = "needs_fix"
     /\ state' = "needs_resolve"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ inConflictQueue' = TRUE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, worktreeState, lastError, githubSynced>>
 
 \* pr.conflict_detected: failed -> needs_resolve (guarded: recovery_attempts_lt_max)
-\* Effects: inc_recovery, reset_merge. kanban "="
+\* Effects: inc_recovery, reset_merge, add_conflict_queue. kanban "="
 PrConflictFromFailed ==
     /\ state = "failed"
     /\ recoveryAttempts < MAX_RECOVERY_ATTEMPTS
@@ -454,27 +570,37 @@ PrConflictFromFailed ==
     /\ recoveryAttempts' = recoveryAttempts + 1
     /\ mergeAttempts' = 0
     /\ kanban' = "="
+    /\ inConflictQueue' = TRUE
+    /\ lastError' = ""
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED worktreeState
 
 \* pr.multi_conflict_detected: none -> needs_multi_resolve
+\* Effect: add_conflict_queue
 PrMultiConflictFromNone ==
     /\ state = "none"
     /\ state' = "needs_multi_resolve"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ inConflictQueue' = TRUE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, worktreeState, lastError, githubSynced>>
 
 \* pr.multi_conflict_detected: needs_merge -> needs_multi_resolve
+\* Effect: add_conflict_queue
 PrMultiConflictFromNeedsMerge ==
     /\ state = "needs_merge"
     /\ state' = "needs_multi_resolve"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ inConflictQueue' = TRUE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, worktreeState, lastError, githubSynced>>
 
 \* pr.multi_conflict_detected: needs_fix -> needs_multi_resolve
+\* Effect: add_conflict_queue
 PrMultiConflictFromNeedsFix ==
     /\ state = "needs_fix"
     /\ state' = "needs_multi_resolve"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ inConflictQueue' = TRUE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, worktreeState, lastError, githubSynced>>
 
 \* pr.multi_conflict_detected: failed -> needs_multi_resolve (guarded)
-\* Effects: inc_recovery, reset_merge. kanban "="
+\* Effects: inc_recovery, reset_merge, add_conflict_queue. kanban "="
 PrMultiConflictFromFailed ==
     /\ state = "failed"
     /\ recoveryAttempts < MAX_RECOVERY_ATTEMPTS
@@ -482,18 +608,24 @@ PrMultiConflictFromFailed ==
     /\ recoveryAttempts' = recoveryAttempts + 1
     /\ mergeAttempts' = 0
     /\ kanban' = "="
+    /\ inConflictQueue' = TRUE
+    /\ lastError' = ""
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED worktreeState
 
 \* pr.comments_detected: none -> needs_fix
 PrCommentsFromNone ==
     /\ state = "none"
     /\ state' = "needs_fix"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* pr.comments_detected: needs_merge -> needs_fix
 PrCommentsFromNeedsMerge ==
     /\ state = "needs_merge"
     /\ state' = "needs_fix"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* pr.comments_detected: failed -> needs_fix (guarded: recovery_attempts_lt_max)
 \* Effect: inc_recovery. kanban "="
@@ -503,13 +635,16 @@ PrCommentsFromFailed ==
     /\ state' = "needs_fix"
     /\ recoveryAttempts' = recoveryAttempts + 1
     /\ kanban' = "="
-    /\ UNCHANGED mergeAttempts
+    /\ lastError' = ""
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, inConflictQueue, worktreeState>>
 
 \* pr.retrack: none -> needs_merge
 PrRetrack ==
     /\ state = "none"
     /\ state' = "needs_merge"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* =========================================================================
 \* Actions - Recovery
@@ -524,6 +659,9 @@ RecoveryToResolveGuarded ==
     /\ recoveryAttempts' = recoveryAttempts + 1
     /\ mergeAttempts' = 0
     /\ kanban' = "="
+    /\ lastError' = ""
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<inConflictQueue, worktreeState>>
 
 \* recovery.to_resolve: failed -> failed (fallback), kanban "*"
 \* Effect: check_permanent
@@ -532,7 +670,8 @@ RecoveryToResolveFallback ==
     /\ recoveryAttempts >= MAX_RECOVERY_ATTEMPTS
     /\ state' = "failed"
     /\ kanban' = "*"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* recovery.to_fix: failed -> needs_fix (guarded)
 \* Effect: inc_recovery. kanban "="
@@ -542,7 +681,9 @@ RecoveryToFixGuarded ==
     /\ state' = "needs_fix"
     /\ recoveryAttempts' = recoveryAttempts + 1
     /\ kanban' = "="
-    /\ UNCHANGED mergeAttempts
+    /\ lastError' = ""
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, inConflictQueue, worktreeState>>
 
 \* recovery.to_fix: failed -> failed (fallback), kanban "*"
 \* Effect: check_permanent
@@ -551,24 +692,31 @@ RecoveryToFixFallback ==
     /\ recoveryAttempts >= MAX_RECOVERY_ATTEMPTS
     /\ state' = "failed"
     /\ kanban' = "*"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* user.resume: failed -> needs_merge, kanban "="
+\* Effect: rm_conflict_queue
 UserResume ==
     /\ state = "failed"
     /\ state' = "needs_merge"
     /\ kanban' = "="
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ lastError' = ""
+    /\ githubSynced' = FALSE
+    /\ inConflictQueue' = FALSE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, worktreeState>>
 
 \* permanent_failure: failed -> failed, kanban "*"
+\* Effect: sync_github
 PermanentFailure ==
     /\ state = "failed"
     /\ state' = "failed"
     /\ kanban' = "*"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = TRUE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* =========================================================================
-\* Actions - Startup Reset
+\* Actions - Startup Reset (Quick Win #2: Crash Recovery)
 \* =========================================================================
 
 \* startup.reset: fixing -> needs_fix
@@ -576,6 +724,7 @@ StartupResetFixing ==
     /\ state = "fixing"
     /\ state' = "needs_fix"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
 
 \* startup.reset: merging -> needs_merge, effect: reset_merge
 StartupResetMerging ==
@@ -583,24 +732,59 @@ StartupResetMerging ==
     /\ state' = "needs_merge"
     /\ mergeAttempts' = 0
     /\ UNCHANGED <<recoveryAttempts, kanban>>
+    /\ EffectVarsUnchanged
+
+\* =========================================================================
+\* Actions - Crash (Quick Win #2)
+\* Models process crash during a running state, leaving effects partial.
+\* After crash, orchestrator restart will trigger startup.reset events.
+\* =========================================================================
+
+\* Crash while fixing: state unchanged, but effects may be partial
+\* (e.g., git changes applied but not committed)
+CrashWhileFixing ==
+    /\ state = "fixing"
+    /\ UNCHANGED <<state, mergeAttempts, recoveryAttempts, kanban>>
+    \* Effects can be partially applied - nondeterministic effect-state
+    /\ githubSynced' \in {TRUE, FALSE}
+    /\ UNCHANGED <<inConflictQueue, worktreeState, lastError>>
+
+\* Crash while merging: state unchanged, effects may be partial
+\* (e.g., merge attempt counted but merge not completed)
+CrashWhileMerging ==
+    /\ state = "merging"
+    /\ UNCHANGED <<state, mergeAttempts, recoveryAttempts, kanban>>
+    /\ githubSynced' \in {TRUE, FALSE}
+    /\ UNCHANGED <<inConflictQueue, worktreeState, lastError>>
+
+\* Crash while resolving: state unchanged, effects may be partial
+CrashWhileResolving ==
+    /\ state = "resolving"
+    /\ UNCHANGED <<state, mergeAttempts, recoveryAttempts, kanban>>
+    /\ githubSynced' \in {TRUE, FALSE}
+    /\ inConflictQueue' \in {TRUE, FALSE}
+    /\ UNCHANGED <<worktreeState, lastError>>
 
 \* =========================================================================
 \* Actions - Resume Abort (wildcard)
 \* =========================================================================
 
 \* resume.abort: * -> failed, kanban "*"
+\* Effect: sync_github
 ResumeAbort ==
     /\ state \notin {"failed"}
     /\ state' = "failed"
     /\ kanban' = "*"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = TRUE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* Also allow from failed (wildcard includes all states)
 ResumeAbortFromFailed ==
     /\ state = "failed"
     /\ state' = "failed"
     /\ kanban' = "*"
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = TRUE
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, worktreeState, lastError>>
 
 \* =========================================================================
 \* Next-state relation
@@ -680,6 +864,10 @@ Next ==
     \* Startup reset
     \/ StartupResetFixing
     \/ StartupResetMerging
+    \* Crash (Quick Win #2)
+    \/ CrashWhileFixing
+    \/ CrashWhileMerging
+    \/ CrashWhileResolving
     \* Resume abort
     \/ ResumeAbort
     \/ ResumeAbortFromFailed
@@ -712,6 +900,10 @@ TypeInvariant ==
     /\ mergeAttempts \in 0..MAX_MERGE_ATTEMPTS + 1
     /\ recoveryAttempts \in 0..MAX_RECOVERY_ATTEMPTS + 1
     /\ kanban \in KanbanValues
+    /\ inConflictQueue \in BOOLEAN
+    /\ worktreeState \in WorktreeValues
+    /\ lastError \in ErrorValues
+    /\ githubSynced \in BOOLEAN
 
 \* BoundedCounters: counters never exceed their maximums by more than 1
 \* (they can reach max and then a transition fires before the guard blocks)
@@ -737,6 +929,43 @@ KanbanMergedConsistency ==
 \* KanbanFailedConsistency: if permanently failed (kanban "*"), state is failed
 KanbanFailedConsistency ==
     kanban = "*" => state = "failed"
+
+\* =========================================================================
+\* Cross-Module Invariants (Quick Win #4)
+\* These validate consistency between effect-state and lifecycle state
+\* =========================================================================
+
+\* ConflictQueueConsistency: if in conflict queue, state must be conflict-related
+\* Exception: crash can leave inConflictQueue TRUE with state unchanged
+\* Also, recovery from failed while in conflict queue can go to needs_fix
+ConflictQueueConsistency ==
+    inConflictQueue => state \in {"merge_conflict", "needs_resolve",
+                                   "needs_multi_resolve", "resolving",
+                                   "fixing", "merging", "failed", "needs_fix"}
+
+\* WorktreeStateConsistency: worktree should be present when worker is active
+WorktreeStateConsistency ==
+    /\ (state = "none" /\ worktreeState = "absent") \/
+       (state \in {"merged"} /\ worktreeState \in {"absent", "cleaning"}) \/
+       (state \notin {"none", "merged"})
+
+\* ErrorStateConsistency: lastError reflects the failure mode
+ErrorStateConsistency ==
+    /\ (lastError = "merge_conflict" => 
+        state \in {"merge_conflict", "needs_resolve", "needs_multi_resolve", 
+                   "resolving", "failed", "merging"})
+    /\ (lastError = "rebase_failed" => state = "failed")
+    /\ (lastError = "hard_fail" => state = "failed")
+
+\* MergedCleanupConsistency: merged state should trigger cleanup
+\* (worktree should be cleaning or absent when merged)
+MergedCleanupConsistency ==
+    state = "merged" => worktreeState \in {"absent", "cleaning"}
+
+\* ConflictQueueClearedOnResolve: after successful resolution, queue is cleared
+\* (This is enforced by ResolveSucceeded setting inConflictQueue = FALSE)
+\* Invariant: if state returned to needs_merge from resolving, queue should be empty
+\* Note: Not a strict invariant due to crash semantics, but useful for checking.
 
 \* =========================================================================
 \* Liveness Properties (require fairness)

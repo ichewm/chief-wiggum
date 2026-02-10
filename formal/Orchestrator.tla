@@ -212,13 +212,24 @@ MergeHardFail(t) ==
 \* Actions - Fix Cycle (PR comments event)
 \* =========================================================================
 
-\* Spawn fix worker: PR comments detected on a needs_merge or none task
+\* Spawn fix worker: PR comments / fix detected on idle or needs_merge task
 SpawnFixWorker(t) ==
-    /\ wState[t] \in {"none", "needs_merge"}
+    /\ wState[t] \in {"idle", "needs_merge"}
     /\ Cardinality(ActivePriority) < FixWorkerLimit
     /\ wState' = [wState EXCEPT ![t] = "needs_fix"]
     /\ wType' = [wType EXCEPT ![t] = "fix"]
     /\ UNCHANGED <<kanban, mergeAttempts, recoveryAttempts>>
+
+\* Spawn fix worker from failed: recovery via fix (guarded by recovery attempts)
+SpawnFixWorkerFromFailed(t) ==
+    /\ wState[t] = "failed"
+    /\ recoveryAttempts[t] < MaxRecoveryAttempts
+    /\ Cardinality(ActivePriority) < FixWorkerLimit
+    /\ wState' = [wState EXCEPT ![t] = "needs_fix"]
+    /\ wType' = [wType EXCEPT ![t] = "fix"]
+    /\ kanban' = [kanban EXCEPT ![t] = "="]
+    /\ recoveryAttempts' = [recoveryAttempts EXCEPT ![t] = recoveryAttempts[t] + 1]
+    /\ UNCHANGED <<mergeAttempts>>
 
 \* Fix started: needs_fix -> fixing
 FixStarted(t) ==
@@ -227,14 +238,14 @@ FixStarted(t) ==
     /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts>>
 
 \* Fix pass: fixing -> needs_merge (guarded: merge_attempts < max)
-\* Reset wType to "main" -- worker re-enters merge cycle
+\* Worker retains its current wType (fix) through the merge cycle.
+\* wType is only set to "none" on terminal transitions (MergeSucceeded, etc.)
 FixPassGuarded(t) ==
     /\ wState[t] = "fixing"
     /\ mergeAttempts[t] < MaxMergeAttempts
     /\ wState' = [wState EXCEPT ![t] = "needs_merge"]
     /\ mergeAttempts' = [mergeAttempts EXCEPT ![t] = mergeAttempts[t] + 1]
-    /\ wType' = [wType EXCEPT ![t] = "main"]
-    /\ UNCHANGED <<kanban, recoveryAttempts>>
+    /\ UNCHANGED <<kanban, wType, recoveryAttempts>>
 
 \* Fix pass fallback: fixing -> failed (merge budget exhausted)
 FixPassFallback(t) ==
@@ -383,6 +394,7 @@ Next ==
         \/ MergeHardFail(t)
         \* Fix cycle
         \/ SpawnFixWorker(t)
+        \/ SpawnFixWorkerFromFailed(t)
         \/ FixStarted(t)
         \/ FixPassGuarded(t)
         \/ FixPassFallback(t)
@@ -424,6 +436,7 @@ Fairness ==
                    \/ MergeConflictDetected(q)
                    \/ MergeOutOfDateOk(q) \/ MergeOutOfDateFail(q))
         /\ WF_vars(ConflictToResolve(q) \/ ConflictToMultiResolve(q) \/ ConflictToFailed(q))
+        /\ WF_vars(SpawnFixWorkerFromFailed(q))
         /\ WF_vars(FixStarted(q))
         /\ WF_vars(FixPassGuarded(q) \/ FixPassFallback(q) \/ FixFail(q))
         /\ WF_vars(ResolveStarted(q))
@@ -468,10 +481,11 @@ NoFileConflictActive ==
     \A t1, t2 \in ActiveMain :
         t1 /= t2 => TaskFiles[t1] \cap TaskFiles[t2] = {}
 
-\* DependencyOrdering: a task can only leave idle if deps are completed
+\* DependencyOrdering: a main worker can only be active if deps are completed.
+\* Fix/resolve workers (spawned from external events) don't require dep checks.
 DependencyOrdering ==
     \A t \in Tasks :
-        wState[t] /= "idle" => DepsCompleted(t)
+        wType[t] = "main" /\ wState[t] \notin {"idle", "merged", "failed"} => DepsCompleted(t)
 
 \* NoDuplicateWorkers: no task has workers of multiple types active
 \* (a task can only be in one worker type at a time)
