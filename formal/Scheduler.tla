@@ -9,9 +9,9 @@
  *
  * Simplifications for tractability:
  *   - Worker pipeline abstracted to spawned -> PASS/FAIL (no internal steps)
- *   - 3 tasks, MaxWorkers=2, PriorityLimit=1
+ *   - 5 tasks, MaxWorkers=3, PriorityLimit=1
  *   - Sibling grouping via explicit TaskGroup constant (not string prefix)
- *   - Linear sibling penalty (not sqrt - sufficient for property verification)
+ *   - Sqrt sibling penalty via precomputed lookup table (matches impl's sqrt(N)*20000)
  *
  * QUICK WIN #3: Exponential backoff skip cooldown
  * Skip cooldown now uses exponential backoff values {0,1,2,4,8,16,30} matching
@@ -188,6 +188,20 @@ SiblingActiveCount(q) ==
 BlockedByCount(q) ==
     Cardinality({v \in Tasks : q \in TaskDeps[v]})
 
+\* Precomputed sqrt sibling penalty lookup table (matches impl's sqrt(N) * 20000)
+\* floor(sqrt(0)*20000)=0, floor(sqrt(1)*20000)=20000, floor(sqrt(2)*20000)=28284,
+\* floor(sqrt(3)*20000)=34641, floor(sqrt(4)*20000)=40000
+\* With CInit's 5 tasks (max 2 per group), SiblingActiveCount <= 1, but the
+\* table covers up to 4 for reuse with larger CInit configurations.
+\* @type: (Int) => Int;
+SqrtSiblingPenalty(n) ==
+    CASE n = 0 -> 0
+      [] n = 1 -> 20000
+      [] n = 2 -> 28284
+      [] n = 3 -> 34641
+      [] n = 4 -> 40000
+      [] OTHER -> 40000  \* cap at sqrt(4) for n > 4
+
 \* Effective priority: lower value = higher priority
 \* Uses fixed-point arithmetic (10000 = 1.0)
 \* Inlined computation avoids multi-binding LET (Apalache SubstRule issue)
@@ -197,7 +211,7 @@ EffectivePriority(q) ==
                - (IF HasPlan[q] THEN 15000 ELSE 0)
                - ((readySince[q] * 8000) \div AgingFactor)
                - (BlockedByCount(q) * 7000)
-               + (SiblingActiveCount(q) * 20000)
+               + SqrtSiblingPenalty(SiblingActiveCount(q))
     IN IF raw < 0 THEN 0 ELSE raw
 
 \* File conflict: task q shares files with an active main worker

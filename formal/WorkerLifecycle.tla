@@ -853,6 +853,34 @@ ResumeAbortFromFailed ==
     /\ EnvVarsUnchanged
 
 \* =========================================================================
+\* Actions - Null-Target Transitions (state unchanged, kanban updated)
+\* These model events where to: null in worker-lifecycle.json -- the worker
+\* state is preserved but kanban visibility changes, which feeds into
+\* ReadyTasks and scheduling. Catches "stuck task never becomes eligible"
+\* and "reclaimed task still shows in-progress" bugs.
+\* =========================================================================
+
+\* resume.retry: * -> null, kanban "=" (mark in-progress for retry)
+\* Wildcard from, but guarded to non-terminal states: applying to "merged"
+\* would violate KanbanMergedConsistency (kanban "x" <=> merged).
+ResumeRetry ==
+    /\ state \notin {"none", "merged"}
+    /\ kanban' = "="
+    /\ UNCHANGED <<state, mergeAttempts, recoveryAttempts, inConflictQueue,
+                   worktreeState, lastError, githubSynced>>
+    /\ EnvVarsUnchanged
+
+\* task.reclaim: * -> null, kanban " " (release task back to pending)
+\* Wildcard from, but guarded to non-terminal states: applying to "merged"
+\* would violate KanbanMergedConsistency (kanban "x" <=> merged).
+TaskReclaim ==
+    /\ state \notin {"none", "merged"}
+    /\ kanban' = " "
+    /\ UNCHANGED <<state, mergeAttempts, recoveryAttempts, inConflictQueue,
+                   worktreeState, lastError, githubSynced>>
+    /\ EnvVarsUnchanged
+
+\* =========================================================================
 \* Actions - Environment Changes (Medium Term #1: Structured Nondeterminism)
 \* Models external events that change the merge environment
 \* =========================================================================
@@ -877,6 +905,22 @@ EnvConflictResolved ==
     /\ hasConflict' = FALSE
     /\ UNCHANGED <<state, mergeAttempts, recoveryAttempts, kanban, inConflictQueue,
                    worktreeState, lastError, githubSynced, baseMoved>>
+
+\* =========================================================================
+\* Actions - Worktree Cleanup Completion
+\* Models the async completion of worktree removal after merge. Without this,
+\* worktreeState goes to "cleaning" but never "absent", preventing verification
+\* of stronger eventual invariants (merged => eventually absent worktree) and
+\* missing "leaked worktree" bugs.
+\* =========================================================================
+
+\* Worktree cleanup finishes: cleaning -> absent
+CleanupCompleted ==
+    /\ worktreeState = "cleaning"
+    /\ worktreeState' = "absent"
+    /\ UNCHANGED <<state, mergeAttempts, recoveryAttempts, kanban,
+                   inConflictQueue, lastError, githubSynced>>
+    /\ EnvVarsUnchanged
 
 \* =========================================================================
 \* Next-state relation
@@ -963,6 +1007,11 @@ Next ==
     \* Resume abort
     \/ ResumeAbort
     \/ ResumeAbortFromFailed
+    \* Null-target transitions
+    \/ ResumeRetry
+    \/ TaskReclaim
+    \* Worktree cleanup
+    \/ CleanupCompleted
     \* Environment changes (Medium Term #1: Structured Nondeterminism)
     \/ EnvBaseMoved
     \/ EnvConflictAppears
@@ -983,6 +1032,7 @@ Fairness ==
     /\ WF_vars(ResolveStartedFromNeedsResolve \/ ResolveStartedFromNeedsMulti)
     /\ WF_vars(ResolveSucceeded \/ ResolveFailFromResolving)
     /\ WF_vars(FixPassGuarded \/ FixPassFallback \/ FixFail \/ FixSkip \/ FixPartial \/ FixTimeout)
+    /\ WF_vars(CleanupCompleted)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 

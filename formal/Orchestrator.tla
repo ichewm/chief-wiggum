@@ -6,14 +6,37 @@
  * kanban board, worker pool capacity enforcement, and file conflict
  * detection.
  *
- * Models concurrent workers with 11 lifecycle states (including merge_conflict
- * and needs_multi_resolve routing) while preserving the key safety properties:
+ * EFFECT-STATE MODELING:
+ * Models side effects as explicit per-task state variables to catch
+ * partial-effect and crash-recovery bugs across concurrent workers:
+ *   - inConflictQueue: whether task is queued for conflict resolution
+ *   - worktreeState: worktree lifecycle (absent/present/cleaning)
+ *   - lastError: error category from last failure
+ *   - githubSynced: whether GitHub issue status matches kanban
+ *
+ * CRASH/RESTART MODELING:
+ * Includes Crash actions that can interrupt any running worker, leaving
+ * effects partially applied. StartupReset actions model orchestrator
+ * restart recovery. Combined with effect-state, this catches:
+ *   - "state updated but effect not applied" bugs
+ *   - "effect applied but state not updated" bugs
+ *   - cross-worker consistency violations after crash
+ *
+ * STRUCTURED NONDETERMINISM:
+ * Per-task baseMoved/hasConflict environment variables constrain merge
+ * outcomes, preventing implausible state combinations.
+ *
+ * Safety properties include:
  *   - Worker pool capacity limits (main workers, priority workers)
  *   - No duplicate workers per task
  *   - Kanban consistency with worker state
  *   - Bounded merge/recovery counters
  *   - File conflict prevention
  *   - Dependency ordering
+ *   - Conflict queue consistency with lifecycle state
+ *   - Worktree state consistency
+ *   - Error state consistency
+ *   - Merged cleanup consistency
  *
  * Designed for Apalache symbolic model checking (type annotations, CInit).
  *)
@@ -46,10 +69,26 @@ VARIABLES
     \* @type: Str -> Int;
     mergeAttempts,     \* task -> merge attempt counter
     \* @type: Str -> Int;
-    recoveryAttempts   \* task -> recovery attempt counter
+    recoveryAttempts,  \* task -> recovery attempt counter
+    \* === EFFECT-STATE VARIABLES ===
+    \* @type: Str -> Bool;
+    inConflictQueue,   \* task -> TRUE if in conflict resolution queue
+    \* @type: Str -> Str;
+    worktreeState,     \* task -> "absent", "present", "cleaning"
+    \* @type: Str -> Str;
+    lastError,         \* task -> "", "merge_conflict", "rebase_failed", "hard_fail"
+    \* @type: Str -> Bool;
+    githubSynced,      \* task -> TRUE if GitHub issue status matches kanban
+    \* === ENVIRONMENT STATE (Structured Nondeterminism) ===
+    \* @type: Str -> Bool;
+    baseMoved,         \* task -> TRUE if upstream base moved (per-PR)
+    \* @type: Str -> Bool;
+    hasConflict        \* task -> TRUE if merge would conflict (per-PR)
 
-\* @type: <<Str -> Str, Str -> Str, Str -> Str, Str -> Int, Str -> Int>>;
-vars == <<kanban, wState, wType, mergeAttempts, recoveryAttempts>>
+\* @type: <<Str -> Str, Str -> Str, Str -> Str, Str -> Int, Str -> Int, Str -> Bool, Str -> Str, Str -> Str, Str -> Bool, Str -> Bool, Str -> Bool>>;
+vars == <<kanban, wState, wType, mergeAttempts, recoveryAttempts,
+          inConflictQueue, worktreeState, lastError, githubSynced,
+          baseMoved, hasConflict>>
 
 \* =========================================================================
 \* State and type definitions
@@ -64,6 +103,10 @@ WorkerStates == {
 KanbanValues == {" ", "=", "x", "*"}
 
 WorkerTypes == {"none", "main", "fix", "resolve"}
+
+WorktreeValues == {"absent", "present", "cleaning"}
+
+ErrorValues == {"", "merge_conflict", "rebase_failed", "hard_fail"}
 
 \* =========================================================================
 \* Derived sets
@@ -87,6 +130,20 @@ ReadyTasks == {w \in Tasks : kanban[w] = " " /\ wState[w] = "idle" /\ DepsComple
 HasFileConflict(q) == \E w \in ActiveMain : w /= q /\ TaskFiles[q] \cap TaskFiles[w] /= {}
 
 \* =========================================================================
+\* Helpers
+\* =========================================================================
+
+\* Unchanged groups for concise UNCHANGED clauses
+EffectVarsUnchanged == UNCHANGED <<inConflictQueue, worktreeState, lastError, githubSynced>>
+EnvVarsUnchanged == UNCHANGED <<baseMoved, hasConflict>>
+AllAuxUnchanged == EffectVarsUnchanged /\ EnvVarsUnchanged
+
+\* check_permanent effect: if recovery exhausted, set kanban to "*"
+\* @type: (Str) => Str;
+KanbanAfterCheckPermanent(t) ==
+    IF recoveryAttempts[t] >= MaxRecoveryAttempts THEN "*" ELSE kanban[t]
+
+\* =========================================================================
 \* Init and CInit
 \* =========================================================================
 
@@ -96,6 +153,12 @@ Init ==
     /\ wType = [u \in Tasks |-> "none"]
     /\ mergeAttempts = [u \in Tasks |-> 0]
     /\ recoveryAttempts = [u \in Tasks |-> 0]
+    /\ inConflictQueue = [u \in Tasks |-> FALSE]
+    /\ worktreeState = [u \in Tasks |-> "absent"]
+    /\ lastError = [u \in Tasks |-> ""]
+    /\ githubSynced = [u \in Tasks |-> TRUE]
+    /\ baseMoved = [u \in Tasks |-> FALSE]
+    /\ hasConflict = [u \in Tasks |-> FALSE]
 
 \* Apalache constant initialization
 \* 3 tasks: T1 uses {f1}, T2 uses {f2}, T3 uses {f1, f3}
@@ -120,6 +183,7 @@ CInit ==
 \* =========================================================================
 
 \* Pick a ready task, check capacity and no file conflict, spawn
+\* Effects: creates worktree, marks github out of sync
 SpawnMainWorker(t) ==
     /\ t \in ReadyTasks
     /\ Cardinality(ActiveMain) < MaxWorkers
@@ -127,42 +191,62 @@ SpawnMainWorker(t) ==
     /\ kanban' = [kanban EXCEPT ![t] = "="]
     /\ wState' = [wState EXCEPT ![t] = "needs_merge"]
     /\ wType' = [wType EXCEPT ![t] = "main"]
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ worktreeState' = [worktreeState EXCEPT ![t] = "present"]
+    /\ githubSynced' = [githubSynced EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, inConflictQueue, lastError>>
+    /\ EnvVarsUnchanged
 
 \* =========================================================================
 \* Actions - Merge Cycle
 \* =========================================================================
 
 \* Worker starts merge (guarded: merge_attempts < max)
+\* Effect: inc_merge_attempts
 WorkerMergeStart(t) ==
     /\ wState[t] = "needs_merge"
     /\ mergeAttempts[t] < MaxMergeAttempts
     /\ wState' = [wState EXCEPT ![t] = "merging"]
     /\ mergeAttempts' = [mergeAttempts EXCEPT ![t] = mergeAttempts[t] + 1]
     /\ UNCHANGED <<kanban, wType, recoveryAttempts>>
+    /\ AllAuxUnchanged
 
 \* Worker starts merge (fallback: max exceeded -> failed)
+\* Effect: check_permanent
 WorkerMergeStartFallback(t) ==
     /\ wState[t] = "needs_merge"
     /\ mergeAttempts[t] >= MaxMergeAttempts
     /\ wState' = [wState EXCEPT ![t] = "failed"]
-    /\ kanban' = [kanban EXCEPT ![t] =
-        IF recoveryAttempts[t] >= MaxRecoveryAttempts THEN "*" ELSE kanban[t]]
-    /\ UNCHANGED <<wType, mergeAttempts, recoveryAttempts>>
+    /\ kanban' = [kanban EXCEPT ![t] = KanbanAfterCheckPermanent(t)]
+    /\ githubSynced' = [githubSynced EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<wType, mergeAttempts, recoveryAttempts,
+                   inConflictQueue, worktreeState, lastError>>
+    /\ EnvVarsUnchanged
 
 \* Merge succeeded
+\* Effects: sync_github, cleanup_batch, cleanup_worktree, release_claim
 MergeSucceeded(t) ==
     /\ wState[t] = "merging"
     /\ wState' = [wState EXCEPT ![t] = "merged"]
     /\ kanban' = [kanban EXCEPT ![t] = "x"]
     /\ wType' = [wType EXCEPT ![t] = "none"]
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = [githubSynced EXCEPT ![t] = TRUE]
+    /\ worktreeState' = [worktreeState EXCEPT ![t] = "cleaning"]
+    /\ inConflictQueue' = [inConflictQueue EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, lastError>>
+    /\ EnvVarsUnchanged
 
-\* Merge conflict detected: merging -> merge_conflict (pure state transition)
+\* Merge conflict detected: merging -> merge_conflict
+\* Structured nondeterminism: only fires when hasConflict is TRUE
+\* Effects: set_error, add_conflict_queue
 MergeConflictDetected(t) ==
     /\ wState[t] = "merging"
+    /\ hasConflict[t] = TRUE
     /\ wState' = [wState EXCEPT ![t] = "merge_conflict"]
-    /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts>>
+    /\ lastError' = [lastError EXCEPT ![t] = "merge_conflict"]
+    /\ inConflictQueue' = [inConflictQueue EXCEPT ![t] = TRUE]
+    /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts,
+                   worktreeState, githubSynced>>
+    /\ EnvVarsUnchanged
 
 \* Conflict routed to single-PR resolve (guarded: merge_attempts < max)
 ConflictToResolve(t) ==
@@ -170,6 +254,7 @@ ConflictToResolve(t) ==
     /\ mergeAttempts[t] < MaxMergeAttempts
     /\ wState' = [wState EXCEPT ![t] = "needs_resolve"]
     /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts>>
+    /\ AllAuxUnchanged
 
 \* Conflict routed to multi-PR resolve (guarded: merge_attempts < max)
 ConflictToMultiResolve(t) ==
@@ -177,36 +262,71 @@ ConflictToMultiResolve(t) ==
     /\ mergeAttempts[t] < MaxMergeAttempts
     /\ wState' = [wState EXCEPT ![t] = "needs_multi_resolve"]
     /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts>>
+    /\ AllAuxUnchanged
 
 \* Conflict fallback: merge_conflict -> failed (attempts exhausted)
+\* Effect: check_permanent
 ConflictToFailed(t) ==
     /\ wState[t] = "merge_conflict"
     /\ mergeAttempts[t] >= MaxMergeAttempts
     /\ wState' = [wState EXCEPT ![t] = "failed"]
-    /\ kanban' = [kanban EXCEPT ![t] =
-        IF recoveryAttempts[t] >= MaxRecoveryAttempts THEN "*" ELSE kanban[t]]
-    /\ UNCHANGED <<wType, mergeAttempts, recoveryAttempts>>
+    /\ kanban' = [kanban EXCEPT ![t] = KanbanAfterCheckPermanent(t)]
+    /\ githubSynced' = [githubSynced EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<wType, mergeAttempts, recoveryAttempts,
+                   inConflictQueue, worktreeState, lastError>>
+    /\ EnvVarsUnchanged
 
-\* Merge out of date: nondeterministic rebase outcome
+\* Merge out of date: rebase succeeded
+\* Structured nondeterminism: requires baseMoved AND ~hasConflict
 MergeOutOfDateOk(t) ==
     /\ wState[t] = "merging"
+    /\ baseMoved[t] = TRUE
+    /\ hasConflict[t] = FALSE
     /\ wState' = [wState EXCEPT ![t] = "needs_merge"]
-    /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts>>
+    /\ baseMoved' = [baseMoved EXCEPT ![t] = FALSE]  \* rebase brings up to date
+    /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts, hasConflict>>
+    /\ EffectVarsUnchanged
 
+\* Merge out of date: rebase failed due to conflict
+\* Structured nondeterminism: requires baseMoved AND hasConflict
+\* Effects: set_error, check_permanent
 MergeOutOfDateFail(t) ==
     /\ wState[t] = "merging"
+    /\ baseMoved[t] = TRUE
+    /\ hasConflict[t] = TRUE
     /\ wState' = [wState EXCEPT ![t] = "failed"]
-    /\ kanban' = [kanban EXCEPT ![t] =
-        IF recoveryAttempts[t] >= MaxRecoveryAttempts THEN "*" ELSE kanban[t]]
-    /\ UNCHANGED <<wType, mergeAttempts, recoveryAttempts>>
+    /\ kanban' = [kanban EXCEPT ![t] = KanbanAfterCheckPermanent(t)]
+    /\ lastError' = [lastError EXCEPT ![t] = "rebase_failed"]
+    /\ githubSynced' = [githubSynced EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<wType, mergeAttempts, recoveryAttempts,
+                   inConflictQueue, worktreeState>>
+    /\ EnvVarsUnchanged
 
-\* Merge hard fail
+\* Merge hard fail (infrastructure failure)
+\* Effects: set_error, check_permanent
 MergeHardFail(t) ==
     /\ wState[t] = "merging"
     /\ wState' = [wState EXCEPT ![t] = "failed"]
-    /\ kanban' = [kanban EXCEPT ![t] =
-        IF recoveryAttempts[t] >= MaxRecoveryAttempts THEN "*" ELSE kanban[t]]
-    /\ UNCHANGED <<wType, mergeAttempts, recoveryAttempts>>
+    /\ kanban' = [kanban EXCEPT ![t] = KanbanAfterCheckPermanent(t)]
+    /\ lastError' = [lastError EXCEPT ![t] = "hard_fail"]
+    /\ githubSynced' = [githubSynced EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<wType, mergeAttempts, recoveryAttempts,
+                   inConflictQueue, worktreeState>>
+    /\ EnvVarsUnchanged
+
+\* merge.pr_merged: any non-idle/non-merged -> merged (wildcard)
+\* Effects: sync_github, cleanup_batch, cleanup_worktree, release_claim
+ExternalPrMerged(t) ==
+    /\ wState[t] \notin {"idle", "merged"}
+    /\ wState' = [wState EXCEPT ![t] = "merged"]
+    /\ kanban' = [kanban EXCEPT ![t] = "x"]
+    /\ wType' = [wType EXCEPT ![t] = "none"]
+    /\ githubSynced' = [githubSynced EXCEPT ![t] = TRUE]
+    /\ worktreeState' = [worktreeState EXCEPT ![t] = "cleaning"]
+    /\ inConflictQueue' = [inConflictQueue EXCEPT ![t] = FALSE]
+    /\ lastError' = [lastError EXCEPT ![t] = ""]
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ EnvVarsUnchanged
 
 \* =========================================================================
 \* Actions - Fix Cycle (PR comments event)
@@ -219,8 +339,10 @@ SpawnFixWorker(t) ==
     /\ wState' = [wState EXCEPT ![t] = "needs_fix"]
     /\ wType' = [wType EXCEPT ![t] = "fix"]
     /\ UNCHANGED <<kanban, mergeAttempts, recoveryAttempts>>
+    /\ AllAuxUnchanged
 
 \* Spawn fix worker from failed: recovery via fix (guarded by recovery attempts)
+\* Effects: inc_recovery, clear_error
 SpawnFixWorkerFromFailed(t) ==
     /\ wState[t] = "failed"
     /\ recoveryAttempts[t] < MaxRecoveryAttempts
@@ -229,46 +351,61 @@ SpawnFixWorkerFromFailed(t) ==
     /\ wType' = [wType EXCEPT ![t] = "fix"]
     /\ kanban' = [kanban EXCEPT ![t] = "="]
     /\ recoveryAttempts' = [recoveryAttempts EXCEPT ![t] = recoveryAttempts[t] + 1]
-    /\ UNCHANGED <<mergeAttempts>>
+    /\ lastError' = [lastError EXCEPT ![t] = ""]
+    /\ githubSynced' = [githubSynced EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<mergeAttempts, inConflictQueue, worktreeState>>
+    /\ EnvVarsUnchanged
 
 \* Fix started: needs_fix -> fixing
 FixStarted(t) ==
     /\ wState[t] = "needs_fix"
     /\ wState' = [wState EXCEPT ![t] = "fixing"]
     /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts>>
+    /\ AllAuxUnchanged
 
 \* Fix pass: fixing -> needs_merge (guarded: merge_attempts < max)
 \* Worker retains its current wType (fix) through the merge cycle.
 \* wType is only set to "none" on terminal transitions (MergeSucceeded, etc.)
+\* Effects: inc_merge_attempts, rm_conflict_queue
 FixPassGuarded(t) ==
     /\ wState[t] = "fixing"
     /\ mergeAttempts[t] < MaxMergeAttempts
     /\ wState' = [wState EXCEPT ![t] = "needs_merge"]
     /\ mergeAttempts' = [mergeAttempts EXCEPT ![t] = mergeAttempts[t] + 1]
-    /\ UNCHANGED <<kanban, wType, recoveryAttempts>>
+    /\ inConflictQueue' = [inConflictQueue EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<kanban, wType, recoveryAttempts,
+                   worktreeState, lastError, githubSynced>>
+    /\ EnvVarsUnchanged
 
 \* Fix pass fallback: fixing -> failed (merge budget exhausted)
+\* Effect: check_permanent
 FixPassFallback(t) ==
     /\ wState[t] = "fixing"
     /\ mergeAttempts[t] >= MaxMergeAttempts
     /\ wState' = [wState EXCEPT ![t] = "failed"]
-    /\ kanban' = [kanban EXCEPT ![t] =
-        IF recoveryAttempts[t] >= MaxRecoveryAttempts THEN "*" ELSE kanban[t]]
-    /\ UNCHANGED <<wType, mergeAttempts, recoveryAttempts>>
+    /\ kanban' = [kanban EXCEPT ![t] = KanbanAfterCheckPermanent(t)]
+    /\ githubSynced' = [githubSynced EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<wType, mergeAttempts, recoveryAttempts,
+                   inConflictQueue, worktreeState, lastError>>
+    /\ EnvVarsUnchanged
 
 \* Fix fail: fixing -> failed
+\* Effect: check_permanent
 FixFail(t) ==
     /\ wState[t] = "fixing"
     /\ wState' = [wState EXCEPT ![t] = "failed"]
-    /\ kanban' = [kanban EXCEPT ![t] =
-        IF recoveryAttempts[t] >= MaxRecoveryAttempts THEN "*" ELSE kanban[t]]
-    /\ UNCHANGED <<wType, mergeAttempts, recoveryAttempts>>
+    /\ kanban' = [kanban EXCEPT ![t] = KanbanAfterCheckPermanent(t)]
+    /\ githubSynced' = [githubSynced EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<wType, mergeAttempts, recoveryAttempts,
+                   inConflictQueue, worktreeState, lastError>>
+    /\ EnvVarsUnchanged
 
 \* Fix partial: fixing -> needs_fix (retry)
 FixPartial(t) ==
     /\ wState[t] = "fixing"
     /\ wState' = [wState EXCEPT ![t] = "needs_fix"]
     /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts>>
+    /\ AllAuxUnchanged
 
 \* =========================================================================
 \* Actions - Resolve Cycle
@@ -279,26 +416,36 @@ ResolveStarted(t) ==
     /\ wState[t] = "needs_resolve"
     /\ wState' = [wState EXCEPT ![t] = "resolving"]
     /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts>>
+    /\ AllAuxUnchanged
 
 \* Resolve succeeded: resolving -> needs_merge (chain through resolved)
+\* Effects: rm_conflict_queue, clear_error
 ResolveSucceeded(t) ==
     /\ wState[t] = "resolving"
     /\ wState' = [wState EXCEPT ![t] = "needs_merge"]
-    /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts>>
+    /\ inConflictQueue' = [inConflictQueue EXCEPT ![t] = FALSE]
+    /\ lastError' = [lastError EXCEPT ![t] = ""]
+    /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts,
+                   worktreeState, githubSynced>>
+    /\ EnvVarsUnchanged
 
 \* Resolve fail: resolving -> failed
+\* Effect: check_permanent
 ResolveFail(t) ==
     /\ wState[t] = "resolving"
     /\ wState' = [wState EXCEPT ![t] = "failed"]
-    /\ kanban' = [kanban EXCEPT ![t] =
-        IF recoveryAttempts[t] >= MaxRecoveryAttempts THEN "*" ELSE kanban[t]]
-    /\ UNCHANGED <<wType, mergeAttempts, recoveryAttempts>>
+    /\ kanban' = [kanban EXCEPT ![t] = KanbanAfterCheckPermanent(t)]
+    /\ githubSynced' = [githubSynced EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<wType, mergeAttempts, recoveryAttempts,
+                   inConflictQueue, worktreeState, lastError>>
+    /\ EnvVarsUnchanged
 
 \* Resolve timeout: resolving -> needs_resolve
 ResolveTimeout(t) ==
     /\ wState[t] = "resolving"
     /\ wState' = [wState EXCEPT ![t] = "needs_resolve"]
     /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts>>
+    /\ AllAuxUnchanged
 
 \* =========================================================================
 \* Actions - Multi-Resolve Cycle
@@ -309,12 +456,14 @@ ResolveStartedFromMulti(t) ==
     /\ wState[t] = "needs_multi_resolve"
     /\ wState' = [wState EXCEPT ![t] = "resolving"]
     /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts>>
+    /\ AllAuxUnchanged
 
-\* Multi-resolve batch failed: needs_multi_resolve -> needs_resolve (fallback to single-PR)
+\* Multi-resolve batch failed: needs_multi_resolve -> needs_resolve
 ResolveBatchFailed(t) ==
     /\ wState[t] = "needs_multi_resolve"
     /\ wState' = [wState EXCEPT ![t] = "needs_resolve"]
     /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts>>
+    /\ AllAuxUnchanged
 
 \* =========================================================================
 \* Actions - Recovery
@@ -322,6 +471,7 @@ ResolveBatchFailed(t) ==
 
 \* Recovery from failed (guarded: recovery_attempts < max)
 \* Reset wType to "main" -- recovered worker re-enters merge cycle
+\* Effects: inc_recovery, reset_merge, clear_error
 Recovery(t) ==
     /\ wState[t] = "failed"
     /\ recoveryAttempts[t] < MaxRecoveryAttempts
@@ -330,48 +480,158 @@ Recovery(t) ==
     /\ mergeAttempts' = [mergeAttempts EXCEPT ![t] = 0]
     /\ kanban' = [kanban EXCEPT ![t] = "="]
     /\ wType' = [wType EXCEPT ![t] = "main"]
+    /\ lastError' = [lastError EXCEPT ![t] = ""]
+    /\ githubSynced' = [githubSynced EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<inConflictQueue, worktreeState>>
+    /\ EnvVarsUnchanged
 
 \* Recovery fallback: failed -> permanent failure
+\* Effect: check_permanent (sets kanban "*")
 RecoveryFallback(t) ==
     /\ wState[t] = "failed"
     /\ recoveryAttempts[t] >= MaxRecoveryAttempts
     /\ kanban' = [kanban EXCEPT ![t] = "*"]
-    /\ UNCHANGED <<wState, wType, mergeAttempts, recoveryAttempts>>
-
-\* =========================================================================
-\* Actions - External Events
-\* =========================================================================
-
-\* External PR merged: any non-idle/non-merged -> merged (wildcard)
-ExternalPrMerged(t) ==
-    /\ wState[t] \notin {"idle", "merged"}
-    /\ wState' = [wState EXCEPT ![t] = "merged"]
-    /\ kanban' = [kanban EXCEPT ![t] = "x"]
-    /\ wType' = [wType EXCEPT ![t] = "none"]
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts>>
+    /\ githubSynced' = [githubSynced EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<wState, wType, mergeAttempts, recoveryAttempts,
+                   inConflictQueue, worktreeState, lastError>>
+    /\ EnvVarsUnchanged
 
 \* =========================================================================
 \* Actions - Startup Reset
-\* =========================================================================
-
 \* Reset running states back to waiting counterparts on orchestrator restart.
 \* Each running state gets its own action to avoid partial UNCHANGED issues.
+\* =========================================================================
+
 StartupResetFixing(t) ==
     /\ wState[t] = "fixing"
     /\ wState' = [wState EXCEPT ![t] = "needs_fix"]
     /\ UNCHANGED <<kanban, wType, mergeAttempts, recoveryAttempts>>
+    /\ AllAuxUnchanged
 
+\* startup.reset: merging -> needs_merge, effect: reset_merge (critical!)
+\* Resets merge budget so worker gets fresh attempts after restart
 StartupResetMerging(t) ==
     /\ wState[t] = "merging"
     /\ wState' = [wState EXCEPT ![t] = "needs_merge"]
     /\ mergeAttempts' = [mergeAttempts EXCEPT ![t] = 0]
     /\ UNCHANGED <<kanban, wType, recoveryAttempts>>
+    /\ AllAuxUnchanged
 
 StartupResetResolving(t) ==
     /\ wState[t] = "resolving"
     /\ wState' = [wState EXCEPT ![t] = "needs_resolve"]
     /\ mergeAttempts' = [mergeAttempts EXCEPT ![t] = 0]
     /\ UNCHANGED <<kanban, wType, recoveryAttempts>>
+    /\ AllAuxUnchanged
+
+\* =========================================================================
+\* Actions - Crash
+\* Models process crash during a running state, leaving effects partially
+\* applied. After crash, orchestrator restart triggers startup.reset events.
+\*
+\* Key insight: crash can interrupt between "state update" and "effect
+\* application", leaving effect-state inconsistent. This is the #1 class
+\* of real bugs in Bash orchestrators.
+\* =========================================================================
+
+\* Crash while fixing: state stays, githubSynced may drift
+\* (e.g., git changes applied but not committed/synced)
+CrashWhileFixing(t) ==
+    /\ wState[t] = "fixing"
+    /\ UNCHANGED <<wState, kanban, wType, mergeAttempts, recoveryAttempts>>
+    \* Effects can be partially applied - nondeterministic githubSynced
+    /\ \E v \in BOOLEAN : githubSynced' = [githubSynced EXCEPT ![t] = v]
+    /\ UNCHANGED <<inConflictQueue, worktreeState, lastError>>
+    /\ EnvVarsUnchanged
+
+\* Crash while merging: state stays, githubSynced may drift
+\* (e.g., merge attempt counted but merge not completed/synced)
+CrashWhileMerging(t) ==
+    /\ wState[t] = "merging"
+    /\ UNCHANGED <<wState, kanban, wType, mergeAttempts, recoveryAttempts>>
+    /\ \E v \in BOOLEAN : githubSynced' = [githubSynced EXCEPT ![t] = v]
+    /\ UNCHANGED <<inConflictQueue, worktreeState, lastError>>
+    /\ EnvVarsUnchanged
+
+\* Crash while resolving: state stays, githubSynced AND inConflictQueue may drift
+\* (conflict queue operations can be partially applied during resolution)
+CrashWhileResolving(t) ==
+    /\ wState[t] = "resolving"
+    /\ UNCHANGED <<wState, kanban, wType, mergeAttempts, recoveryAttempts>>
+    /\ \E v1 \in BOOLEAN : githubSynced' = [githubSynced EXCEPT ![t] = v1]
+    /\ \E v2 \in BOOLEAN : inConflictQueue' = [inConflictQueue EXCEPT ![t] = v2]
+    /\ UNCHANGED <<worktreeState, lastError>>
+    /\ EnvVarsUnchanged
+
+\* =========================================================================
+\* Actions - Worktree Cleanup Completion
+\* Models the async completion of worktree removal after merge. Without this,
+\* worktreeState goes to "cleaning" but never "absent", preventing verification
+\* of stronger eventual invariants (merged => eventually absent worktree) and
+\* missing "leaked worktree" bugs.
+\* =========================================================================
+
+\* Worktree cleanup finishes: cleaning -> absent
+CleanupCompleted(t) ==
+    /\ worktreeState[t] = "cleaning"
+    /\ worktreeState' = [worktreeState EXCEPT ![t] = "absent"]
+    /\ UNCHANGED <<kanban, wState, wType, mergeAttempts, recoveryAttempts,
+                   inConflictQueue, lastError, githubSynced>>
+    /\ EnvVarsUnchanged
+
+\* =========================================================================
+\* Actions - Null-Target Transitions
+\* These model events where to: null in worker-lifecycle.json -- the worker
+\* state is preserved but kanban visibility changes, which feeds into
+\* ReadyTasks and scheduling. Catches "stuck task never becomes eligible"
+\* and "reclaimed task still shows in-progress" bugs.
+\* =========================================================================
+
+\* resume.retry: * -> null, kanban "=" (mark in-progress for retry)
+\* Wildcard from, guarded to non-terminal: merged would violate KanbanMergedConsistency.
+ResumeRetry(t) ==
+    /\ wState[t] \notin {"idle", "merged"}
+    /\ kanban' = [kanban EXCEPT ![t] = "="]
+    /\ UNCHANGED <<wState, wType, mergeAttempts, recoveryAttempts>>
+    /\ AllAuxUnchanged
+
+\* task.reclaim: * -> null, kanban " " (release task back to pending)
+\* Wildcard from, guarded to non-terminal: merged would violate KanbanMergedConsistency.
+TaskReclaim(t) ==
+    /\ wState[t] \notin {"idle", "merged"}
+    /\ kanban' = [kanban EXCEPT ![t] = " "]
+    /\ UNCHANGED <<wState, wType, mergeAttempts, recoveryAttempts>>
+    /\ AllAuxUnchanged
+
+\* =========================================================================
+\* Actions - Environment Changes (Structured Nondeterminism)
+\* Per-task: each PR branch can independently become out-of-date or
+\* develop conflicts. Only active (non-terminal, non-idle) workers are
+\* affected since idle/terminal tasks have no live PR branch.
+\* =========================================================================
+
+\* Upstream base moves (e.g., another PR merged to main)
+EnvBaseMoved(t) ==
+    /\ wState[t] \notin {"idle", "merged", "failed"}
+    /\ baseMoved[t] = FALSE
+    /\ baseMoved' = [baseMoved EXCEPT ![t] = TRUE]
+    /\ UNCHANGED <<wState, kanban, wType, mergeAttempts, recoveryAttempts, hasConflict>>
+    /\ EffectVarsUnchanged
+
+\* A conflict appears (e.g., concurrent changes to same files)
+EnvConflictAppears(t) ==
+    /\ wState[t] \notin {"idle", "merged", "failed"}
+    /\ hasConflict[t] = FALSE
+    /\ hasConflict' = [hasConflict EXCEPT ![t] = TRUE]
+    /\ UNCHANGED <<wState, kanban, wType, mergeAttempts, recoveryAttempts, baseMoved>>
+    /\ EffectVarsUnchanged
+
+\* Conflict resolved externally (e.g., blocking PR merged, files no longer overlap)
+EnvConflictResolved(t) ==
+    /\ hasConflict[t] = TRUE
+    /\ hasConflict' = [hasConflict EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<wState, kanban, wType, mergeAttempts, recoveryAttempts, baseMoved>>
+    /\ EffectVarsUnchanged
 
 \* =========================================================================
 \* Next-state relation
@@ -392,6 +652,7 @@ Next ==
         \/ MergeOutOfDateOk(t)
         \/ MergeOutOfDateFail(t)
         \/ MergeHardFail(t)
+        \/ ExternalPrMerged(t)
         \* Fix cycle
         \/ SpawnFixWorker(t)
         \/ SpawnFixWorkerFromFailed(t)
@@ -411,12 +672,23 @@ Next ==
         \* Recovery
         \/ Recovery(t)
         \/ RecoveryFallback(t)
-        \* External events
-        \/ ExternalPrMerged(t)
         \* Startup reset
         \/ StartupResetFixing(t)
         \/ StartupResetMerging(t)
         \/ StartupResetResolving(t)
+        \* Crash
+        \/ CrashWhileFixing(t)
+        \/ CrashWhileMerging(t)
+        \/ CrashWhileResolving(t)
+        \* Worktree cleanup
+        \/ CleanupCompleted(t)
+        \* Null-target transitions
+        \/ ResumeRetry(t)
+        \/ TaskReclaim(t)
+        \* Environment changes
+        \/ EnvBaseMoved(t)
+        \/ EnvConflictAppears(t)
+        \/ EnvConflictResolved(t)
 
 \* =========================================================================
 \* Fairness
@@ -443,6 +715,7 @@ Fairness ==
         /\ WF_vars(ResolveStartedFromMulti(q))
         /\ WF_vars(ResolveSucceeded(q) \/ ResolveFail(q))
         /\ WF_vars(Recovery(q) \/ RecoveryFallback(q))
+        /\ WF_vars(CleanupCompleted(q))
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -457,6 +730,12 @@ TypeInvariant ==
     /\ \A t \in Tasks : wType[t] \in WorkerTypes
     /\ \A t \in Tasks : mergeAttempts[t] \in 0..(MaxMergeAttempts + 1)
     /\ \A t \in Tasks : recoveryAttempts[t] \in 0..(MaxRecoveryAttempts + 1)
+    /\ \A t \in Tasks : inConflictQueue[t] \in BOOLEAN
+    /\ \A t \in Tasks : worktreeState[t] \in WorktreeValues
+    /\ \A t \in Tasks : lastError[t] \in ErrorValues
+    /\ \A t \in Tasks : githubSynced[t] \in BOOLEAN
+    /\ \A t \in Tasks : baseMoved[t] \in BOOLEAN
+    /\ \A t \in Tasks : hasConflict[t] \in BOOLEAN
 
 \* WorkerPoolCapacity: main and priority workers within limits
 WorkerPoolCapacity ==
@@ -491,6 +770,53 @@ DependencyOrdering ==
 NoDuplicateActiveWorkers ==
     \A t \in Tasks :
         wType[t] /= "none" => wState[t] /= "idle"
+
+\* KanbanFailedConsistency: permanent failure marker implies failed state
+KanbanFailedConsistency ==
+    \A t \in Tasks :
+        kanban[t] = "*" => wState[t] = "failed"
+
+\* =========================================================================
+\* Cross-Module Invariants (Effect-State Consistency)
+\* These validate consistency between effect-state and lifecycle state.
+\* Crash actions introduce nondeterminism, so invariants must account for
+\* partially-applied effects in running states.
+\* =========================================================================
+
+\* ConflictQueueConsistency: if in conflict queue, state must be conflict-related
+\* or a state reachable via crash (running states preserve queue membership).
+\* Exception: recovery from failed while in conflict queue can go to needs_fix.
+ConflictQueueConsistency ==
+    \A t \in Tasks :
+        inConflictQueue[t] => wState[t] \in {
+            "merge_conflict", "needs_resolve", "needs_multi_resolve",
+            "resolving", "fixing", "merging", "failed", "needs_fix",
+            "needs_merge"
+        }
+
+\* WorktreeStateConsistency: worktree lifecycle matches worker state
+\* idle workers have no worktree; merged workers are cleaning up or done
+WorktreeStateConsistency ==
+    \A t \in Tasks :
+        \/ (wState[t] = "idle" /\ worktreeState[t] = "absent")
+        \/ (wState[t] = "merged" /\ worktreeState[t] \in {"absent", "cleaning"})
+        \/ (wState[t] \notin {"idle", "merged"})
+
+\* ErrorStateConsistency: lastError reflects the failure mode
+\* rebase_failed and hard_fail only persist in failed state
+\* merge_conflict can persist through the conflict resolution chain
+ErrorStateConsistency ==
+    \A t \in Tasks :
+        /\ (lastError[t] = "merge_conflict" =>
+            wState[t] \in {"merge_conflict", "needs_resolve", "needs_multi_resolve",
+                           "resolving", "failed", "merging"})
+        /\ (lastError[t] = "rebase_failed" => wState[t] = "failed")
+        /\ (lastError[t] = "hard_fail" => wState[t] = "failed")
+
+\* MergedCleanupConsistency: merged workers have worktree cleaning or absent
+MergedCleanupConsistency ==
+    \A t \in Tasks :
+        wState[t] = "merged" => worktreeState[t] \in {"absent", "cleaning"}
 
 \* =========================================================================
 \* Liveness Properties (require fairness)

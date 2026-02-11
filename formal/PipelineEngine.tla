@@ -227,7 +227,10 @@ ExecuteStep ==
                     /\ status' = "running"
 
 \* Execute step and increment iteration counter
+\* Guard: when supervisor is enabled, execution blocks once the interval is reached
+\* — the real implementation checks the supervisor deterministically at that point.
 ExecuteStepWithCount ==
+    /\ SupervisorInterval = 0 \/ iterationsSinceCheck < SupervisorInterval
     /\ ExecuteStep
     /\ iterationsSinceCheck' = iterationsSinceCheck + 1
     /\ UNCHANGED supervisorRestarts

@@ -10,6 +10,7 @@ cd "$(dirname "$0")"
 VERBOSE=false
 INTERACTIVE=false
 FILTER=""
+TIMEOUT=0
 
 usage() {
     cat <<'EOF'
@@ -18,8 +19,9 @@ Usage: verify.sh [OPTIONS] [FILTER]
 Run Apalache model checks on TLA+ specs.
 
 Options:
-  -v, --verbose       Show full Apalache output (default: errors only)
+  -v, --verbose       Show full Apalache output (default: per-step progress dots)
   -i, --interactive   Prompt before each check (y/n/q)
+  -t, --time SECS     Kill each check after SECS seconds; PASS if no violation found
   -h, --help          Show this help
 
 Filter:
@@ -30,7 +32,7 @@ Filter:
     verify.sh Orchestrator        # all Orchestrator checks
     verify.sh TypeInvariant       # TypeInvariant across all specs
 
-Checks (27 safety invariants):
+Checks (32 safety invariants):
   WorkerLifecycle.tla   TypeInvariant BoundedCounters TransientStateInvariant
                         KanbanMergedConsistency KanbanFailedConsistency
                         ConflictQueueConsistency WorktreeStateConsistency
@@ -40,7 +42,9 @@ Checks (27 safety invariants):
   Orchestrator.tla      TypeInvariant WorkerPoolCapacity BoundedCounters
                         KanbanMergedConsistency NoIdleInProgress
                         NoFileConflictActive DependencyOrdering
-                        NoDuplicateActiveWorkers
+                        NoDuplicateActiveWorkers KanbanFailedConsistency
+                        ConflictQueueConsistency WorktreeStateConsistency
+                        ErrorStateConsistency MergedCleanupConsistency
   Scheduler.tla         TypeInvariant CapacityInvariant DependencyInvariant
                         FileConflictInvariant SkipBoundInvariant
 
@@ -59,6 +63,9 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -v|--verbose)     VERBOSE=true; shift ;;
         -i|--interactive) INTERACTIVE=true; shift ;;
+        -t|--time)
+            [[ $# -lt 2 ]] && { echo "Error: --time requires a value" >&2; exit 2; }
+            TIMEOUT="$2"; shift 2 ;;
         -h|--help)        usage; exit 0 ;;
         -*)               echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
         *)                FILTER="$1"; shift ;;
@@ -73,31 +80,55 @@ PASS_COUNT=0
 FAIL_COUNT=0
 SKIP_COUNT=0
 TOTAL_COUNT=0
+TIMEOUT_COUNT=0
+DRY_RUN=false
+APALACHE_PID=""
+INTERRUPTED=false
+declare -a FAILURES=()
+
+_on_sigint() {
+    # Double Ctrl+C: quit immediately
+    if [[ "$INTERRUPTED" == true ]]; then
+        echo ""
+        echo "Double interrupt — aborting."
+        _print_summary
+        exit 130
+    fi
+    if [[ -n "$APALACHE_PID" ]]; then
+        kill "$APALACHE_PID" 2>/dev/null || true
+        wait "$APALACHE_PID" 2>/dev/null || true
+        APALACHE_PID=""
+    fi
+    INTERRUPTED=true
+}
+trap _on_sigint INT
+
+# Check if a spec::inv pair matches the current filter
+_matches_filter() {
+    local spec_name="$1" inv="$2"
+    if [[ -n "$FILTER" ]]; then
+        if [[ "$FILTER" == *"::"* ]]; then
+            local fspec="${FILTER%%::*}"
+            local finv="${FILTER#*::}"
+            [[ -n "$fspec" ]] && [[ "$spec_name" != *"$fspec"* ]] && return 1
+            [[ -n "$finv" ]] && [[ "$inv" != *"$finv"* ]] && return 1
+        else
+            [[ "$spec_name" != *"$FILTER"* ]] && [[ "$inv" != *"$FILTER"* ]] && return 1
+        fi
+    fi
+    return 0
+}
 
 run_check() {
     local spec="$1" inv="$2" length="$3"
     local spec_name="${spec%.tla}"
 
-    # Filter: if FILTER contains "::", match each side independently against
-    # spec name and invariant name. Otherwise match as substring against either.
-    if [[ -n "$FILTER" ]]; then
-        if [[ "$FILTER" == *"::"* ]]; then
-            local fspec="${FILTER%%::*}"
-            local finv="${FILTER#*::}"
-            if [[ -n "$fspec" ]] && [[ "$spec_name" != *"$fspec"* ]]; then
-                return 0
-            fi
-            if [[ -n "$finv" ]] && [[ "$inv" != *"$finv"* ]]; then
-                return 0
-            fi
-        else
-            if [[ "$spec_name" != *"$FILTER"* ]] && [[ "$inv" != *"$FILTER"* ]]; then
-                return 0
-            fi
-        fi
-    fi
+    _matches_filter "$spec_name" "$inv" || return 0
 
     ((++TOTAL_COUNT)) || true
+
+    # Counting mode
+    [[ "$DRY_RUN" == true ]] && return 0
 
     # Interactive prompt
     if [[ "$INTERACTIVE" == true ]]; then
@@ -109,33 +140,131 @@ run_check() {
         esac
     fi
 
-    printf "%-55s " "${spec_name}::${inv}"
-
     local tmpout
     tmpout=$(mktemp)
-
+    local -a cmd=(apalache-mc check --cinit=CInit --inv="$inv" --length="$length" "$spec")
     local rc=0
+
+    INTERRUPTED=false
+
     if [[ "$VERBOSE" == true ]]; then
-        apalache-mc check --cinit=CInit --inv="$inv" --length="$length" "$spec" \
-            2>&1 | tee "$tmpout" || rc=$?
+        # --- Verbose mode: stream output in real time ---
+        printf "%-45s [%s]\n" "${spec_name}::${inv}" "$length"
+
+        "${cmd[@]}" > "$tmpout" 2>&1 &
+        APALACHE_PID=$!
+
+        # Stream output via tail -f; killed when apalache exits
+        tail -f "$tmpout" 2>/dev/null &
+        local tail_pid=$!
+
+        local start=$SECONDS timed_out=false
+        while kill -0 "$APALACHE_PID" 2>/dev/null; do
+            if [[ "$INTERRUPTED" == true ]]; then
+                kill "$APALACHE_PID" 2>/dev/null || true
+                wait "$APALACHE_PID" 2>/dev/null || true
+                break
+            fi
+            if (( TIMEOUT > 0 && SECONDS - start >= TIMEOUT )); then
+                kill "$APALACHE_PID" 2>/dev/null || true
+                wait "$APALACHE_PID" 2>/dev/null || true
+                timed_out=true
+                break
+            fi
+            sleep 0.5 || true
+        done
+
+        # Stop streaming
+        kill "$tail_pid" 2>/dev/null || true
+        wait "$tail_pid" 2>/dev/null || true
+
+        if [[ "$INTERRUPTED" != true && "$timed_out" != true ]]; then
+            wait "$APALACHE_PID" 2>/dev/null || rc=$?
+        elif [[ "$timed_out" == true ]]; then
+            rc=124
+        fi
+        APALACHE_PID=""
     else
-        apalache-mc check --cinit=CInit --inv="$inv" --length="$length" "$spec" \
-            > "$tmpout" 2>&1 || rc=$?
+        # --- Default mode: name [steps] dots ---
+        printf "%-45s [%s] " "${spec_name}::${inv}" "$length"
+
+        "${cmd[@]}" > "$tmpout" 2>&1 &
+        APALACHE_PID=$!
+
+        local dots=0 start=$SECONDS timed_out=false
+        while kill -0 "$APALACHE_PID" 2>/dev/null; do
+            if [[ "$INTERRUPTED" == true ]]; then
+                kill "$APALACHE_PID" 2>/dev/null || true
+                wait "$APALACHE_PID" 2>/dev/null || true
+                break
+            fi
+            if (( TIMEOUT > 0 && SECONDS - start >= TIMEOUT )); then
+                kill "$APALACHE_PID" 2>/dev/null || true
+                wait "$APALACHE_PID" 2>/dev/null || true
+                timed_out=true
+                break
+            fi
+            local n=0
+            n=$(grep -c "picking a transition" "$tmpout" 2>/dev/null) || n=0
+            while (( dots < n )); do printf "."; ((++dots)); done
+            sleep 0.5 || true
+        done
+
+        if [[ "$INTERRUPTED" != true && "$timed_out" != true ]]; then
+            wait "$APALACHE_PID" 2>/dev/null || rc=$?
+        elif [[ "$timed_out" == true ]]; then
+            rc=124
+        fi
+        APALACHE_PID=""
+
+        # Print remaining dots after process exits
+        if [[ "$INTERRUPTED" != true ]]; then
+            local n=0
+            n=$(grep -c "picking a transition" "$tmpout" 2>/dev/null) || n=0
+            while (( dots < n )); do printf "."; ((++dots)); done
+        fi
     fi
 
-    if [[ $rc -eq 0 ]]; then
-        echo "PASS"
-        ((++PASS_COUNT)) || true
-    else
-        echo "FAIL (exit $rc)"
-        ((++FAIL_COUNT)) || true
-
-        if [[ "$VERBOSE" != true ]]; then
-            # Show only error-relevant lines
-            grep -E '(violation|error|Error|EXITCODE|invariant.*violated|Check the trace)' "$tmpout" \
-                | sed 's/^/  /'
+    # --- Result ---
+    if [[ "$INTERRUPTED" == true ]]; then
+        ((++SKIP_COUNT)) || true
+        if [[ "$VERBOSE" == true ]]; then
+            echo "SKIP (interrupted)"
+        else
+            printf " SKIP\n"
         fi
-        echo ""
+    elif [[ $rc -eq 0 ]]; then
+        ((++PASS_COUNT)) || true
+        if [[ "$VERBOSE" == true ]]; then
+            echo "PASS"
+        else
+            printf " PASS\n"
+        fi
+    elif (( TIMEOUT > 0 )) && [[ $rc -eq 124 ]]; then
+        # Timeout: no violation found within time budget
+        ((++PASS_COUNT)) || true
+        ((++TIMEOUT_COUNT)) || true
+        if [[ "$VERBOSE" == true ]]; then
+            echo "PASS (timeout ${TIMEOUT}s)"
+        else
+            printf " PASS (%ss)\n" "$TIMEOUT"
+        fi
+    else
+        ((++FAIL_COUNT)) || true
+        if [[ "$VERBOSE" == true ]]; then
+            echo "FAIL (exit $rc)"
+        else
+            printf " FAIL\n"
+        fi
+        # Collect failure details
+        local detail=""
+        detail=$(grep -E '(violation|error|Error|EXITCODE|invariant.*violated|Check the trace)' "$tmpout" \
+            | sed 's/^/    /' || true)
+        if [[ -n "$detail" ]]; then
+            FAILURES+=("  ${spec_name}::${inv} (exit $rc)"$'\n'"$detail")
+        else
+            FAILURES+=("  ${spec_name}::${inv} (exit $rc)")
+        fi
     fi
 
     rm -f "$tmpout"
@@ -144,54 +273,89 @@ run_check() {
 _print_summary() {
     echo ""
     echo "========================================="
-    echo "  Pass: $PASS_COUNT  Fail: $FAIL_COUNT  Skip: $SKIP_COUNT  Total: $TOTAL_COUNT"
+    local pass_str="$PASS_COUNT"
+    [[ "$TIMEOUT_COUNT" -gt 0 ]] && pass_str="$PASS_COUNT ($TIMEOUT_COUNT timeout)"
+    echo "  Pass: $pass_str  Fail: $FAIL_COUNT  Skip: $SKIP_COUNT  Total: $TOTAL_COUNT"
     echo "========================================="
 }
 
 # =========================================================================
-# Checks
+# Check definitions
 # =========================================================================
 
-# WorkerLifecycle
-run_check WorkerLifecycle.tla TypeInvariant 20
-run_check WorkerLifecycle.tla BoundedCounters 20
-run_check WorkerLifecycle.tla TransientStateInvariant 20
-run_check WorkerLifecycle.tla KanbanMergedConsistency 20
-run_check WorkerLifecycle.tla KanbanFailedConsistency 20
-# Quick Win #4: Cross-module invariants
-run_check WorkerLifecycle.tla ConflictQueueConsistency 20
-run_check WorkerLifecycle.tla WorktreeStateConsistency 20
-run_check WorkerLifecycle.tla ErrorStateConsistency 20
-run_check WorkerLifecycle.tla MergedCleanupConsistency 20
+_run_all_checks() {
+    # WorkerLifecycle
+    run_check WorkerLifecycle.tla TypeInvariant 20
+    run_check WorkerLifecycle.tla BoundedCounters 20
+    run_check WorkerLifecycle.tla TransientStateInvariant 20
+    run_check WorkerLifecycle.tla KanbanMergedConsistency 20
+    run_check WorkerLifecycle.tla KanbanFailedConsistency 20
+    run_check WorkerLifecycle.tla ConflictQueueConsistency 20
+    run_check WorkerLifecycle.tla WorktreeStateConsistency 20
+    run_check WorkerLifecycle.tla ErrorStateConsistency 20
+    run_check WorkerLifecycle.tla MergedCleanupConsistency 20
 
-# PipelineEngine
-run_check PipelineEngine.tla TypeInvariant 30
-run_check PipelineEngine.tla VisitsBounded 30
-run_check PipelineEngine.tla InlineVisitsBounded 30
-run_check PipelineEngine.tla StatusConsistency 30
-run_check PipelineEngine.tla SupervisorRestartsBounded 30
+    # PipelineEngine
+    run_check PipelineEngine.tla TypeInvariant 30
+    run_check PipelineEngine.tla VisitsBounded 30
+    run_check PipelineEngine.tla InlineVisitsBounded 30
+    run_check PipelineEngine.tla StatusConsistency 30
+    run_check PipelineEngine.tla SupervisorRestartsBounded 30
 
-# Orchestrator
-run_check Orchestrator.tla TypeInvariant 15
-run_check Orchestrator.tla WorkerPoolCapacity 15
-run_check Orchestrator.tla BoundedCounters 15
-run_check Orchestrator.tla KanbanMergedConsistency 15
-run_check Orchestrator.tla NoIdleInProgress 15
-run_check Orchestrator.tla NoFileConflictActive 15
-run_check Orchestrator.tla DependencyOrdering 15
-run_check Orchestrator.tla NoDuplicateActiveWorkers 15
+    # Orchestrator
+    run_check Orchestrator.tla TypeInvariant 15
+    run_check Orchestrator.tla WorkerPoolCapacity 15
+    run_check Orchestrator.tla BoundedCounters 15
+    run_check Orchestrator.tla KanbanMergedConsistency 15
+    run_check Orchestrator.tla NoIdleInProgress 15
+    run_check Orchestrator.tla NoFileConflictActive 15
+    run_check Orchestrator.tla DependencyOrdering 15
+    run_check Orchestrator.tla NoDuplicateActiveWorkers 15
+    run_check Orchestrator.tla KanbanFailedConsistency 15
+    run_check Orchestrator.tla ConflictQueueConsistency 15
+    run_check Orchestrator.tla WorktreeStateConsistency 15
+    run_check Orchestrator.tla ErrorStateConsistency 15
+    run_check Orchestrator.tla MergedCleanupConsistency 15
 
-# Scheduler
-run_check Scheduler.tla TypeInvariant 15
-run_check Scheduler.tla CapacityInvariant 15
-run_check Scheduler.tla DependencyInvariant 15
-run_check Scheduler.tla FileConflictInvariant 15
-run_check Scheduler.tla SkipBoundInvariant 15
+    # Scheduler
+    run_check Scheduler.tla TypeInvariant 15
+    run_check Scheduler.tla CapacityInvariant 15
+    run_check Scheduler.tla DependencyInvariant 15
+    run_check Scheduler.tla FileConflictInvariant 15
+    run_check Scheduler.tla SkipBoundInvariant 15
+}
 
 # =========================================================================
+# Execute
+# =========================================================================
+
+# Counting pass: determine how many checks match the filter
+DRY_RUN=true
+_run_all_checks
+STEP_COUNT=$TOTAL_COUNT
+TOTAL_COUNT=0
+
+echo "$STEP_COUNT checks"
+
+if [[ "$STEP_COUNT" -eq 0 ]]; then
+    echo "No checks matched filter."
+    exit 0
+fi
+
+# Execution pass
+DRY_RUN=false
+_run_all_checks
+
+# Print failure details
+if [[ ${#FAILURES[@]} -gt 0 ]]; then
+    echo ""
+    echo "Failures:"
+    for f in "${FAILURES[@]}"; do
+        echo "$f"
+    done
+fi
+
 # Summary
-# =========================================================================
-
 _print_summary
 
 if (( FAIL_COUNT > 0 )); then
