@@ -18,6 +18,7 @@ source "$WIGGUM_HOME/lib/core/lifecycle-guards.sh"
 source "$WIGGUM_HOME/lib/worker/git-state.sh"
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/platform.sh"
+source "$WIGGUM_HOME/lib/core/effect-outbox.sh"
 
 # Emit an event to transition a worker through the lifecycle state machine
 #
@@ -153,6 +154,10 @@ _lifecycle_update_kanban() {
 # runtime context (worker_dir, task_id, ralph_dir) and event data (data.*)
 # into the argument list.
 #
+# Uses the outbox pattern for crash-safety: effects are recorded as pending
+# before execution and marked complete afterward. On restart, pending effects
+# are replayed to achieve eventual consistency.
+#
 # Args:
 #   effects_csv - Comma-separated list of effect names
 #   worker_dir  - Worker directory path
@@ -168,38 +173,99 @@ _lifecycle_run_effects() {
     task_id=$(_lifecycle_resolve_task_id "$worker_dir" "$data_json")
     ralph_dir=$(_lifecycle_resolve_ralph_dir "$worker_dir" "$data_json")
 
+    # Build context for outbox replay
+    local context_json
+    context_json=$(jq -n \
+        --arg task_id "$task_id" \
+        --arg ralph_dir "$ralph_dir" \
+        --arg kanban "$kanban" \
+        --argjson data "$data_json" \
+        '{task_id: $task_id, ralph_dir: $ralph_dir, kanban: $kanban, data: $data}' 2>/dev/null) || context_json='{}'
+
+    # Record effects as pending before execution (outbox pattern)
+    local batch_id=""
+    if [[ "${WIGGUM_EFFECT_OUTBOX_ENABLED:-true}" == "true" ]]; then
+        batch_id=$(outbox_record_pending "$worker_dir" "$effects_csv" "$context_json")
+    fi
+
     IFS=',' read -ra effect_list <<< "$effects_csv"
     for effect_name in "${effect_list[@]}"; do
-        local fn="${_LC_EFFECT_FN[$effect_name]:-}"
-        [ -z "$fn" ] && { log_warn "lifecycle: unknown effect: $effect_name"; continue; }
+        local entry_id="${batch_id}-${effect_name}"
 
-        # Resolve args from spec + runtime context
-        local args_spec="${_LC_EFFECT_ARGS[$effect_name]:-}"
-        local resolved_args=()
-        IFS=',' read -ra arg_names <<< "$args_spec"
-        for arg in "${arg_names[@]}"; do
-            case "$arg" in
-                worker_dir)   resolved_args+=("$worker_dir") ;;
-                task_id)      resolved_args+=("$task_id") ;;
-                ralph_dir)    resolved_args+=("$ralph_dir") ;;
-                kanban_file)  resolved_args+=("$ralph_dir/kanban.md") ;;
-                kanban)       resolved_args+=("$kanban") ;;
-                data.*)
-                    local data_key="${arg#data.}"
-                    local data_val
-                    data_val=$(echo "$data_json" | jq -r ".${data_key} // empty" 2>/dev/null)
-                    resolved_args+=("${data_val:-}")
-                    ;;
-                *)          resolved_args+=("$arg") ;;
-            esac
-        done
-
-        if ! declare -f "$fn" &>/dev/null; then
-            log_debug "lifecycle: effect '$effect_name' skipped ($fn not loaded)"
-            continue
+        if _lifecycle_run_single_effect "$effect_name" "$worker_dir" "$context_json" "$kanban"; then
+            # Mark effect complete in outbox
+            if [[ -n "$batch_id" ]]; then
+                outbox_mark_completed "$worker_dir" "$entry_id"
+            fi
+        else
+            log_warn "lifecycle: effect '$effect_name' failed (non-fatal)"
         fi
-        "$fn" "${resolved_args[@]}" 2>/dev/null || log_warn "lifecycle: effect '$effect_name' failed (non-fatal)"
     done
+}
+
+# Execute a single effect by name
+#
+# Used by both _lifecycle_run_effects and outbox_replay_pending.
+#
+# Args:
+#   effect_name  - Effect name from spec
+#   worker_dir   - Worker directory path
+#   context_json - JSON with task_id, ralph_dir, kanban, data
+#   kanban       - Kanban status (optional, can be in context_json)
+#
+# Returns: 0 on success, 1 on failure
+_lifecycle_run_single_effect() {
+    local effect_name="$1"
+    local worker_dir="$2"
+    local context_json="${3:-'{}'}"
+    local kanban="${4:-}"
+
+    local fn="${_LC_EFFECT_FN[$effect_name]:-}"
+    [ -z "$fn" ] && { log_warn "lifecycle: unknown effect: $effect_name"; return 1; }
+
+    # Extract context
+    local task_id ralph_dir
+    task_id=$(echo "$context_json" | jq -r '.task_id // empty' 2>/dev/null)
+    ralph_dir=$(echo "$context_json" | jq -r '.ralph_dir // empty' 2>/dev/null)
+    kanban="${kanban:-$(echo "$context_json" | jq -r '.kanban // empty' 2>/dev/null)}"
+    local data_json
+    data_json=$(echo "$context_json" | jq -c '.data // {}' 2>/dev/null) || data_json='{}'
+
+    # Fallback resolution if context is incomplete
+    if [ -z "$task_id" ]; then
+        task_id=$(_lifecycle_resolve_task_id "$worker_dir" "$data_json")
+    fi
+    if [ -z "$ralph_dir" ]; then
+        ralph_dir=$(_lifecycle_resolve_ralph_dir "$worker_dir" "$data_json")
+    fi
+
+    # Resolve args from spec + runtime context
+    local args_spec="${_LC_EFFECT_ARGS[$effect_name]:-}"
+    local resolved_args=()
+    IFS=',' read -ra arg_names <<< "$args_spec"
+    for arg in "${arg_names[@]}"; do
+        case "$arg" in
+            worker_dir)   resolved_args+=("$worker_dir") ;;
+            task_id)      resolved_args+=("$task_id") ;;
+            ralph_dir)    resolved_args+=("$ralph_dir") ;;
+            kanban_file)  resolved_args+=("$ralph_dir/kanban.md") ;;
+            kanban)       resolved_args+=("$kanban") ;;
+            data.*)
+                local data_key="${arg#data.}"
+                local data_val
+                data_val=$(echo "$data_json" | jq -r ".${data_key} // empty" 2>/dev/null)
+                resolved_args+=("${data_val:-}")
+                ;;
+            *)          resolved_args+=("$arg") ;;
+        esac
+    done
+
+    if ! declare -f "$fn" &>/dev/null; then
+        log_debug "lifecycle: effect '$effect_name' skipped ($fn not loaded)"
+        return 0  # Not an error - function just not available
+    fi
+
+    "$fn" "${resolved_args[@]}" 2>/dev/null
 }
 
 # Write an event to the worker's lifecycle event log

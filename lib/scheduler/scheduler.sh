@@ -31,6 +31,7 @@ source "$WIGGUM_HOME/lib/tasks/conflict-detection.sh"
 source "$WIGGUM_HOME/lib/worker/worker-lifecycle.sh"
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/resume-state.sh"
+source "$WIGGUM_HOME/lib/core/effect-outbox.sh"
 
 # Scheduler configuration (set by scheduler_init)
 declare -g _SCHED_RALPH_DIR=""
@@ -174,6 +175,9 @@ scheduler_restore_workers() {
 
         # Reconcile merged workers with incomplete effects (mid-crash recovery)
         _scheduler_reconcile_merged_workers
+
+        # Replay pending effects from outbox (crash-safe effect execution)
+        _scheduler_replay_pending_effects
 
         # Migrate legacy .needs-fix markers to git-state.json
         # (must be inside the workers-dir check since it iterates worker-*)
@@ -329,6 +333,16 @@ _scheduler_reset_dead_workers() {
             # Transient states stuck without a running agent
             merge_conflict)
                 event="conflict.needs_resolve" ;;
+            # Transient chain states that should never persist (TLA+ assumes atomic collapse)
+            # If a crash occurred between chain write and target write, replay the transition
+            fix_completed)
+                # fix_completed chains to needs_merge (via fix.pass/fix.skip)
+                # Re-emit fix.skip which has no guard and chains to needs_merge
+                event="fix.skip" ;;
+            resolved)
+                # resolved chains to needs_merge (via resolve.succeeded)
+                # Transition directly since we already completed resolution
+                event="resolve.succeeded" ;;
             # Terminal/waiting states — already handled by services
             merged|failed|needs_fix|needs_merge|needs_resolve|needs_multi_resolve|none)
                 log_debug "reset_dead: $worker_name state=$current_git_state - skip (handled by services)"
@@ -359,10 +373,12 @@ _scheduler_reset_dead_workers() {
 # inconsistent state. _scheduler_reset_dead_workers skips terminal states,
 # so these inconsistencies persist forever without explicit reconciliation.
 #
-# Fixes three crash-recovery bugs:
+# Fixes crash-recovery bugs identified in TLA+ model (MidCrashMergeSucceeded):
 #   1. kanban still "=" but state="merged" — task stuck in-progress
 #   2. conflict queue still has entry — stale queue entry never cleaned
 #   3. workspace/ still exists — leaked worktree wasting disk + git registration
+#   4. GitHub issue not synced — status mismatch between kanban and issue
+#   5. error field not cleared — stale error from previous failure
 _scheduler_reconcile_merged_workers() {
     [ -d "$_SCHED_RALPH_DIR/workers" ] || return 0
 
@@ -382,16 +398,37 @@ _scheduler_reconcile_merged_workers() {
         local task_id
         task_id=$(get_task_id_from_worker "$worker_name")
 
+        local needs_reconcile=false
+
         # Bug 1: kanban not updated to "x" (complete)
         local kanban_status
         kanban_status=$(get_task_status "$_SCHED_RALPH_DIR/kanban.md" "$task_id")
         if [[ "$kanban_status" != "x" ]]; then
             update_kanban_status "$_SCHED_RALPH_DIR/kanban.md" "$task_id" "x" || true
             log "Reconciled merged worker $task_id: kanban $kanban_status → x"
+            needs_reconcile=true
         fi
 
         # Bug 2: conflict queue not cleared (no-op if not in queue)
         conflict_queue_remove "$_SCHED_RALPH_DIR" "$task_id"
+
+        # Bug 4: GitHub issue not synced (sync_github effect didn't run)
+        # Only sync if kanban was wrong (indicates mid-crash)
+        if [[ "$needs_reconcile" == "true" ]]; then
+            if declare -F github_issue_sync_task_status &>/dev/null; then
+                github_issue_sync_task_status "$_SCHED_RALPH_DIR" "$task_id" "x" 2>/dev/null || true
+                log_debug "Reconciled merged worker $task_id: synced GitHub issue"
+            fi
+        fi
+
+        # Bug 5: error field not cleared (clear_error effect didn't run)
+        local last_error
+        last_error=$(git_state_get_error "$worker_dir" 2>/dev/null || echo "")
+        if [[ -n "$last_error" && "$last_error" != "null" ]]; then
+            git_state_clear_error "$worker_dir" || true
+            log_debug "Reconciled merged worker $task_id: cleared stale error"
+            needs_reconcile=true
+        fi
 
         # Bug 3: workspace not cleaned up (must run last — archives worker dir)
         if [ -d "$worker_dir/workspace" ]; then
@@ -401,11 +438,58 @@ _scheduler_reconcile_merged_workers() {
             continue  # worker_dir moved to history/, skip further access
         fi
 
-        ((++reconciled)) || true
+        if [[ "$needs_reconcile" == "true" ]]; then
+            ((++reconciled)) || true
+        fi
     done
 
     if [ "$reconciled" -gt 0 ]; then
         log "Reconciled $reconciled merged worker(s) with incomplete effects"
+    fi
+}
+
+# Replay pending effects from the outbox for all workers
+#
+# When emit_event() crashes after recording effects in the outbox but before
+# executing them, effects remain pending. This function replays them at startup
+# to achieve eventual consistency.
+#
+# Part of the crash-safety improvements identified in TLA+ model analysis.
+_scheduler_replay_pending_effects() {
+    [ -d "$_SCHED_RALPH_DIR/workers" ] || return 0
+
+    # Ensure lifecycle spec is loaded for effect execution
+    lifecycle_is_loaded || lifecycle_load
+
+    local total_replayed=0
+    for worker_dir in "$_SCHED_RALPH_DIR/workers"/worker-*; do
+        [ -d "$worker_dir" ] || continue
+
+        # Skip if no pending effects
+        outbox_has_pending "$worker_dir" || continue
+
+        local worker_name
+        worker_name=$(basename "$worker_dir")
+        local task_id
+        task_id=$(get_task_id_from_worker "$worker_name")
+
+        log "Replaying pending effects for $task_id..."
+
+        local replayed
+        replayed=$(outbox_replay_pending "$worker_dir")
+        replayed="${replayed:-0}"
+
+        if [ "$replayed" -gt 0 ]; then
+            log "Replayed $replayed pending effect(s) for $task_id"
+            ((total_replayed += replayed)) || true
+        fi
+
+        # Clean up old completed entries
+        outbox_cleanup_completed "$worker_dir"
+    done
+
+    if [ "$total_replayed" -gt 0 ]; then
+        log "Replayed $total_replayed pending effect(s) across all workers"
     fi
 }
 
