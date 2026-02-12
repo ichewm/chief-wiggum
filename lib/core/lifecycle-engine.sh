@@ -20,6 +20,9 @@ source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/effect-outbox.sh"
 
+# Re-entry guard for cleanup_worktree pre-replay (prevents infinite recursion)
+_CLEANUP_WORKTREE_REPLAYING=0
+
 # Emit an event to transition a worker through the lifecycle state machine
 #
 # Finds the matching transition for the current state + event, evaluates
@@ -227,11 +230,15 @@ _lifecycle_run_single_effect() {
 
     # CATEGORY 4 FIX: Replay pending effects before cleanup_worktree archives the directory
     # This catches effects from mid-transition crashes that would otherwise be lost
-    if [[ "$effect_name" == "cleanup_worktree" ]]; then
+    # Re-entry guard: outbox_replay_pending calls _lifecycle_run_single_effect for each
+    # pending entry, including cleanup_worktree itself, which would recurse infinitely.
+    if [[ "$effect_name" == "cleanup_worktree" ]] && (( ! ${_CLEANUP_WORKTREE_REPLAYING:-0} )); then
+        _CLEANUP_WORKTREE_REPLAYING=1
         if outbox_has_pending "$worker_dir" 2>/dev/null; then
             log_debug "lifecycle: replaying pending effects before cleanup_worktree"
             outbox_replay_pending "$worker_dir" >/dev/null 2>&1 || true
         fi
+        _CLEANUP_WORKTREE_REPLAYING=0
     fi
 
     local fn="${_LC_EFFECT_FN[$effect_name]:-}"
