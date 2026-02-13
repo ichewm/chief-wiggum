@@ -15,6 +15,10 @@ _PROCESS_SH_LOADED=1
 # Under set -e, bare `wait "$pid"` will kill the calling script if the
 # process exited non-zero. This helper captures the exit code safely.
 #
+# IMPORTANT: Do NOT use exit_code=$(wait_safe "$pid") — the $() subshell
+# cannot wait for the parent's background PID and returns 127. Use
+# wait_safe_var instead, or redirect to a file.
+#
 # Args:
 #   pid - Process ID to wait for
 #
@@ -22,10 +26,10 @@ _PROCESS_SH_LOADED=1
 # Exit: Always 0 (to not trigger set -e)
 #
 # Usage:
-#   exit_code=$(wait_safe "$pid")
-#   # OR
 #   local exit_code=0
-#   wait_safe_var exit_code "$pid"
+#   wait_safe_var exit_code "$pid"    # preferred
+#   # OR
+#   wait_safe "$pid" > "$tmpfile"     # file redirection (no subshell)
 wait_safe() {
     local pid="$1"
     local exit_code=0

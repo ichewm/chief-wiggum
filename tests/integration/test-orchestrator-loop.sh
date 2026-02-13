@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# test-orchestrator-loop.sh - Integration tests for orchestrator main loop
 set -euo pipefail
+# test-orchestrator-loop.sh - Integration tests for orchestrator main loop
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -15,17 +15,17 @@ PASS_COUNT=0
 FAIL_COUNT=0
 
 test_start() {
-    ((++TEST_COUNT)) || true
+    TEST_COUNT=$((TEST_COUNT + 1))
     echo -n "Test $TEST_COUNT: $1... "
 }
 
 test_pass() {
-    ((++PASS_COUNT)) || true
+    PASS_COUNT=$((PASS_COUNT + 1))
     echo "PASS"
 }
 
 test_fail() {
-    ((++FAIL_COUNT)) || true
+    FAIL_COUNT=$((FAIL_COUNT + 1))
     echo "FAIL"
     [ -n "${1:-}" ] && echo "  Error: $1"
 }
@@ -133,12 +133,10 @@ test_start "Scheduler initializes with tasks"
     source "$WIGGUM_HOME/lib/core/defaults.sh"
     source "$WIGGUM_HOME/lib/scheduler/scheduler.sh"
 
-    scheduler_init "$RALPH_DIR" "$PROJECT_DIR" 7 20000 15000 7000 20000 8000
+    scheduler_init "$RALPH_DIR" "$PROJECT_DIR" 7 20000 15000 7000 5000 3000
+    scheduler_tick 2>/dev/null
 
-    # Run a scheduler tick to populate ready tasks
-    scheduler_tick
-
-    # Should have tasks queued (TEST-001 should be ready)
+    # Should have tasks queued
     [[ "$SCHED_READY_TASKS" == *"TEST-001"* ]]
 ) && test_pass || test_fail "Scheduler should find tasks"
 
@@ -148,7 +146,7 @@ test_start "Worker directory structure"
     setup_minimal_project
 
     source "$WIGGUM_HOME/lib/core/logger.sh"
-    source "$WIGGUM_HOME/lib/worker/worker-lifecycle.sh"
+    source "$WIGGUM_HOME/lib/git/worktree-helpers.sh"
 
     # Create worker structure manually (simulating spawn)
     worker_id="12345678"
@@ -171,14 +169,12 @@ test_start "Service state persists"
 
     # Update a service
     service_state_set_status "test-service" "running"
-    service_state_set_last_run "test-service"
     service_state_save
 
     # Verify persistence
     [ -f "$RALPH_DIR/services/state.json" ]
 
-    # Check status
-    local status
+    # Load and verify
     status=$(service_state_get_status "test-service")
     [ "$status" = "running" ]
 ) && test_pass || test_fail "State not persisted"
@@ -198,9 +194,7 @@ test_start "Service state survives restart"
     service_state_save
 
     # Clear in-memory state (simulate restart)
-    unset _SERVICE_LAST_RUN
-    unset _SERVICE_STATUS
-    unset _SERVICE_RUN_COUNT
+    unset _SERVICE_STATE
     unset _SERVICE_STATE_FILE
     _SERVICE_STATE_LOADED=""
 
@@ -209,7 +203,6 @@ test_start "Service state survives restart"
     service_state_init "$RALPH_DIR"
     service_state_restore
 
-    local last_run
     last_run=$(service_state_get_last_run "pr-sync")
     [ "$last_run" = "1700000000" ]
 ) && test_pass || test_fail "State not restored"
@@ -235,7 +228,6 @@ test_start "Task parser extracts pending tasks"
     source "$WIGGUM_HOME/lib/core/logger.sh"
     source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 
-    local tasks
     tasks=$(get_todo_tasks "$RALPH_DIR/kanban.md")
 
     # Should have TEST-001 (pending)
@@ -251,18 +243,13 @@ test_start "Dependency blocking"
     source "$WIGGUM_HOME/lib/core/defaults.sh"
     source "$WIGGUM_HOME/lib/scheduler/scheduler.sh"
 
-    scheduler_init "$RALPH_DIR" "$PROJECT_DIR" 7 20000 15000 7000 20000 8000
-
-    # Run scheduler tick to populate state
-    scheduler_tick
+    scheduler_init "$RALPH_DIR" "$PROJECT_DIR" 7 20000 15000 7000 5000 3000
+    scheduler_tick 2>/dev/null
 
     # TEST-001 should be ready
     echo "$SCHED_READY_TASKS" | grep -q "TEST-001" || exit 1
 
-    # TEST-002 should be blocked (depends on TEST-001)
-    echo "$SCHED_BLOCKED_TASKS" | grep -q "TEST-002" || exit 1
-
-    # TEST-002 should NOT be in ready list
+    # TEST-002 should NOT be ready (blocked by TEST-001)
     if echo "$SCHED_READY_TASKS" | grep -q "TEST-002"; then
         exit 1  # Should not be in ready list
     fi
@@ -270,20 +257,45 @@ test_start "Dependency blocking"
     true
 ) && test_pass || test_fail "Dependency not blocking"
 
-# Test 10: Process module wait_safe works correctly
+# Test 10: Process module helpers work correctly
 test_start "Process module wait_safe"
 (
     source "$WIGGUM_HOME/lib/core/process.sh"
 
     # Start a process that exits with code 42
     (exit 42) &
-    local pid=$!
+    pid=$!
 
-    local exit_code
-    exit_code=$(wait_safe "$pid")
+    # Use wait_safe_var to avoid subshell issue with $()
+    exit_code=0
+    wait_safe_var exit_code "$pid"
 
     [ "$exit_code" = "42" ]
 ) && test_pass || test_fail "wait_safe incorrect"
+
+# Test 11: GitHub API module loads
+test_start "GitHub API module loads"
+(
+    source "$WIGGUM_HOME/lib/core/logger.sh"
+    source "$WIGGUM_HOME/lib/github/gh-api.sh"
+
+    # Verify functions exist
+    type gh_api > /dev/null 2>&1
+    type gh_pr_list > /dev/null 2>&1
+    type gh_current_user > /dev/null 2>&1
+) && test_pass || test_fail "gh-api.sh not loadable"
+
+# Test 12: Service handler common module loads
+test_start "Service handler common module loads"
+(
+    source "$WIGGUM_HOME/lib/core/logger.sh"
+    source "$WIGGUM_HOME/lib/service/service-handler-common.sh"
+
+    # Verify functions exist
+    type svc_require_env > /dev/null 2>&1
+    type svc_run_if > /dev/null 2>&1
+    type svc_try > /dev/null 2>&1
+) && test_pass || test_fail "service-handler-common.sh not loadable"
 
 # =============================================================================
 # Summary

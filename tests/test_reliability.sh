@@ -19,10 +19,16 @@ export LOG_LEVEL
 test_wait_safe_captures_zero_exit() {
     source "$WIGGUM_HOME/lib/core/process.sh"
 
+    # Use file redirection instead of $() — command substitution creates a
+    # subshell where wait can't see the parent's background PID (returns 127).
+    local tmpfile
+    tmpfile=$(mktemp)
     (exit 0) &
     local pid=$!
+    wait_safe "$pid" > "$tmpfile"
     local exit_code
-    exit_code=$(wait_safe "$pid")
+    exit_code=$(cat "$tmpfile")
+    rm -f "$tmpfile"
 
     assert_equals "0" "$exit_code" "wait_safe should capture exit code 0"
 }
@@ -30,10 +36,14 @@ test_wait_safe_captures_zero_exit() {
 test_wait_safe_captures_nonzero_exit() {
     source "$WIGGUM_HOME/lib/core/process.sh"
 
+    local tmpfile
+    tmpfile=$(mktemp)
     (exit 42) &
     local pid=$!
+    wait_safe "$pid" > "$tmpfile"
     local exit_code
-    exit_code=$(wait_safe "$pid")
+    exit_code=$(cat "$tmpfile")
+    rm -f "$tmpfile"
 
     assert_equals "42" "$exit_code" "wait_safe should capture exit code 42"
 }
@@ -213,7 +223,7 @@ test_svc_run_if_any_runs_on_first_true() {
 }
 
 # =============================================================================
-# lib/core/safe-path.sh Tests (ensure existing still works)
+# lib/core/safe-path.sh Tests
 # =============================================================================
 
 test_safe_path_rejects_empty() {

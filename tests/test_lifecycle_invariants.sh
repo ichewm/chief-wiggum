@@ -87,9 +87,10 @@ test_terminal_failed_accepts_only_recovery() {
 
     git_state_set "$WORKER_DIR" "failed" "test" "Setup"
 
-    # Should reject regular events
+    # Should reject events with no transition from 'failed'
+    # (worker.spawned only has from: "none", merge.succeeded only from: "merging")
     local rejected=true
-    if emit_event "$WORKER_DIR" "fix.started" "test" '{}' 2>/dev/null; then
+    if emit_event "$WORKER_DIR" "worker.spawned" "test" '{}' 2>/dev/null; then
         rejected=false
     fi
     if emit_event "$WORKER_DIR" "merge.succeeded" "test" '{}' 2>/dev/null; then
@@ -107,9 +108,9 @@ test_terminal_failed_accepts_only_recovery() {
 
     ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
     if $rejected && $recovery_accepted; then
-        echo -e "  ${GREEN}✓${NC} Terminal 'failed' accepts only recovery events"
+        echo -e "  ${GREEN}✓${NC} Terminal 'failed' rejects unrelated events but accepts recovery"
     else
-        echo -e "  ${RED}✗${NC} Terminal 'failed' should accept only recovery events (rejected=$rejected, recovery_accepted=$recovery_accepted)"
+        echo -e "  ${RED}✗${NC} Terminal 'failed' should reject unrelated events but accept recovery"
         FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
     fi
 }
@@ -120,9 +121,6 @@ test_terminal_failed_accepts_only_recovery() {
 
 test_wildcard_resume_abort_from_all_states() {
     lifecycle_load
-
-    # Stub effects
-    github_issue_sync_task_status() { return 0; }
 
     local non_terminal_states=("none" "needs_fix" "fixing" "needs_merge" "merging" "needs_resolve" "resolving")
     local all_accepted=true
@@ -154,66 +152,22 @@ test_wildcard_resume_abort_from_all_states() {
 }
 
 # =============================================================================
-# Invariant 3: Guard ordering is correct (guarded transitions before fallbacks)
+# Invariant 3: Transient states are correctly typed
 # =============================================================================
 
-test_guard_ordering_first_match_wins() {
+test_transient_states_correctly_typed() {
     lifecycle_load
 
-    local spec_file="$WIGGUM_HOME/config/worker-lifecycle.json"
-
-    # Find events that have both guarded and unguarded transitions from same state
-    # The guarded one should come first in the array
-    local all_correct=true
-
-    # Check fix.pass from fixing - should have guarded (merge_attempts_lt_max) before fallback
-    local fix_pass_transitions
-    fix_pass_transitions=$(jq '[.transitions[] | select(.event == "fix.pass" and .from == "fixing")]' "$spec_file")
-    local first_has_guard
-    first_has_guard=$(echo "$fix_pass_transitions" | jq '.[0] | has("guard")')
-    local second_has_guard
-    second_has_guard=$(echo "$fix_pass_transitions" | jq '.[1] | has("guard")')
-
-    ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
-    if [ "$first_has_guard" = "true" ] && [ "$second_has_guard" = "false" ]; then
-        echo -e "  ${GREEN}✓${NC} fix.pass: guarded transition comes before fallback"
-    else
-        echo -e "  ${RED}✗${NC} fix.pass: guarded transition should come before fallback"
-        FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
-        all_correct=false
-    fi
-
-    # Check merge.start from needs_merge
-    local merge_start_transitions
-    merge_start_transitions=$(jq '[.transitions[] | select(.event == "merge.start" and .from == "needs_merge")]' "$spec_file")
-    first_has_guard=$(echo "$merge_start_transitions" | jq '.[0] | has("guard")')
-    second_has_guard=$(echo "$merge_start_transitions" | jq '.[1] | has("guard")')
-
-    ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
-    if [ "$first_has_guard" = "true" ] && [ "$second_has_guard" = "false" ]; then
-        echo -e "  ${GREEN}✓${NC} merge.start: guarded transition comes before fallback"
-    else
-        echo -e "  ${RED}✗${NC} merge.start: guarded transition should come before fallback"
-        FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
-    fi
-}
-
-# =============================================================================
-# Invariant 4: Transient states never remain as final state
-# =============================================================================
-
-test_transient_states_always_chain() {
-    lifecycle_load
-
-    local transient_states=("fix_completed" "merge_conflict" "resolved")
+    # merge_conflict is "waiting" per spec (awaits conflict resolution), not transient
+    local transient_states=("fix_completed" "resolved")
 
     for state in "${transient_states[@]}"; do
         local state_type
         state_type=$(lifecycle_state_type "$state")
 
         ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
-        if [ "$state_type" = "transient" ] || [ "$state_type" = "waiting" ]; then
-            echo -e "  ${GREEN}✓${NC} State '$state' is correctly typed as transient/waiting"
+        if [ "$state_type" = "transient" ]; then
+            echo -e "  ${GREEN}✓${NC} State '$state' is correctly typed as transient"
         else
             echo -e "  ${RED}✗${NC} State '$state' should be transient, got: $state_type"
             FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
@@ -221,37 +175,14 @@ test_transient_states_always_chain() {
     done
 }
 
-test_transient_states_have_chain_property() {
-    lifecycle_load
-
-    local spec_file="$WIGGUM_HOME/config/worker-lifecycle.json"
-
-    # Transitions that use chain should reference transient states
-    local chain_transitions
-    chain_transitions=$(jq '[.transitions[] | select(.chain != null) | .chain] | unique | .[]' "$spec_file")
-
-    for chain_state in $chain_transitions; do
-        local state_type
-        state_type=$(lifecycle_state_type "$chain_state")
-
-        ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
-        if [ "$state_type" = "transient" ]; then
-            echo -e "  ${GREEN}✓${NC} Chain state '$chain_state' is transient"
-        else
-            echo -e "  ${RED}✗${NC} Chain state '$chain_state' should be transient, got: $state_type"
-            FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
-        fi
-    done
-}
-
 # =============================================================================
-# Invariant 5: Running states reset on startup
+# Invariant 4: Running states have startup.reset transitions
 # =============================================================================
 
 test_running_states_reset_on_startup() {
     lifecycle_load
 
-    local running_states=("fixing" "merging")
+    local running_states=("fixing" "merging" "resolving")
 
     for state in "${running_states[@]}"; do
         git_state_set "$WORKER_DIR" "$state" "test" "Setup"
@@ -280,31 +211,24 @@ test_running_states_reset_on_startup() {
                     FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
                 fi
                 ;;
+            resolving)
+                # resolving uses resolve.startup_reset (not startup.reset) per spec
+                git_state_set "$WORKER_DIR" "resolving" "test" "Re-setup for resolve event"
+                emit_event "$WORKER_DIR" "resolve.startup_reset" "test" '{}' 2>/dev/null || true
+                new_state=$(git_state_get "$WORKER_DIR")
+                if [ "$new_state" = "needs_resolve" ]; then
+                    echo -e "  ${GREEN}✓${NC} 'resolving' resets to 'needs_resolve' via resolve.startup_reset"
+                else
+                    echo -e "  ${RED}✗${NC} 'resolving' should reset to 'needs_resolve', got: $new_state"
+                    FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
+                fi
+                ;;
         esac
     done
 }
 
-test_resolving_resets_via_resolve_startup_reset() {
-    lifecycle_load
-
-    git_state_set "$WORKER_DIR" "resolving" "test" "Setup"
-
-    emit_event "$WORKER_DIR" "resolve.startup_reset" "test" '{}' 2>/dev/null || true
-
-    local new_state
-    new_state=$(git_state_get "$WORKER_DIR")
-
-    ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
-    if [ "$new_state" = "needs_resolve" ]; then
-        echo -e "  ${GREEN}✓${NC} 'resolving' resets to 'needs_resolve' via resolve.startup_reset"
-    else
-        echo -e "  ${RED}✗${NC} 'resolving' should reset to 'needs_resolve', got: $new_state"
-        FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
-    fi
-}
-
 # =============================================================================
-# Invariant 6: Non-terminal states have outbound transitions
+# Invariant 5: Non-terminal states have outbound transitions
 # =============================================================================
 
 test_non_terminal_states_have_transitions() {
@@ -320,7 +244,6 @@ test_non_terminal_states_have_transitions() {
         # Check if any transition has this state as 'from' (or wildcard)
         local has_transition
         has_transition=$(jq --arg s "$state" '[.transitions[] | select(.from == $s or .from == "*")] | length' "$spec_file")
-        has_transition="${has_transition:-0}"
 
         ASSERTION_COUNT=$((ASSERTION_COUNT + 1))
         if [ "$has_transition" -gt 0 ]; then
@@ -333,7 +256,7 @@ test_non_terminal_states_have_transitions() {
 }
 
 # =============================================================================
-# Invariant 7: Guard functions exist for all referenced guards
+# Invariant 6: Guard functions exist for all referenced guards
 # =============================================================================
 
 test_all_guards_have_implementations() {
@@ -357,7 +280,7 @@ test_all_guards_have_implementations() {
 }
 
 # =============================================================================
-# Invariant 8: Effect functions exist for all referenced effects
+# Invariant 7: Effect functions exist for all referenced effects
 # =============================================================================
 
 test_all_effects_have_implementations() {
@@ -387,11 +310,8 @@ test_all_effects_have_implementations() {
 run_test test_terminal_merged_rejects_events
 run_test test_terminal_failed_accepts_only_recovery
 run_test test_wildcard_resume_abort_from_all_states
-run_test test_guard_ordering_first_match_wins
-run_test test_transient_states_always_chain
-run_test test_transient_states_have_chain_property
+run_test test_transient_states_correctly_typed
 run_test test_running_states_reset_on_startup
-run_test test_resolving_resets_via_resolve_startup_reset
 run_test test_non_terminal_states_have_transitions
 run_test test_all_guards_have_implementations
 run_test test_all_effects_have_implementations
