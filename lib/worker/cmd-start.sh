@@ -117,8 +117,12 @@ do_start() {
             # Fallback: lifecycle not loaded or event failed — use direct update
             # This preserves backward compatibility during transition
             log_warn "worker.spawned event failed, falling back to direct kanban update"
-            update_kanban_status "$RALPH_DIR/kanban.md" "$task_id" "=" || true
-            github_issue_sync_task_status "$RALPH_DIR" "$task_id" "=" || true
+            if ! update_kanban_status "$RALPH_DIR/kanban.md" "$task_id" "="; then
+                log_warn "Fallback kanban update also failed for $task_id"
+            fi
+            if ! github_issue_sync_task_status "$RALPH_DIR" "$task_id" "="; then
+                log_warn "Fallback GitHub issue sync also failed for $task_id"
+            fi
         fi
 
         _msg "Starting worker $worker_id for task $task_id"

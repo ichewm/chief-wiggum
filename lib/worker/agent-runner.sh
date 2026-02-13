@@ -85,6 +85,9 @@ _agent_runner_signal_handler() {
     if [ -n "$_AGENT_RUNNER_CHILD_PID" ] && kill -0 "$_AGENT_RUNNER_CHILD_PID" 2>/dev/null; then
         log "Terminating child process (PID: $_AGENT_RUNNER_CHILD_PID)"
         kill -TERM "$_AGENT_RUNNER_CHILD_PID" 2>/dev/null || true
+        # Exit code intentionally discarded: we're in a signal handler performing
+        # emergency cleanup; the child was forcibly terminated and the main script
+        # is about to exit regardless of the child's exit status.
         wait "$_AGENT_RUNNER_CHILD_PID" 2>/dev/null || true
     fi
 }

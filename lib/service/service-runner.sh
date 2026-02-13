@@ -880,8 +880,8 @@ service_wait() {
         fi
     fi
 
-    wait "$pid" 2>/dev/null
-    local exit_code=$?
+    local exit_code=0
+    wait "$pid" 2>/dev/null || exit_code=$?
 
     # Record metrics
     local start_time end_time duration_ms

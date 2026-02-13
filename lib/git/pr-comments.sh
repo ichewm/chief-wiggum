@@ -8,6 +8,7 @@ set -euo pipefail
 source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/defaults.sh"
 source "$WIGGUM_HOME/lib/core/platform.sh"
+source "$WIGGUM_HOME/lib/github/gh-api.sh"
 
 # Load review config on source
 load_review_config
@@ -106,14 +107,14 @@ _gh_pr_list_with_error_handling() {
     return 1
 }
 
-# Get current GitHub user
+# Get current GitHub user - delegate to gh-api.sh
 get_current_github_user() {
-    timeout "${WIGGUM_GH_TIMEOUT:-30}" gh api user --jq '.login' 2>/dev/null
+    gh_current_user
 }
 
-# Get current GitHub user's numeric ID
+# Get current GitHub user's numeric ID - delegate to gh-api.sh
 get_current_github_user_id() {
-    timeout "${WIGGUM_GH_TIMEOUT:-30}" gh api user --jq '.id' 2>/dev/null
+    gh_current_user_id
 }
 
 # Find PRs matching task regex patterns

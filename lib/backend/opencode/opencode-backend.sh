@@ -17,6 +17,18 @@ _OPENCODE_BACKEND_LOADED=1
 
 source "$WIGGUM_HOME/lib/core/logger.sh"
 
+# Fail-fast helper for unimplemented functions
+#
+# Provides clear error message when OpenCode backend functions are called
+# without implementation.
+_opencode_not_implemented() {
+    local func_name="${1:-unknown}"
+    log_error "OpenCode backend: $func_name is not implemented"
+    log_error "To implement OpenCode backend, edit: $WIGGUM_HOME/lib/backend/opencode/opencode-backend.sh"
+    log_error "See docs/RUNTIME-SCHEMA.md for the backend contract"
+    return 1
+}
+
 # =============================================================================
 # BACKEND IDENTITY
 # =============================================================================
@@ -31,8 +43,14 @@ runtime_backend_name() {
 
 runtime_backend_init() {
     OPENCODE="${OPENCODE:-opencode}"
-    # TODO: Load OpenCode-specific config, auth tokens, API settings
-    # TODO: Validate that the opencode binary exists on PATH
+    
+    # Validate opencode binary exists
+    if ! command -v "$OPENCODE" &>/dev/null; then
+        log_error "OpenCode backend: '$OPENCODE' binary not found in PATH"
+        log_error "Install OpenCode or set OPENCODE=/path/to/opencode"
+        return 1
+    fi
+    
     log_debug "OpenCode backend initialized (binary: $OPENCODE)"
 }
 
@@ -51,33 +69,11 @@ runtime_backend_invoke() {
 # =============================================================================
 
 runtime_backend_build_exec_args() {
-    local -n _args="$1"
-    # shellcheck disable=SC2034  # All args defined for implementors to use
-    local workspace="$2" system_prompt="$3" user_prompt="$4"
-    # shellcheck disable=SC2034
-    local output_file="$5" max_turns="$6" session_id="${7:-}"
-
-    # TODO: Build OpenCode CLI arguments for single-shot execution
-    # Map workspace, system_prompt, user_prompt, max_turns to OpenCode flags
-    # Example:
-    #   _args=(--workspace "$workspace" --system "$system_prompt" --prompt "$user_prompt")
-    #   [ -n "$session_id" ] && _args+=(--session "$session_id")
-    log_error "opencode backend: build_exec_args not yet implemented"
-    return 1
+    _opencode_not_implemented "build_exec_args"
 }
 
 runtime_backend_build_resume_args() {
-    local -n _args="$1"
-    # shellcheck disable=SC2034  # All args defined for implementors to use
-    local session_id="$2" prompt="$3"
-    # shellcheck disable=SC2034
-    local output_file="$4" max_turns="${5:-3}"
-
-    # TODO: Build OpenCode CLI arguments for session resume (if supported)
-    # Example:
-    #   _args=(--resume "$session_id" --prompt "$prompt" --max-turns "$max_turns")
-    log_error "opencode backend: build_resume_args not yet implemented"
-    return 1
+    _opencode_not_implemented "build_resume_args"
 }
 
 # =============================================================================
@@ -102,12 +98,7 @@ runtime_backend_is_retryable() {
 # =============================================================================
 
 runtime_backend_extract_text() {
-    # shellcheck disable=SC2034  # log_file for implementors
-    local log_file="$1"
-
-    # TODO: Parse OpenCode output format to extract assistant text
-    # The implementation depends on OpenCode's output format (JSON, plain text, etc.)
-    return 1
+    _opencode_not_implemented "extract_text"
 }
 
 runtime_backend_extract_session_id() {

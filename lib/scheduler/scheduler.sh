@@ -323,7 +323,9 @@ _scheduler_reset_dead_workers() {
                 # Check if pipeline completed but self-complete didn't fire (crash edge case)
                 if _worker_has_completion_results "$worker_dir"; then
                     log "Detected completed fix pipeline for $task_id - running completion handler instead of reset"
-                    handle_fix_worker_completion "$worker_dir" "$task_id" || true
+                    if ! handle_fix_worker_completion "$worker_dir" "$task_id"; then
+                        log_warn "Failed to handle fix worker completion for $task_id during startup reset"
+                    fi
                     ((++reset_count)) || true
                     continue
                 fi

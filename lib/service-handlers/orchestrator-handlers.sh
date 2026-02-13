@@ -26,6 +26,9 @@ source "$WIGGUM_HOME/lib/service-handlers/memory-handlers.sh"
 # Source meta-agent service handlers
 source "$WIGGUM_HOME/lib/service-handlers/meta-handlers.sh"
 
+# Source common service handler utilities
+source "$WIGGUM_HOME/lib/service/service-handler-common.sh"
+
 # =============================================================================
 # Orchestrator Service Handlers
 #
@@ -94,10 +97,7 @@ svc_orch_cleanup_all_workers() {
 
 # Process orphaned fix_completed/needs_merge workers (only when state changed)
 svc_orch_process_pending_merges() {
-    [[ "${POOL_CLEANUP_EVENT:-false}" = "true" ]] \
-        || [[ "${SCHED_SCHEDULING_EVENT:-false}" = "true" ]] \
-        || return 0
-    orch_process_pending_merges "$@"
+    svc_run_if_any orch_process_pending_merges POOL_CLEANUP_EVENT SCHED_SCHEDULING_EVENT
 }
 
 # Display orchestrator status on scheduling events
@@ -164,7 +164,9 @@ svc_orch_init_scheduler() {
     fi
 
     log "Checking for dependency cycles..."
-    scheduler_detect_cycles || true
+    if ! scheduler_detect_cycles; then
+        log_warn "Dependency cycle detection found issues (see above)"
+    fi
 }
 
 # Pre-flight: check clean git status and pull main
@@ -320,7 +322,9 @@ svc_orch_resume_decide() {
                 "Step interrupted, direct resume"
             if resume_state_max_exceeded "$worker_dir"; then
                 lifecycle_is_loaded || lifecycle_load
-                emit_event "$worker_dir" "resume.abort" "orchestrator-handlers.svc_orch_resume_decide" || true
+                if ! emit_event "$worker_dir" "resume.abort" "orchestrator-handlers.svc_orch_resume_decide"; then
+                    log_warn "Failed to emit resume.abort event for $task_id"
+                fi
                 resume_state_set_terminal "$worker_dir" "Max resume attempts exceeded (direct RETRY)"
                 log_error "Task $task_id marked FAILED — max resume attempts exceeded at step $current_step"
                 activity_log "worker.resume_failed" "$(basename "$worker_dir")" "$task_id" \
@@ -508,7 +512,9 @@ svc_orch_task_spawner() {
             # Claim task in distributed mode (assign issue + server label)
             if ! scheduler_claim_task "$task_id"; then
                 log_debug "Failed to claim $task_id - reverting to pending"
-                update_kanban_status "$RALPH_DIR/kanban.md" "$task_id" " " || true
+                if ! update_kanban_status "$RALPH_DIR/kanban.md" "$task_id" " "; then
+                    log_warn "Failed to revert $task_id kanban status to pending after claim failure"
+                fi
                 continue
             fi
 
@@ -529,7 +535,9 @@ svc_orch_task_spawner() {
             spawn_worker "$task_id" || spawn_rc=$?
             if [ "$spawn_rc" -eq 2 ]; then
                 # Deferred - worker exists and is resumable, revert kanban to pending
-                update_kanban_status "$RALPH_DIR/kanban.md" "$task_id" " " || true
+                if ! update_kanban_status "$RALPH_DIR/kanban.md" "$task_id" " "; then
+                    log_warn "Failed to revert $task_id kanban status to pending after spawn deferral"
+                fi
                 scheduler_release_task "$task_id"
                 export WIGGUM_PIPELINE="$_saved_pipeline"
                 export WIGGUM_PLAN_MODE="$_saved_plan_mode"
@@ -538,7 +546,9 @@ svc_orch_task_spawner() {
                 log_error "Failed to spawn worker for $task_id"
                 update_kanban_status "$RALPH_DIR/kanban.md" "$task_id" "*"
                 source "$WIGGUM_HOME/lib/github/issue-sync.sh"
-                github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*" || true
+                if ! github_issue_sync_task_status "$RALPH_DIR" "$task_id" "*"; then
+                    log_warn "Failed to sync failed status to GitHub for $task_id"
+                fi
                 scheduler_release_task "$task_id"
                 export WIGGUM_PIPELINE="$_saved_pipeline"
                 export WIGGUM_PLAN_MODE="$_saved_plan_mode"
@@ -577,13 +587,17 @@ svc_orch_task_spawner() {
             fi
 
             # Re-claim task in distributed mode (server label removed during shutdown)
-            scheduler_claim_task "$task_id" || true
+            if ! scheduler_claim_task "$task_id"; then
+                log_warn "Failed to re-claim $task_id in distributed mode for resume"
+            fi
 
             log "Launching resume worker for $task_id (pipeline at: '$resume_step')"
             if _launch_resume_worker "$worker_dir" "$task_id"; then
                 pool_add "$SPAWNED_WORKER_PID" "$worker_type" "$task_id"
                 scheduler_mark_event
-                audit_log_task_assigned "$task_id" "$SPAWNED_WORKER_ID" "$SPAWNED_WORKER_PID" 2>/dev/null || true
+                if ! audit_log_task_assigned "$task_id" "$SPAWNED_WORKER_ID" "$SPAWNED_WORKER_PID" 2>/dev/null; then
+                    log_warn "Failed to write audit log for resumed $task_id"
+                fi
                 log "Resumed worker $SPAWNED_WORKER_ID for $task_id (PID: $SPAWNED_WORKER_PID)"
                 if [[ "$worker_type" =~ ^(fix|resolve)$ ]]; then
                     ((++pending_priority_count))
