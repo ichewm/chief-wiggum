@@ -1,6 +1,10 @@
 # Ralph directory (project-specific, not part of source)
 .ralph/
 
+# Override global gitignore patterns that conflict with project structure
+!lib/
+!lib64/
+
 # Common patterns
 *.log
 !tui/tests/fixtures/**/*.log
