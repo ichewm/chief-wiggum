@@ -1,0 +1,45 @@
+# started on Mon Feb 16 15:28:21 2026
+
+cycles:u: 496855706 341960580 286926120
+cycles:u: 677582143 232218757 89064550
+instructions:u: 987589879 341960580 286926120
+instructions:u: 1869758706 232218757 89064550
+cache-references:u: 3362268 341960580 286926120
+cache-references:u: 2836303 232218757 89064550
+cache-misses:u: 674314 341960580 286926120
+cache-misses:u: 567498 232218757 89064550
+branch-misses:u: 3437527 341960580 286926120
+branch-misses:u: 5000483 232218757 89064550
+task-clock:u: 375990670 375990670 375990670
+context-switches:u: 0 375990670 375990670
+cpu-migrations:u: 0 375990670 375990670
+
+ Performance counter stats for 'bash -c run_wiggum () 
+{ 
+    local timeout_sec=$DURATION_SECONDS;
+    rm -f "$WIGGUM_HOME/.ralph/orchestrator/lock";
+    timeout --signal=SIGINT --kill-after=5 "$timeout_sec" "$WIGGUM_HOME/bin/wiggum" run --mode local --no-python --max-workers "$MAX_WORKERS" --no-resume --no-fix --no-merge --no-sync -q 2>&1 || true;
+    rm -f "$WIGGUM_HOME/.ralph/orchestrator/lock";
+    rm -f "$WIGGUM_HOME/.ralph/orchestrator/should-exit"
+}; DURATION_SECONDS=5 MAX_WORKERS=1 run_wiggum':
+
+       496,855,706      cpu_atom/cycles/u                #    1.321 GHz                         (83.91%)
+       677,582,143      cpu_core/cycles/u                #    1.802 GHz                         (38.35%)
+       987,589,879      cpu_atom/instructions/u          #    1.99  insn per cycle              (83.91%)
+     1,869,758,706      cpu_core/instructions/u          #    2.76  insn per cycle              (38.35%)
+         3,362,268      cpu_atom/cache-references/u      #    8.942 M/sec                       (83.91%)
+         2,836,303      cpu_core/cache-references/u      #    7.544 M/sec                       (38.35%)
+           674,314      cpu_atom/cache-misses/u          #   20.06% of all cache refs           (83.91%)
+           567,498      cpu_core/cache-misses/u          #   20.01% of all cache refs           (38.35%)
+         3,437,527      cpu_atom/branch-misses/u                                                (83.91%)
+         5,000,483      cpu_core/branch-misses/u                                                (38.35%)
+       375,990,670      task-clock:u                     #    0.900 CPUs utilized             
+                 0      context-switches:u               #    0.000 /sec                      
+                 0      cpu-migrations:u                 #    0.000 /sec                      
+
+       0.417634537 seconds time elapsed
+
+       0.242750000 seconds user
+       0.166067000 seconds sys
+
+

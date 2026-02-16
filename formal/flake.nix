@@ -48,7 +48,7 @@
         packages.apalache = apalache;
 
         devShells.default = pkgs.mkShell {
-          packages = [ apalache pkgs.z3 ];
+          packages = [ apalache pkgs.z3 pkgs.perf ];
         };
       });
 }
