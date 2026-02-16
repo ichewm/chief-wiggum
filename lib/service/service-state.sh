@@ -173,49 +173,48 @@ service_state_restore() {
         return 1
     fi
 
-    # Read services
-    local service_ids
-    service_ids=$(jq -r '.services | keys[]' "$_SERVICE_STATE_FILE" 2>/dev/null)
-
-    while read -r id; do
+    # Single jq call: extract all service data as TSV
+    # Fields: id, last_run, run_count, fail_count, last_success, circuit.state,
+    #         circuit.opened_at, circuit.half_open_attempts, metrics.*,
+    #         queue, backoff_until, retry_count, status, pid
+    while IFS=$'\x1e' read -r id last_run run_count fail_count last_success \
+            circuit_state circuit_opened_at half_open_attempts \
+            total_duration success_count last_duration min_duration max_duration \
+            queue backoff_until retry_count status pid; do
         [ -n "$id" ] || continue
 
         # Basic state
-        _SERVICE_LAST_RUN[$id]=$(jq -r --arg id "$id" '.services[$id].last_run // 0' "$_SERVICE_STATE_FILE")
-        _SERVICE_RUN_COUNT[$id]=$(jq -r --arg id "$id" '.services[$id].run_count // 0' "$_SERVICE_STATE_FILE")
-        _SERVICE_FAIL_COUNT[$id]=$(jq -r --arg id "$id" '.services[$id].fail_count // 0' "$_SERVICE_STATE_FILE")
-        _SERVICE_LAST_SUCCESS[$id]=$(jq -r --arg id "$id" '.services[$id].last_success // 0' "$_SERVICE_STATE_FILE")
+        _SERVICE_LAST_RUN[$id]="${last_run:-0}"
+        _SERVICE_RUN_COUNT[$id]="${run_count:-0}"
+        _SERVICE_FAIL_COUNT[$id]="${fail_count:-0}"
+        _SERVICE_LAST_SUCCESS[$id]="${last_success:-0}"
 
         # Circuit breaker state
-        _SERVICE_CIRCUIT_STATE[$id]=$(jq -r --arg id "$id" '.services[$id].circuit.state // "closed"' "$_SERVICE_STATE_FILE")
-        _SERVICE_CIRCUIT_OPENED_AT[$id]=$(jq -r --arg id "$id" '.services[$id].circuit.opened_at // 0' "$_SERVICE_STATE_FILE")
-        _SERVICE_HALF_OPEN_ATTEMPTS[$id]=$(jq -r --arg id "$id" '.services[$id].circuit.half_open_attempts // 0' "$_SERVICE_STATE_FILE")
+        _SERVICE_CIRCUIT_STATE[$id]="${circuit_state:-closed}"
+        _SERVICE_CIRCUIT_OPENED_AT[$id]="${circuit_opened_at:-0}"
+        _SERVICE_HALF_OPEN_ATTEMPTS[$id]="${half_open_attempts:-0}"
 
         # Metrics
-        _SERVICE_TOTAL_DURATION[$id]=$(jq -r --arg id "$id" '.services[$id].metrics.total_duration_ms // 0' "$_SERVICE_STATE_FILE")
-        _SERVICE_SUCCESS_COUNT[$id]=$(jq -r --arg id "$id" '.services[$id].metrics.success_count // 0' "$_SERVICE_STATE_FILE")
-        _SERVICE_LAST_DURATION[$id]=$(jq -r --arg id "$id" '.services[$id].metrics.last_duration_ms // 0' "$_SERVICE_STATE_FILE")
-        _SERVICE_MIN_DURATION[$id]=$(jq -r --arg id "$id" '.services[$id].metrics.min_duration_ms // 0' "$_SERVICE_STATE_FILE")
-        _SERVICE_MAX_DURATION[$id]=$(jq -r --arg id "$id" '.services[$id].metrics.max_duration_ms // 0' "$_SERVICE_STATE_FILE")
+        _SERVICE_TOTAL_DURATION[$id]="${total_duration:-0}"
+        _SERVICE_SUCCESS_COUNT[$id]="${success_count:-0}"
+        _SERVICE_LAST_DURATION[$id]="${last_duration:-0}"
+        _SERVICE_MIN_DURATION[$id]="${min_duration:-0}"
+        _SERVICE_MAX_DURATION[$id]="${max_duration:-0}"
 
         # Queue
-        _SERVICE_QUEUE[$id]=$(jq -c --arg id "$id" '.services[$id].queue // []' "$_SERVICE_STATE_FILE")
+        _SERVICE_QUEUE[$id]="${queue:-[]}"
 
         # Backoff
-        _SERVICE_BACKOFF_UNTIL[$id]=$(jq -r --arg id "$id" '.services[$id].backoff_until // 0' "$_SERVICE_STATE_FILE")
-        _SERVICE_RETRY_COUNT[$id]=$(jq -r --arg id "$id" '.services[$id].retry_count // 0' "$_SERVICE_STATE_FILE")
+        _SERVICE_BACKOFF_UNTIL[$id]="${backoff_until:-0}"
+        _SERVICE_RETRY_COUNT[$id]="${retry_count:-0}"
 
         # Check if previously running service is still running
-        local saved_status saved_pid
-        saved_status=$(jq -r --arg id "$id" '.services[$id].status // "stopped"' "$_SERVICE_STATE_FILE")
-        saved_pid=$(jq -r --arg id "$id" '.services[$id].pid // null' "$_SERVICE_STATE_FILE")
-
-        if [ "$saved_status" = "running" ] && [ "$saved_pid" != "null" ] && [ -n "$saved_pid" ]; then
+        if [ "$status" = "running" ] && [ "$pid" != "null" ] && [ -n "$pid" ]; then
             # Verify process is still running
-            if kill -0 "$saved_pid" 2>/dev/null; then
+            if kill -0 "$pid" 2>/dev/null; then
                 _SERVICE_STATUS[$id]="running"
-                _SERVICE_RUNNING_PID[$id]="$saved_pid"
-                log_debug "Service $id still running (PID: $saved_pid)"
+                _SERVICE_RUNNING_PID[$id]="$pid"
+                log_debug "Service $id still running (PID: $pid)"
             else
                 _SERVICE_STATUS[$id]="stopped"
                 log_debug "Service $id was running but process exited"
@@ -223,7 +222,26 @@ service_state_restore() {
         else
             _SERVICE_STATUS[$id]="stopped"
         fi
-    done <<< "$service_ids"
+    done < <(jq -r '.services | to_entries[] | [
+        .key,
+        (.value.last_run // 0 | tostring),
+        (.value.run_count // 0 | tostring),
+        (.value.fail_count // 0 | tostring),
+        (.value.last_success // 0 | tostring),
+        (.value.circuit.state // "closed"),
+        (.value.circuit.opened_at // 0 | tostring),
+        (.value.circuit.half_open_attempts // 0 | tostring),
+        (.value.metrics.total_duration_ms // 0 | tostring),
+        (.value.metrics.success_count // 0 | tostring),
+        (.value.metrics.last_duration_ms // 0 | tostring),
+        (.value.metrics.min_duration_ms // 0 | tostring),
+        (.value.metrics.max_duration_ms // 0 | tostring),
+        (.value.queue // [] | tojson),
+        (.value.backoff_until // 0 | tostring),
+        (.value.retry_count // 0 | tostring),
+        (.value.status // "stopped"),
+        (.value.pid // "null" | tostring)
+    ] | join("\u001e")' "$_SERVICE_STATE_FILE" 2>/dev/null)
 
     local saved_at
     saved_at=$(jq -r '.saved_at // 0' "$_SERVICE_STATE_FILE")

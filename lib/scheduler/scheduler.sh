@@ -1346,18 +1346,20 @@ scheduler_write_state() {
     local now
     now=$(epoch_now)
 
-    # Convert space-separated lists to JSON arrays
-    local ready_json blocked_json pending_json
-    ready_json=$(echo "$SCHED_READY_TASKS" | tr ' ' '\n' | jq -R 'select(length > 0)' | jq -s '.')
-    blocked_json=$(echo "$SCHED_BLOCKED_TASKS" | tr ' ' '\n' | jq -R 'select(length > 0)' | jq -s '.')
-    pending_json=$(echo "$SCHED_PENDING_TASKS" | tr ' ' '\n' | jq -R 'select(length > 0)' | jq -s '.')
-
+    # Single jq call: convert space-separated lists to JSON arrays
+    # Previously: 7 jq invocations (2 per list + 1 for final JSON)
+    # Now: 1 jq invocation with split/compact
     jq -n \
         --argjson computed_at "$now" \
-        --argjson ready "$ready_json" \
-        --argjson blocked "$blocked_json" \
-        --argjson pending "$pending_json" \
-        '{computed_at: $computed_at, ready_tasks: $ready, blocked_tasks: $blocked, pending_tasks: $pending}' \
+        --arg ready "$SCHED_READY_TASKS" \
+        --arg blocked "$SCHED_BLOCKED_TASKS" \
+        --arg pending "$SCHED_PENDING_TASKS" \
+        '{
+            computed_at: $computed_at,
+            ready_tasks: (if $ready == "" then [] else ($ready | split(" ") | map(select(length > 0))) end),
+            blocked_tasks: (if $blocked == "" then [] else ($blocked | split(" ") | map(select(length > 0))) end),
+            pending_tasks: (if $pending == "" then [] else ($pending | split(" ") | map(select(length > 0))) end)
+        }' \
         > "$state_file"
 }
 
@@ -1376,11 +1378,19 @@ scheduler_read_state() {
 
     [ -f "$state_file" ] || return 1
 
-    SCHED_READY_TASKS=$(jq -r '.ready_tasks // [] | .[]' "$state_file" 2>/dev/null | tr '\n' ' ')
-    SCHED_BLOCKED_TASKS=$(jq -r '.blocked_tasks // [] | .[]' "$state_file" 2>/dev/null | tr '\n' ' ')
-    SCHED_PENDING_TASKS=$(jq -r '.pending_tasks // [] | .[]' "$state_file" 2>/dev/null | tr '\n' ' ')
+    # Single jq call with @sh output for efficient bash parsing
+    # Previously: 3 separate jq calls to read the same file
+    # Now: 1 jq invocation
+    local data
+    data=$(jq -r '@sh "\(.ready_tasks | join(" "))|\(.blocked_tasks | join(" "))|\(.pending_tasks | join(" "))"' "$state_file" 2>/dev/null)
 
-    # Trim trailing spaces
+    # Parse pipe-delimited output
+    SCHED_READY_TASKS="${data%%|*}"
+    local rest="${data#*|}"
+    SCHED_BLOCKED_TASKS="${rest%%|*}"
+    SCHED_PENDING_TASKS="${rest#*|}"
+
+    # Trim trailing spaces and handle empty arrays
     SCHED_READY_TASKS="${SCHED_READY_TASKS% }"
     SCHED_BLOCKED_TASKS="${SCHED_BLOCKED_TASKS% }"
     SCHED_PENDING_TASKS="${SCHED_PENDING_TASKS% }"
