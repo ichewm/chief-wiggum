@@ -42,11 +42,8 @@ run_wiggum() {
     rm -f "$WIGGUM_HOME/.ralph/orchestrator/lock"
 
     # Run with timeout - creates should-exit file to signal shutdown
-    # Create fake gh auth to bypass preflight check
-    mkdir -p "$WIGGUM_HOME/.ralph/orchestrator"
-    echo "logged_in" > "$WIGGUM_HOME/.ralph/orchestrator/.gh-auth-skip" 2>/dev/null || true
-
     timeout --signal=SIGINT --kill-after=5 "$timeout_sec" \
+        env PATH="$WIGGUM_HOME/formal/mocks:$PATH" \
         "$WIGGUM_HOME/bin/wiggum" run \
         --mode local \
         --no-python \

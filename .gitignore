@@ -26,6 +26,7 @@ test-*/
 
 # Benchmark artifacts
 formal/benchmark-results/
+formal/mocks/
 
 # UI dependencies and build artifacts
 ui/node_modules/
