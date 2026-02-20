@@ -9,9 +9,9 @@ PROJECT_DIR="$(pwd)"
 RALPH_DIR="${RALPH_DIR:-$PROJECT_DIR/.ralph}"
 
 # Source shared libraries
-source "$WIGGUM_HOME/lib/core/exit-codes.sh"
+[ -z "${_WIGGUM_SRC_EXIT_CODES_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 source "$WIGGUM_HOME/lib/core/verbose-flags.sh"
-source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
 
 # Source consolidated service modules
 source "$WIGGUM_HOME/lib/service/service-core.sh"

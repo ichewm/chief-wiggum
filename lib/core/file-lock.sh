@@ -2,10 +2,6 @@
 # File locking utilities for concurrent worker access
 set -euo pipefail
 
-# Prevent double-sourcing
-[ -n "${_WIGGUM_SRC_FILE_LOCK_LOADED:-}" ] && return 0
-_WIGGUM_SRC_FILE_LOCK_LOADED=1
-
 [ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # =============================================================================

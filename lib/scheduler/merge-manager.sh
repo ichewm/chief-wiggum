@@ -220,7 +220,7 @@ _check_merge_approved() {
 
     # Load review config if not already loaded (sets WIGGUM_APPROVED_USER_IDS)
     if [ -z "${WIGGUM_APPROVED_USER_IDS:-}" ]; then
-        source "$WIGGUM_HOME/lib/core/defaults.sh"
+        [ -z "${_WIGGUM_SRC_DEFAULTS_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/defaults.sh"
         load_review_config
     fi
 

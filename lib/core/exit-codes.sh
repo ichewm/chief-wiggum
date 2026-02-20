@@ -17,10 +17,6 @@
 #   128+N   - Terminated by signal N (standard convention)
 set -euo pipefail
 
-# Prevent double-sourcing
-[ -n "${_WIGGUM_SRC_EXIT_CODES_LOADED:-}" ] && return 0
-_WIGGUM_SRC_EXIT_CODES_LOADED=1
-
 # === OS Generic ===
 export EXIT_OK=0
 export EXIT_ERROR=1

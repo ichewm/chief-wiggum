@@ -7,10 +7,6 @@
 # Source this file when you need: find_newest, find_oldest, grep_pcre_match, etc.
 set -euo pipefail
 
-# Prevent double-sourcing
-[ -n "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && return 0
-_WIGGUM_SRC_PLATFORM_LOADED=1
-
 # =============================================================================
 # PLATFORM DETECTION (cached at source time)
 # =============================================================================

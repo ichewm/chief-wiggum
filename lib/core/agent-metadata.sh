@@ -109,8 +109,8 @@ agent_valid_results() {
 
 # Source core dependencies (logger, defaults)
 agent_source_core() {
-    source "$WIGGUM_HOME/lib/core/logger.sh"
-    source "$WIGGUM_HOME/lib/core/defaults.sh"
+    [ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
+    [ -z "${_WIGGUM_SRC_DEFAULTS_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/defaults.sh"
 }
 
 # Source ralph loop (unified execution pattern with optional supervision)
@@ -155,7 +155,7 @@ agent_source_registry() {
 
 # Source file locking utilities
 agent_source_lock() {
-    source "$WIGGUM_HOME/lib/core/file-lock.sh"
+    [ -z "${_WIGGUM_SRC_FILE_LOCK_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/file-lock.sh"
 }
 
 # Source resume capabilities

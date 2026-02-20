@@ -371,7 +371,7 @@ _gather_pr_data() {
     # of those IDs before allowing merge (usernames are not trusted).
     # Ensure review config is loaded (sets WIGGUM_APPROVED_USER_IDS from config.json)
     if [ -z "${WIGGUM_APPROVED_USER_IDS:-}" ]; then
-        source "$WIGGUM_HOME/lib/core/defaults.sh"
+        [ -z "${_WIGGUM_SRC_DEFAULTS_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/defaults.sh"
         load_review_config
     fi
     local _approved_ids="${WIGGUM_APPROVED_USER_IDS:-}"
