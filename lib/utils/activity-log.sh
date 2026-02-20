@@ -14,8 +14,8 @@
 [ -n "${_ACTIVITY_LOG_LOADED:-}" ] && return 0
 _ACTIVITY_LOG_LOADED=1
 
-source "$WIGGUM_HOME/lib/core/file-lock.sh"
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_FILE_LOCK_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/file-lock.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Global path to the activity log file (set by activity_init)
 _ACTIVITY_LOG_FILE=""

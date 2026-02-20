@@ -8,14 +8,14 @@
 _CMD_RESUME_LOADED=1
 
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
-source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 source "$WIGGUM_HOME/lib/utils/audit-logger.sh"
 source "$WIGGUM_HOME/lib/worker/worker-lifecycle.sh"
 source "$WIGGUM_HOME/lib/worker/agent-registry.sh"
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
 source "$WIGGUM_HOME/lib/git/git-operations.sh"
-source "$WIGGUM_HOME/lib/core/file-lock.sh"
+[ -z "${_WIGGUM_SRC_FILE_LOCK_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/file-lock.sh"
 source "$WIGGUM_HOME/lib/runtime/runtime.sh"
 source "$WIGGUM_HOME/lib/backend/claude/usage-tracker.sh"
 source "$WIGGUM_HOME/lib/pipeline/pipeline-loader.sh"

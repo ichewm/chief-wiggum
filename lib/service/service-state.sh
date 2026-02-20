@@ -35,7 +35,7 @@
 # Prevent double-sourcing
 [ -n "${_SERVICE_STATE_LOADED:-}" ] && return 0
 _SERVICE_STATE_LOADED=1
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # State tracking
 _SERVICE_STATE_FILE=""

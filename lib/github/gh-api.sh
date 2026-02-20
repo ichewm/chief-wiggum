@@ -11,7 +11,7 @@ set -euo pipefail
 [ -n "${_GH_API_LOADED:-}" ] && return 0
 _GH_API_LOADED=1
 
-source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/gh-error.sh"
 
 # Configuration

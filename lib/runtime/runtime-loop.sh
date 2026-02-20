@@ -18,9 +18,9 @@
 # =============================================================================
 set -euo pipefail
 
-source "$WIGGUM_HOME/lib/core/logger.sh"
-source "$WIGGUM_HOME/lib/core/defaults.sh"
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_DEFAULTS_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/defaults.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/checkpoint.sh"
 source "$WIGGUM_HOME/lib/runtime/runtime.sh"
 source "$WIGGUM_HOME/lib/utils/work-log.sh"

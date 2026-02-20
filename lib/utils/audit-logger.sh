@@ -3,8 +3,8 @@
 # Tracks who ran what task and when for security audit trail
 set -euo pipefail
 
-source "$WIGGUM_HOME/lib/core/file-lock.sh"
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_FILE_LOCK_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/file-lock.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 AUDIT_LOG="${AUDIT_LOG:-${RALPH_DIR:-$PROJECT_DIR/.ralph}/logs/audit.log}"
 

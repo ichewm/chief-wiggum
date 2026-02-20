@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Maximum size for content truncation
 MAX_CONTENT=3000

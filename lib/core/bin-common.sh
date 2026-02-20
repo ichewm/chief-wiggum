@@ -46,6 +46,6 @@ RALPH_DIR="${RALPH_DIR:-$PROJECT_DIR/.ralph}"
 export PROJECT_DIR RALPH_DIR
 
 # Source core libraries
-source "$WIGGUM_HOME/lib/core/exit-codes.sh"
+[ -z "${_WIGGUM_SRC_EXIT_CODES_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 source "$WIGGUM_HOME/lib/core/verbose-flags.sh"
-source "$WIGGUM_HOME/lib/core/defaults.sh"
+[ -z "${_WIGGUM_SRC_DEFAULTS_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/defaults.sh"

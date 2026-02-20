@@ -34,3 +34,5 @@ ui/client/node_modules/
 ui/server/node_modules/
 ui/client/dist/
 ui/server/dist/
+.claude/
+perf.data

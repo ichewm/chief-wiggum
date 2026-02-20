@@ -15,7 +15,7 @@ set -euo pipefail
 
 [ -n "${_WORKER_POOL_LOADED:-}" ] && return 0
 _WORKER_POOL_LOADED=1
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Pool storage - PID -> "type|task_id|start_time|last_checked"
 declare -gA _WORKER_POOL=()

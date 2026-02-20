@@ -25,7 +25,7 @@ set -euo pipefail
 [ -n "${_RUNTIME_PROMPTS_LOADED:-}" ] && return 0
 _RUNTIME_PROMPTS_LOADED=1
 
-source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
 
 # Module-level cached prompt values
 _PROMPT_PRE_SYSTEM=""

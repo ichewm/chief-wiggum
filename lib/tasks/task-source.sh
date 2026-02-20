@@ -26,7 +26,7 @@ set -euo pipefail
 _TASK_SOURCE_LOADED=1
 
 # Source dependencies
-source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
 
 # =============================================================================
 # Configuration

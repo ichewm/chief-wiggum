@@ -44,8 +44,8 @@ agent_source_metrics
 agent_source_registry
 
 # Source exit codes for standardized returns
-source "$WIGGUM_HOME/lib/core/exit-codes.sh"
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_EXIT_CODES_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/exit-codes.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/lifecycle-engine.sh"
 
 # Source pipeline libraries

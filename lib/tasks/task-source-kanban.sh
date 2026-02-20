@@ -13,8 +13,8 @@ set -euo pipefail
 _TASK_SOURCE_KANBAN_LOADED=1
 
 # Source dependencies
-source "$WIGGUM_HOME/lib/core/logger.sh"
-source "$WIGGUM_HOME/lib/core/file-lock.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_FILE_LOCK_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/file-lock.sh"
 source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 
 # =============================================================================

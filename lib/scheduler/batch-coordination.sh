@@ -22,7 +22,7 @@ set -euo pipefail
 _BATCH_COORDINATION_LOADED=1
 
 # Source file locking utilities
-source "$WIGGUM_HOME/lib/core/file-lock.sh"
+[ -z "${_WIGGUM_SRC_FILE_LOCK_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/file-lock.sh"
 
 # =============================================================================
 # COORDINATION FILE OPERATIONS

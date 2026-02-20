@@ -15,7 +15,7 @@ set -euo pipefail
 [ -n "${_AGENT_RESULT_LOADED:-}" ] && return 0
 _AGENT_RESULT_LOADED=1
 
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # =============================================================================

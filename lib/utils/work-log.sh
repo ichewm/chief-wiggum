@@ -16,7 +16,7 @@
 [ -n "${_WORK_LOG_LOADED:-}" ] && return 0
 _WORK_LOG_LOADED=1
 
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Initialize work log directory structure
 #

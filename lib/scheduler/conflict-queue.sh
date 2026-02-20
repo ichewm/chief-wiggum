@@ -18,11 +18,11 @@ set -euo pipefail
 
 [ -n "${_CONFLICT_QUEUE_LOADED:-}" ] && return 0
 _CONFLICT_QUEUE_LOADED=1
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Source dependencies
-source "$WIGGUM_HOME/lib/core/logger.sh"
-source "$WIGGUM_HOME/lib/core/file-lock.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_FILE_LOCK_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/file-lock.sh"
 source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # Initialize conflict queue if it doesn't exist

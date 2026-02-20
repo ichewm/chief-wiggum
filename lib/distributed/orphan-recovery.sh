@@ -22,8 +22,8 @@ set -euo pipefail
 _ORPHAN_RECOVERY_LOADED=1
 
 # Source dependencies
-source "$WIGGUM_HOME/lib/core/logger.sh"
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/distributed/server-identity.sh"
 source "$WIGGUM_HOME/lib/distributed/claim-manager.sh"
 

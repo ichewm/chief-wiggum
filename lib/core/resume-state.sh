@@ -13,8 +13,8 @@ set -euo pipefail
 [ -n "${_RESUME_STATE_LOADED:-}" ] && return 0
 _RESUME_STATE_LOADED=1
 
-source "$WIGGUM_HOME/lib/core/platform.sh"
-source "$WIGGUM_HOME/lib/core/defaults.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_DEFAULTS_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/defaults.sh"
 
 # Read resume state JSON from worker directory
 #

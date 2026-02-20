@@ -20,7 +20,7 @@ set -euo pipefail
 _ORCHESTRATOR_LIFECYCLE_LOADED=1
 
 # Source platform helpers for portable time functions
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Validate that the project is properly initialized
 #

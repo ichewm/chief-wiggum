@@ -11,7 +11,7 @@ set -euo pipefail
 [ -n "${_SVC_HANDLER_COMMON_LOADED:-}" ] && return 0
 _SVC_HANDLER_COMMON_LOADED=1
 
-source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
 
 # Validate required environment variables are set and non-empty
 #

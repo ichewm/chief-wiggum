@@ -18,7 +18,7 @@ set -euo pipefail
 _SCHEDULER_INTEGRATION_LOADED=1
 
 # Source dependencies
-source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/tasks/task-source.sh"
 
 # Source distributed modules unconditionally — they use double-source guards

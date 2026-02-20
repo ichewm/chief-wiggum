@@ -21,7 +21,7 @@ agent_source_core
 
 # Source batch coordination
 source "$WIGGUM_HOME/lib/scheduler/batch-coordination.sh"
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Configurable polling interval (seconds)
 BATCH_POLL_INTERVAL="${WIGGUM_BATCH_POLL_INTERVAL:-5}"

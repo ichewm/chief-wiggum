@@ -14,6 +14,10 @@
 #   DEBUG     - If set to 1, equivalent to LOG_LEVEL=DEBUG (legacy compatibility)
 set -euo pipefail
 
+# Prevent double-sourcing
+[ -n "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && return 0
+_WIGGUM_SRC_LOGGER_LOADED=1
+
 # Log level numeric values for comparison
 _log_level_value() {
     case "$1" in

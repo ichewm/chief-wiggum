@@ -9,7 +9,7 @@ set -euo pipefail
 [ -n "${_GITHUB_PR_LABELS_LOADED:-}" ] && return 0
 _GITHUB_PR_LABELS_LOADED=1
 
-source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/github/issue-config.sh"
 source "$WIGGUM_HOME/lib/worker/git-state.sh"
 source "$WIGGUM_HOME/lib/worker/worker-lifecycle.sh"

@@ -47,7 +47,7 @@ agent_source_once
 
 # Source pipeline loader for dynamic config reading
 source "$WIGGUM_HOME/lib/pipeline/pipeline-loader.sh"
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Load pipeline configuration and cache step info for prompt generation
 # Sets _PIPELINE_STEPS array with step IDs in order

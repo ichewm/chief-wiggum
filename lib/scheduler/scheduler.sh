@@ -16,8 +16,8 @@ set -euo pipefail
 [ -n "${_SCHEDULER_LOADED:-}" ] && return 0
 _SCHEDULER_LOADED=1
 
-# Source platform helpers for portable time functions
-source "$WIGGUM_HOME/lib/core/platform.sh"
+# Source platform helpers for portable time functions (guard before source to skip parsing)
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Source all scheduler components
 source "$WIGGUM_HOME/lib/scheduler/worker-pool.sh"
@@ -29,7 +29,7 @@ source "$WIGGUM_HOME/lib/scheduler/status-display.sh"
 source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 source "$WIGGUM_HOME/lib/tasks/conflict-detection.sh"
 source "$WIGGUM_HOME/lib/worker/worker-lifecycle.sh"
-source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
 source "$WIGGUM_HOME/lib/core/resume-state.sh"
 source "$WIGGUM_HOME/lib/core/effect-outbox.sh"
 

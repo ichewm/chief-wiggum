@@ -17,8 +17,8 @@
 set -euo pipefail
 
 WIGGUM_HOME="${WIGGUM_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-source "$WIGGUM_HOME/lib/core/logger.sh"
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 _USAGE_TRACKER_PROJECTS_DIR="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
 _USAGE_TRACKER_DATA_DIR="${USAGE_DATA_DIR:-$WIGGUM_HOME/data}"

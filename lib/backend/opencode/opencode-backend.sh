@@ -15,7 +15,7 @@ set -euo pipefail
 [ -n "${_OPENCODE_BACKEND_LOADED:-}" ] && return 0
 _OPENCODE_BACKEND_LOADED=1
 
-source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
 
 # Fail-fast helper for unimplemented functions
 #

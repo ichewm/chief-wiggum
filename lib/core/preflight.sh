@@ -5,10 +5,10 @@
 # configured before running wiggum commands.
 set -euo pipefail
 
-source "$WIGGUM_HOME/lib/core/logger.sh"
-source "$WIGGUM_HOME/lib/core/exit-codes.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_EXIT_CODES_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 source "$WIGGUM_HOME/lib/core/config-validator.sh"
-source "$WIGGUM_HOME/lib/core/defaults.sh"
+[ -z "${_WIGGUM_SRC_DEFAULTS_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/defaults.sh"
 
 # Terminal colors (if supported)
 if [ -t 1 ]; then

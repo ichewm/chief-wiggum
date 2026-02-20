@@ -17,9 +17,9 @@ _MERGE_MANAGER_LOADED=1
 
 # Source dependencies
 source "$WIGGUM_HOME/lib/worker/git-state.sh"
-source "$WIGGUM_HOME/lib/core/logger.sh"
-source "$WIGGUM_HOME/lib/core/file-lock.sh"
-source "$WIGGUM_HOME/lib/core/defaults.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_FILE_LOCK_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/file-lock.sh"
+[ -z "${_WIGGUM_SRC_DEFAULTS_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/defaults.sh"
 source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 source "$WIGGUM_HOME/lib/scheduler/conflict-queue.sh"
 source "$WIGGUM_HOME/lib/scheduler/batch-coordination.sh"

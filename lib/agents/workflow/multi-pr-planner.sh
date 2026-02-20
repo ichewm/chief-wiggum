@@ -26,7 +26,7 @@ agent_required_paths() {
 # Source dependencies
 agent_source_core
 agent_source_once
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Source batch coordination for multi-PR workflow
 source "$WIGGUM_HOME/lib/scheduler/batch-coordination.sh"

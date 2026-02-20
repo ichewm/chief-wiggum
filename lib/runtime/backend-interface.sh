@@ -27,7 +27,7 @@ set -euo pipefail
 
 [ -n "${_BACKEND_INTERFACE_LOADED:-}" ] && return 0
 _BACKEND_INTERFACE_LOADED=1
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # =============================================================================
 # REQUIRED FUNCTIONS (must be overridden by backend)

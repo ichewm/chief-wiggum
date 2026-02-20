@@ -18,8 +18,8 @@ set -euo pipefail
 [ -n "${_AGENT_MD_LOADED:-}" ] && return 0
 _AGENT_MD_LOADED=1
 
-source "$WIGGUM_HOME/lib/core/logger.sh"
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
 
 # =============================================================================

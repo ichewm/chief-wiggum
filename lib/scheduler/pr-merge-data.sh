@@ -11,7 +11,7 @@ set -euo pipefail
 
 [ -n "${_PR_MERGE_DATA_LOADED:-}" ] && return 0
 _PR_MERGE_DATA_LOADED=1
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/safe-path.sh"
 source "$WIGGUM_HOME/lib/core/lifecycle-engine.sh"
 

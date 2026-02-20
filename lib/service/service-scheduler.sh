@@ -44,12 +44,12 @@
 # Prevent double-sourcing
 [ -n "${_SERVICE_SCHEDULER_LOADED:-}" ] && return 0
 _SERVICE_SCHEDULER_LOADED=1
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Source dependencies - use consolidated service-core.sh
 source "$WIGGUM_HOME/lib/service/service-core.sh"
 source "$WIGGUM_HOME/lib/service/service-state.sh"
-source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
 
 # Scheduler configuration
 _SCHED_RALPH_DIR=""

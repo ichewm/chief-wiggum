@@ -27,7 +27,7 @@
 # Prevent double-sourcing
 [ -n "${_SERVICE_RUNNER_LOADED:-}" ] && return 0
 _SERVICE_RUNNER_LOADED=1
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Source dependencies (careful of circular deps - loader must be loaded first)
 # service-state.sh should already be loaded by scheduler

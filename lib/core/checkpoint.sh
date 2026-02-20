@@ -5,8 +5,8 @@
 # alongside prose summaries. Enables robust resume capabilities.
 set -euo pipefail
 
-source "$WIGGUM_HOME/lib/core/platform.sh"
-source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
 
 # Checkpoint schema version
 CHECKPOINT_VERSION="1.0"

@@ -24,7 +24,7 @@ agent_required_paths() {
 # Source dependencies
 agent_source_core
 source "$WIGGUM_HOME/lib/git/git-operations.sh"
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Main entry point
 agent_run() {

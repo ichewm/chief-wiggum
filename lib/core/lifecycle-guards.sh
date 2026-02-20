@@ -11,7 +11,7 @@ set -euo pipefail
 _LIFECYCLE_GUARDS_LOADED=1
 
 source "$WIGGUM_HOME/lib/worker/git-state.sh"
-source "$WIGGUM_HOME/lib/core/defaults.sh"
+[ -z "${_WIGGUM_SRC_DEFAULTS_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/defaults.sh"
 
 # Guard: merge attempts below maximum
 #

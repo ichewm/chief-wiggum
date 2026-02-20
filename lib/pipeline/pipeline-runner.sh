@@ -22,7 +22,7 @@
 # Prevent double-sourcing
 [ -n "${_PIPELINE_RUNNER_LOADED:-}" ] && return 0
 _PIPELINE_RUNNER_LOADED=1
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/atomic-write.sh"
 
 source "$WIGGUM_HOME/lib/utils/activity-log.sh"

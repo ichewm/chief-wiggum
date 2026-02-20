@@ -14,7 +14,7 @@ set -euo pipefail
 _AGENT_STREAM_LOADED=1
 
 # Source platform helpers for portable grep
-source "${WIGGUM_HOME:-$(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")}/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "${WIGGUM_HOME:-$(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")}/lib/core/platform.sh"
 
 # =============================================================================
 # STREAM-JSON EXTRACTION UTILITIES

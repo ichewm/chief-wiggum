@@ -11,7 +11,7 @@ set -euo pipefail
 [ -n "${_CONFIG_VALIDATOR_LOADED:-}" ] && return 0
 _CONFIG_VALIDATOR_LOADED=1
 
-source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
 
 # Validate a JSON file exists and is valid JSON
 #

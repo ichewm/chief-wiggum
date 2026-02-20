@@ -22,7 +22,7 @@ set -euo pipefail
 
 [ -n "${_GIT_STATE_LOADED:-}" ] && return 0
 _GIT_STATE_LOADED=1
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/atomic-write.sh"
 
 # Get current state from git-state.json

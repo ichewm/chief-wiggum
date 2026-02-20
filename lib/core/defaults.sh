@@ -5,6 +5,10 @@
 # All values can be overridden by environment variables.
 set -euo pipefail
 
+# Prevent double-sourcing
+[ -n "${_WIGGUM_SRC_DEFAULTS_LOADED:-}" ] && return 0
+_WIGGUM_SRC_DEFAULTS_LOADED=1
+
 # Core paths
 WIGGUM_HOME="${WIGGUM_HOME:-$HOME/.claude/chief-wiggum}"
 PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"

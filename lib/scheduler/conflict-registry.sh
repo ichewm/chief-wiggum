@@ -23,7 +23,7 @@ set -euo pipefail
 
 [ -n "${_CONFLICT_REGISTRY_LOADED:-}" ] && return 0
 _CONFLICT_REGISTRY_LOADED=1
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Initialize conflict registry file if it doesn't exist
 #

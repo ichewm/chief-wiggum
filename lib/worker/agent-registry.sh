@@ -23,8 +23,8 @@ set -euo pipefail
 [ -n "${_AGENT_REGISTRY_LOADED:-}" ] && return 0
 _AGENT_REGISTRY_LOADED=1
 
-source "$WIGGUM_HOME/lib/core/logger.sh"
-source "$WIGGUM_HOME/lib/core/exit-codes.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_EXIT_CODES_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/exit-codes.sh"
 source "$WIGGUM_HOME/lib/core/agent-base.sh"
 source "$WIGGUM_HOME/lib/core/agent-md.sh"
 source "$WIGGUM_HOME/lib/worker/agent-runner.sh"

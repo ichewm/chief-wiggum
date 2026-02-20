@@ -11,14 +11,14 @@ set -euo pipefail
 
 [ -n "${_STATUS_DISPLAY_LOADED:-}" ] && return 0
 _STATUS_DISPLAY_LOADED=1
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 
 # Source dependencies
 source "$WIGGUM_HOME/lib/scheduler/worker-pool.sh"
 source "$WIGGUM_HOME/lib/worker/worker-lifecycle.sh"
 source "$WIGGUM_HOME/lib/tasks/task-parser.sh"
 source "$WIGGUM_HOME/lib/tasks/conflict-detection.sh"
-source "$WIGGUM_HOME/lib/core/logger.sh"
+[ -z "${_WIGGUM_SRC_LOGGER_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/logger.sh"
 
 # Compute status counts for the terminal header
 #

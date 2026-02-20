@@ -8,8 +8,8 @@
 set -euo pipefail
 
 # Prevent double-sourcing
-[ -n "${_PLATFORM_LOADED:-}" ] && return 0
-_PLATFORM_LOADED=1
+[ -n "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && return 0
+_WIGGUM_SRC_PLATFORM_LOADED=1
 
 # =============================================================================
 # PLATFORM DETECTION (cached at source time)

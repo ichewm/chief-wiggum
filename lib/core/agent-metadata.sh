@@ -17,7 +17,7 @@ set -euo pipefail
 _AGENT_METADATA_LOADED=1
 
 # Source platform.sh at top level for portable helper functions (find_newest, grep_pcre_*, etc.)
-source "$WIGGUM_HOME/lib/core/platform.sh"
+[ -z "${_WIGGUM_SRC_PLATFORM_LOADED:-}" ] && source "$WIGGUM_HOME/lib/core/platform.sh"
 source "$WIGGUM_HOME/lib/core/safe-path.sh"
 
 # =============================================================================
