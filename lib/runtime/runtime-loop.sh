@@ -259,6 +259,13 @@ run_ralph_loop() {
         _has_sessions=true
     fi
 
+    # Check if backend supports named sessions (pre-assigned session IDs)
+    # If not, we must extract the session ID from output after each run
+    local _supports_named_sessions=true
+    if ! runtime_backend_supports_named_sessions; then
+        _supports_named_sessions=false
+    fi
+
     # Determine if supervision is enabled
     local supervision_enabled=false
     if [ "$supervisor_interval" -gt 0 ]; then
@@ -429,6 +436,20 @@ run_ralph_loop() {
         wait "$_ralph_loop_current_pid" 2>/dev/null || exit_code=$?
         _ralph_loop_current_pid=""
         log "Work phase completed (exit code: $exit_code, session: $session_id)"
+
+        # For backends that don't support named sessions, extract the actual
+        # session ID from output (e.g., Codex auto-generates session IDs)
+        if [ "$_supports_named_sessions" = false ] && [ "$_has_sessions" = true ]; then
+            local extracted_session_id
+            extracted_session_id=$(runtime_backend_extract_session_id "$log_file" 2>/dev/null || echo "")
+            if [ -n "$extracted_session_id" ]; then
+                log_debug "Extracted session_id from output: $extracted_session_id (was: $session_id)"
+                session_id="$extracted_session_id"
+                last_session_id="$session_id"
+            else
+                log_warn "Could not extract session_id from output - resume may fail"
+            fi
+        fi
 
         local work_duration=$(( $(epoch_now) - work_start_epoch ))
 

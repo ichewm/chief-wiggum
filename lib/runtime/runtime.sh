@@ -176,6 +176,17 @@ run_agent_once() {
         local exit_code=0
         runtime_exec_with_retry "${cmd_args[@]}" > "$output_file" 2>&1 || exit_code=$?
         log_debug "Agent completed (exit_code: $exit_code, output: $output_file)"
+
+        # For backends that don't support named sessions, extract actual session_id
+        if ! runtime_backend_supports_named_sessions && runtime_backend_supports_sessions; then
+            local actual_session_id
+            actual_session_id=$(runtime_backend_extract_session_id "$output_file" 2>/dev/null || echo "")
+            if [ -n "$actual_session_id" ]; then
+                log_debug "Extracted session_id: $actual_session_id"
+                export WIGGUM_LAST_SESSION_ID="$actual_session_id"
+            fi
+        fi
+
         _run_once_completed_normally=true
         return $exit_code
     else
@@ -257,11 +268,26 @@ run_agent_once_with_session() {
         local exit_code=0
         runtime_exec_with_retry "${cmd_args[@]}" > "$output_file" 2>&1 || exit_code=$?
         log_debug "Agent completed with session (exit_code: $exit_code, output: $output_file)"
+
+        # For backends that don't support named sessions, extract actual session_id
+        if ! runtime_backend_supports_named_sessions; then
+            local actual_session_id
+            actual_session_id=$(runtime_backend_extract_session_id "$output_file" 2>/dev/null || echo "")
+            if [ -n "$actual_session_id" ]; then
+                log_debug "Extracted actual session_id: $actual_session_id (was: $session_id)"
+                export WIGGUM_LAST_SESSION_ID="$actual_session_id"
+            fi
+        else
+            export WIGGUM_LAST_SESSION_ID="$session_id"
+        fi
+
         _run_once_with_session_completed_normally=true
         return $exit_code
     else
         local exit_code=0
         runtime_exec_with_retry "${cmd_args[@]}" 2>&1 || exit_code=$?
+        # No output file to extract from - use requested session_id
+        export WIGGUM_LAST_SESSION_ID="$session_id"
         _run_once_with_session_completed_normally=true
         return $exit_code
     fi

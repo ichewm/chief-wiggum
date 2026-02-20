@@ -127,6 +127,19 @@ runtime_backend_supports_sessions() {
     return 1
 }
 
+# Check if backend supports creating sessions with pre-assigned IDs
+# (e.g., Claude's --session-id flag)
+#
+# Returns: 0 = yes (named sessions), 1 = no (must extract from output)
+#
+# When false, the runtime must extract the actual session_id from output
+# after the first run using runtime_backend_extract_session_id().
+#
+# Default: return 0 (assume named sessions for backward compatibility)
+runtime_backend_supports_named_sessions() {
+    return 0
+}
+
 # Update usage statistics to shared file
 #
 # Args:
