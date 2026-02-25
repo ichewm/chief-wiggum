@@ -600,7 +600,7 @@ _teardown_worktree_env() {
     fi
 }
 
-test_worktree_glob_allows_original_repo_path() {
+test_worktree_blocks_original_repo_glob() {
     _setup_worktree_env
 
     local json
@@ -609,12 +609,12 @@ test_worktree_glob_allows_original_repo_path() {
 
     local rc=0
     run_validate_hook "$json" "$_WT_WORKTREE_DIR" "" || rc=$?
-    assert_equals "0" "$rc" "Glob on original repo path should be allowed from worktree"
+    assert_equals "2" "$rc" "Glob on original repo path should be blocked from worktree"
 
     _teardown_worktree_env
 }
 
-test_worktree_read_allows_original_repo_file() {
+test_worktree_blocks_original_repo_read() {
     _setup_worktree_env
 
     local json
@@ -622,12 +622,12 @@ test_worktree_read_allows_original_repo_file() {
 
     local rc=0
     run_validate_hook "$json" "$_WT_WORKTREE_DIR" "" || rc=$?
-    assert_equals "0" "$rc" "Read file in original repo should be allowed from worktree"
+    assert_equals "2" "$rc" "Read file in original repo should be blocked from worktree"
 
     _teardown_worktree_env
 }
 
-test_worktree_write_allows_original_repo_path() {
+test_worktree_blocks_original_repo_write() {
     _setup_worktree_env
 
     local json
@@ -635,7 +635,7 @@ test_worktree_write_allows_original_repo_path() {
 
     local rc=0
     run_validate_hook "$json" "$_WT_WORKTREE_DIR" "" || rc=$?
-    assert_equals "0" "$rc" "Write to original repo path should be allowed from worktree"
+    assert_equals "2" "$rc" "Write to original repo path should be blocked from worktree"
 
     _teardown_worktree_env
 }
@@ -729,10 +729,10 @@ run_test test_hook_allows_grep_inside_workspace
 run_test test_full_integration_setup_then_enforce
 run_test test_full_integration_claude_project_dir_only
 
-# Git worktree path resolution
-run_test test_worktree_glob_allows_original_repo_path
-run_test test_worktree_read_allows_original_repo_file
-run_test test_worktree_write_allows_original_repo_path
+# Git worktree path resolution (original repo must be blocked)
+run_test test_worktree_blocks_original_repo_glob
+run_test test_worktree_blocks_original_repo_read
+run_test test_worktree_blocks_original_repo_write
 run_test test_worktree_still_blocks_unrelated_paths
 run_test test_non_worktree_blocks_external_repo_path
 
