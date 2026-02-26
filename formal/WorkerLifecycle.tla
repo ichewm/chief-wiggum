@@ -59,10 +59,12 @@ VARIABLES
     \* @type: Bool;
     baseMoved,             \* TRUE if upstream base has moved (causes out-of-date)
     \* @type: Bool;
-    hasConflict            \* TRUE if merge would conflict (rebase cannot succeed)
+    hasConflict,           \* TRUE if merge would conflict (rebase cannot succeed)
+    \* @type: Bool;
+    hasComments            \* TRUE if PR has new unaddressed comments
 
-\* @type: <<Str, Int, Int, Str, Bool, Str, Str, Bool, Bool, Bool>>;
-vars == <<state, mergeAttempts, recoveryAttempts, kanban, inConflictQueue, worktreeState, lastError, githubSynced, baseMoved, hasConflict>>
+\* @type: <<Str, Int, Int, Str, Bool, Str, Str, Bool, Bool, Bool, Bool>>;
+vars == <<state, mergeAttempts, recoveryAttempts, kanban, inConflictQueue, worktreeState, lastError, githubSynced, baseMoved, hasConflict, hasComments>>
 
 \* =========================================================================
 \* Type and state definitions
@@ -99,6 +101,7 @@ Init ==
     /\ githubSynced = TRUE
     /\ baseMoved = FALSE
     /\ hasConflict = FALSE
+    /\ hasComments = FALSE
 
 \* Apalache constant initialization (replaces .cfg)
 CInit ==
@@ -106,7 +109,7 @@ CInit ==
     /\ MAX_RECOVERY_ATTEMPTS = 2
 
 \* Helper: unchanged environment variables
-EnvVarsUnchanged == UNCHANGED <<baseMoved, hasConflict>>
+EnvVarsUnchanged == UNCHANGED <<baseMoved, hasConflict, hasComments>>
 
 \* Helper: unchanged effect-state variables
 EffectVarsUnchanged == UNCHANGED <<inConflictQueue, worktreeState, lastError, githubSynced>>
@@ -315,7 +318,7 @@ MergeOutOfDateRebaseOk ==
     /\ hasConflict = FALSE
     /\ state' = "needs_merge"
     /\ baseMoved' = FALSE  \* rebase brings us up to date
-    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, hasConflict>>
+    /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, hasConflict, hasComments>>
     /\ EffectVarsUnchanged
 
 \* merge.out_of_date: merging -> failed (fallback: rebase failed due to conflict)
@@ -593,8 +596,10 @@ PrConflictFromMergeConflict ==
 
 \* pr.conflict_detected: none -> needs_resolve
 \* Effect: add_conflict_queue
+\* Guard: ~hasComments — optimizer checks comments first; conflict events never fire when comments exist
 PrConflictFromNone ==
     /\ state = "none"
+    /\ hasComments = FALSE
     /\ state' = "needs_resolve"
     /\ inConflictQueue' = TRUE
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, worktreeState, lastError, githubSynced>>
@@ -602,8 +607,10 @@ PrConflictFromNone ==
 
 \* pr.conflict_detected: needs_merge -> needs_resolve
 \* Effect: add_conflict_queue
+\* Guard: ~hasComments — optimizer checks comments first; conflict events never fire when comments exist
 PrConflictFromNeedsMerge ==
     /\ state = "needs_merge"
+    /\ hasComments = FALSE
     /\ state' = "needs_resolve"
     /\ inConflictQueue' = TRUE
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, worktreeState, lastError, githubSynced>>
@@ -611,8 +618,10 @@ PrConflictFromNeedsMerge ==
 
 \* pr.conflict_detected: needs_fix -> needs_resolve
 \* Effect: add_conflict_queue
+\* Guard: ~hasComments — optimizer checks comments first; conflict events never fire when comments exist
 PrConflictFromNeedsFix ==
     /\ state = "needs_fix"
+    /\ hasComments = FALSE
     /\ state' = "needs_resolve"
     /\ inConflictQueue' = TRUE
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, worktreeState, lastError, githubSynced>>
@@ -620,8 +629,10 @@ PrConflictFromNeedsFix ==
 
 \* pr.conflict_detected: failed -> needs_resolve (guarded: recovery_attempts_lt_max)
 \* Effects: inc_recovery, reset_merge, add_conflict_queue. kanban "="
+\* Guard: ~hasComments — optimizer checks comments first; conflict events never fire when comments exist
 PrConflictFromFailed ==
     /\ state = "failed"
+    /\ hasComments = FALSE
     /\ recoveryAttempts < MAX_RECOVERY_ATTEMPTS
     /\ state' = "needs_resolve"
     /\ recoveryAttempts' = recoveryAttempts + 1
@@ -635,8 +646,10 @@ PrConflictFromFailed ==
 
 \* pr.multi_conflict_detected: none -> needs_multi_resolve
 \* Effect: add_conflict_queue
+\* Guard: ~hasComments — optimizer checks comments first; conflict events never fire when comments exist
 PrMultiConflictFromNone ==
     /\ state = "none"
+    /\ hasComments = FALSE
     /\ state' = "needs_multi_resolve"
     /\ inConflictQueue' = TRUE
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, worktreeState, lastError, githubSynced>>
@@ -644,8 +657,10 @@ PrMultiConflictFromNone ==
 
 \* pr.multi_conflict_detected: needs_merge -> needs_multi_resolve
 \* Effect: add_conflict_queue
+\* Guard: ~hasComments — optimizer checks comments first; conflict events never fire when comments exist
 PrMultiConflictFromNeedsMerge ==
     /\ state = "needs_merge"
+    /\ hasComments = FALSE
     /\ state' = "needs_multi_resolve"
     /\ inConflictQueue' = TRUE
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, worktreeState, lastError, githubSynced>>
@@ -653,8 +668,10 @@ PrMultiConflictFromNeedsMerge ==
 
 \* pr.multi_conflict_detected: needs_fix -> needs_multi_resolve
 \* Effect: add_conflict_queue
+\* Guard: ~hasComments — optimizer checks comments first; conflict events never fire when comments exist
 PrMultiConflictFromNeedsFix ==
     /\ state = "needs_fix"
+    /\ hasComments = FALSE
     /\ state' = "needs_multi_resolve"
     /\ inConflictQueue' = TRUE
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban, worktreeState, lastError, githubSynced>>
@@ -662,8 +679,10 @@ PrMultiConflictFromNeedsFix ==
 
 \* pr.multi_conflict_detected: failed -> needs_multi_resolve (guarded)
 \* Effects: inc_recovery, reset_merge, add_conflict_queue. kanban "="
+\* Guard: ~hasComments — optimizer checks comments first; conflict events never fire when comments exist
 PrMultiConflictFromFailed ==
     /\ state = "failed"
+    /\ hasComments = FALSE
     /\ recoveryAttempts < MAX_RECOVERY_ATTEMPTS
     /\ state' = "needs_multi_resolve"
     /\ recoveryAttempts' = recoveryAttempts + 1
@@ -676,23 +695,29 @@ PrMultiConflictFromFailed ==
     /\ EnvVarsUnchanged
 
 \* pr.comments_detected: none -> needs_fix
+\* Guard: hasComments — optimizer only fires comments events when comments exist
 PrCommentsFromNone ==
     /\ state = "none"
+    /\ hasComments = TRUE
     /\ state' = "needs_fix"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
     /\ AllAuxUnchanged
 
 \* pr.comments_detected: needs_merge -> needs_fix
+\* Guard: hasComments — optimizer only fires comments events when comments exist
 PrCommentsFromNeedsMerge ==
     /\ state = "needs_merge"
+    /\ hasComments = TRUE
     /\ state' = "needs_fix"
     /\ UNCHANGED <<mergeAttempts, recoveryAttempts, kanban>>
     /\ AllAuxUnchanged
 
 \* pr.comments_detected: failed -> needs_fix (guarded: recovery_attempts_lt_max)
 \* Effect: inc_recovery. kanban "="
+\* Guard: hasComments — optimizer only fires comments events when comments exist
 PrCommentsFromFailed ==
     /\ state = "failed"
+    /\ hasComments = TRUE
     /\ recoveryAttempts < MAX_RECOVERY_ATTEMPTS
     /\ state' = "needs_fix"
     /\ recoveryAttempts' = recoveryAttempts + 1
@@ -1084,22 +1109,36 @@ ManualStartFixFromFailedFallback ==
 EnvBaseMoved ==
     /\ baseMoved = FALSE
     /\ baseMoved' = TRUE
-    /\ UNCHANGED <<state, mergeAttempts, recoveryAttempts, kanban, inConflictQueue, 
-                   worktreeState, lastError, githubSynced, hasConflict>>
+    /\ UNCHANGED <<state, mergeAttempts, recoveryAttempts, kanban, inConflictQueue,
+                   worktreeState, lastError, githubSynced, hasConflict, hasComments>>
 
 \* A conflict appears (e.g., concurrent changes to same files)
 EnvConflictAppears ==
     /\ hasConflict = FALSE
     /\ hasConflict' = TRUE
     /\ UNCHANGED <<state, mergeAttempts, recoveryAttempts, kanban, inConflictQueue,
-                   worktreeState, lastError, githubSynced, baseMoved>>
+                   worktreeState, lastError, githubSynced, baseMoved, hasComments>>
 
 \* Conflict is resolved externally (e.g., blocking PR merged, files no longer overlap)
 EnvConflictResolved ==
     /\ hasConflict = TRUE
     /\ hasConflict' = FALSE
     /\ UNCHANGED <<state, mergeAttempts, recoveryAttempts, kanban, inConflictQueue,
-                   worktreeState, lastError, githubSynced, baseMoved>>
+                   worktreeState, lastError, githubSynced, baseMoved, hasComments>>
+
+\* New comments appear on the PR (e.g., reviewer leaves feedback)
+EnvCommentsAppear ==
+    /\ hasComments = FALSE
+    /\ hasComments' = TRUE
+    /\ UNCHANGED <<state, mergeAttempts, recoveryAttempts, kanban, inConflictQueue,
+                   worktreeState, lastError, githubSynced, baseMoved, hasConflict>>
+
+\* Comments are addressed (e.g., fix agent resolves feedback)
+EnvCommentsResolved ==
+    /\ hasComments = TRUE
+    /\ hasComments' = FALSE
+    /\ UNCHANGED <<state, mergeAttempts, recoveryAttempts, kanban, inConflictQueue,
+                   worktreeState, lastError, githubSynced, baseMoved, hasConflict>>
 
 \* =========================================================================
 \* Actions - Worktree Cleanup Completion
@@ -1230,6 +1269,8 @@ Next ==
     \/ EnvBaseMoved
     \/ EnvConflictAppears
     \/ EnvConflictResolved
+    \/ EnvCommentsAppear
+    \/ EnvCommentsResolved
 
 \* =========================================================================
 \* Fairness (for liveness properties)
@@ -1252,6 +1293,7 @@ Fairness ==
     /\ WF_vars(PlannerCompleted)
     /\ WF_vars(ManualStartMergeFromFailedGuarded \/ ManualStartMergeFromFailedFallback)
     /\ WF_vars(ManualStartFixFromFailedGuarded \/ ManualStartFixFromFailedFallback)
+    /\ WF_vars(EnvCommentsResolved)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -1271,6 +1313,7 @@ TypeInvariant ==
     /\ githubSynced \in BOOLEAN
     /\ baseMoved \in BOOLEAN
     /\ hasConflict \in BOOLEAN
+    /\ hasComments \in BOOLEAN
 
 \* BoundedCounters: counters never exceed their maximums by more than 1
 \* (they can reach max and then a transition fires before the guard blocks)
@@ -1302,6 +1345,12 @@ KanbanMergedConsistency ==
 \* KanbanFailedConsistency: if permanently failed (kanban "*"), state is failed
 KanbanFailedConsistency ==
     kanban = "*" => state = "failed"
+
+\* CommentConflictExclusion: the optimizer never routes to conflict resolution
+\* via PR events when comments are present. Comments take priority because the
+\* conflict resolver merges the PR, which would bypass unaddressed review.
+\* Enforced by hasComments guards on PrConflict*/PrMultiConflict* actions.
+\* (Implicitly verified: if hasComments=TRUE, no PrConflict* action is enabled.)
 
 \* =========================================================================
 \* Cross-Module Invariants (Quick Win #4)

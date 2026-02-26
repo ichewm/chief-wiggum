@@ -364,9 +364,16 @@ pr_merge_handle_remaining() {
                 echo "$task_id" >> "$ralph_dir/orchestrator/tasks-needing-fix.txt"
                 ((++needs_fix))
             else
-                log_debug "  $task_id: pr.comments_detected rejected by lifecycle (state=$(git_state_get "$worker_dir" 2>/dev/null))"
+                # Worker already in a state handling comments (e.g. needs_fix from
+                # previous cycle) or in an active state (resolving, fixing).
+                # Log at INFO for visibility — the lifecycle correctly rejected a
+                # redundant transition, but we must not silently drop the PR.
+                local current_state
+                current_state=$(git_state_get "$worker_dir" 2>/dev/null || echo "unknown")
+                log "  $task_id: has comments (already in state=$current_state)"
+                ((++waiting))
             fi
-            continue
+            continue  # Correct: comments take priority — conflict resolver merges, which would skip review
         fi
 
         # Case 2: Has unaddressed review requests → waiting

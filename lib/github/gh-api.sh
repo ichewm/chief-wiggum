@@ -83,8 +83,6 @@ gh_rate_limit_guard() {
 #
 # Returns: Wait seconds on stdout
 _gh_rate_limit_wait_seconds() {
-    local output="${1:-}"
-
     # Try to extract reset time from gh api rate_limit
     local rate_json exit_code=0
     rate_json=$(timeout 10 gh api rate_limit 2>/dev/null) || exit_code=$?
