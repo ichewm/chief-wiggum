@@ -36,3 +36,4 @@ ui/client/dist/
 ui/server/dist/
 .claude/
 perf.data
+_apalache-out/

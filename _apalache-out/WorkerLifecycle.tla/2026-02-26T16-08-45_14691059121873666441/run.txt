@@ -1,1 +1,0 @@
- check --cinit=CInit --inv=TypeInvariant,BoundedCounters,TransientStateInvariant,KanbanMergedConsistency,KanbanFailedConsistency,ConflictQueueConsistency,WorktreeStateConsistency,ErrorStateConsistency,MergedCleanupConsistency --length=15 formal/WorkerLifecycle.tla
